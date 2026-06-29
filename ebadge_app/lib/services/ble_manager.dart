@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -109,13 +110,14 @@ class BleManager {
     if (scan.isGranted && connect.isGranted) return true;
 
     final location = await Permission.locationWhenInUse.request();
-    return location.isGranted;
+    return location.isGranted || location.isLimited;
   }
 
   /// Start scanning for BLE devices. Each discovered device is reported via
   /// [onDeviceFound].
   Future<void> startScan(void Function(ScanResult) onDeviceFound) async {
     if (_disposed) return;
+    stopScan();
 
     final allowed = await _ensureBlePermissions();
     if (!allowed) {
@@ -127,8 +129,8 @@ class BleManager {
 
     _scanSub = FlutterBluePlus.onScanResults.listen(
       (results) {
-        if (results.isNotEmpty) {
-          onDeviceFound(results.last);
+        for (final result in results) {
+          onDeviceFound(result);
         }
       },
       onError: (Object error) {
@@ -143,6 +145,16 @@ class BleManager {
         _setState(BleState.disconnected);
       },
     );
+
+    try {
+      await FlutterBluePlus.startScan(
+        androidScanMode: AndroidScanMode.lowLatency,
+        androidUsesFineLocation: true,
+      );
+    } catch (e) {
+      stopScan();
+      _setState(BleState.disconnected);
+    }
   }
 
   /// Stop an ongoing scan.
@@ -164,17 +176,20 @@ class BleManager {
   /// Connect to a BLE device and show the UI. Returns true on success.
   Future<bool> connect(String deviceId, String deviceName) async {
     if (_disposed) return false;
+    stopScan();
     _setState(BleState.connecting);
     _deviceId = deviceId;
     _deviceName = deviceName;
 
     try {
+      debugPrint('BleManager: connecting to $deviceName ($deviceId)');
       _device = BluetoothDevice(remoteId: DeviceIdentifier(deviceId));
 
       // Connect with timeout.
       await _device!.connect(
         timeout: const Duration(seconds: 10),
       );
+      debugPrint('BleManager: connected, discovering services');
 
       // Listen for disconnection (AFTER connect succeeds, skip initial state).
       _connectionStateSub = _device!.connectionState.skip(1).listen(
@@ -190,20 +205,42 @@ class BleManager {
 
       final services = _device!.servicesList;
       for (final s in services) {
+        debugPrint('BleManager: service ${s.uuid}');
         for (final c in s.characteristics) {
           final uuid = c.uuid.toString().toUpperCase();
-          if (uuid.contains(_txUuid)) _txChar = c;
+          debugPrint(
+            'BleManager: characteristic ${c.uuid} '
+            'write=${c.properties.write} '
+            'writeWithoutResponse=${c.properties.writeWithoutResponse} '
+            'notify=${c.properties.notify} '
+            'indicate=${c.properties.indicate}',
+          );
+          if (uuid.contains(_txUuid)) {
+            _txChar = c;
+          }
           if (uuid.contains(_rxUuid) &&
-              (c.properties.notify || c.properties.indicate)) _rxChar = c;
+              (c.properties.notify || c.properties.indicate)) {
+            _rxChar = c;
+          }
         }
       }
 
       if (_txChar == null || _rxChar == null) {
-        throw StateError('设备不支持此功能');
+        debugPrint(
+          'BleManager: transfer characteristics not found; '
+          'continuing with GATT connection only',
+        );
+        _setState(BleState.connected);
+        return true;
       }
 
       // Set up notify, MTU, and protocol stack.
-      final mtu = await _device!.requestMtu(512);
+      var mtu = 23;
+      try {
+        mtu = await _device!.requestMtu(512);
+      } catch (e) {
+        debugPrint('BleManager: requestMtu failed, using default MTU: $e');
+      }
 
       await _rxChar!.setNotifyValue(true);
       _notificationSub = _rxChar!.onValueReceived.listen(
@@ -228,8 +265,10 @@ class BleManager {
       );
 
       _setState(BleState.connected);
+      debugPrint('BleManager: ready, mtu=$mtu');
       return true;
     } catch (e) {
+      debugPrint('BleManager: connect failed: $e');
       await _device?.disconnect();
       _cleanup();
       _setState(BleState.disconnected);
