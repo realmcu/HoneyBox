@@ -1,0 +1,97 @@
+import 'dart:typed_data';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'ble_provider.dart';
+
+enum TransferStatus { idle, sending, done, error }
+
+class TransferState {
+  final TransferStatus status;
+  final double progress; // 0.0 to 1.0
+  final int speedKBs;
+  final String? errorMessage;
+
+  const TransferState({
+    this.status = TransferStatus.idle,
+    this.progress = 0.0,
+    this.speedKBs = 0,
+    this.errorMessage,
+  });
+
+  TransferState copyWith({
+    TransferStatus? status,
+    double? progress,
+    int? speedKBs,
+    String? errorMessage,
+  }) {
+    return TransferState(
+      status: status ?? this.status,
+      progress: progress ?? this.progress,
+      speedKBs: speedKBs ?? this.speedKBs,
+      errorMessage: errorMessage ?? this.errorMessage,
+    );
+  }
+}
+
+// Transfer progress notifier — manages file transfer status
+final transferProgressProvider =
+    StateNotifierProvider<TransferProgressNotifier, TransferState>((ref) {
+  return TransferProgressNotifier(ref);
+});
+
+class TransferProgressNotifier extends StateNotifier<TransferState> {
+  final Ref _ref;
+  int _startTime = 0;
+
+  TransferProgressNotifier(this._ref) : super(const TransferState());
+
+  /// Send a file via BLE. Sets up progress/complete/error callbacks.
+  void send(int fileType, Uint8List buffer, String filename) {
+    final bleManager = _ref.read(bleManagerProvider);
+    final session = bleManager.session;
+    if (session == null) {
+      state = const TransferState(
+        status: TransferStatus.error,
+        errorMessage: '设备未连接',
+      );
+      return;
+    }
+
+    _startTime = DateTime.now().millisecondsSinceEpoch;
+    state = const TransferState(status: TransferStatus.sending);
+
+    session.onProgress = (sent, total) {
+      final elapsed =
+          (DateTime.now().millisecondsSinceEpoch - _startTime) / 1000;
+      final speed = elapsed > 0 ? (sent / elapsed / 1024).round() : 0;
+      state = TransferState(
+        status: TransferStatus.sending,
+        progress: total > 0 ? sent / total : 0.0,
+        speedKBs: speed,
+      );
+    };
+
+    session.onComplete = () {
+      state = const TransferState(status: TransferStatus.done, progress: 1.0);
+    };
+
+    session.onError = (reason) {
+      state = TransferState(
+        status: TransferStatus.error,
+        errorMessage: reason,
+      );
+    };
+
+    session.send(fileType, buffer, filename);
+  }
+
+  void abort() {
+    final bleManager = _ref.read(bleManagerProvider);
+    bleManager.session?.abort();
+    state = const TransferState();
+  }
+
+  void reset() {
+    state = const TransferState();
+  }
+}

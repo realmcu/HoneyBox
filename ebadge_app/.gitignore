@@ -1,0 +1,63 @@
+# Flutter
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/doc/api/
+
+# Android
+.gradle/
+local.properties
+*.iml
+.idea/
+*.class
+*.jar
+*.apk
+*.aab
+*.dex
+*.ap_
+.gradle/
+
+# iOS
+ios/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+Pods/
+.swiftpm/
+DerivedData/
+build/
+
+# macOS
+macos/
+*.xcworkspace
+xcuserdata/
+
+# Linux
+linux/
+
+# Web
+web/
+
+# Windows
+windows/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+
+# Misc
+.DS_Store
+*.log
+*.key
+*.pem
+.env
+.env.*
