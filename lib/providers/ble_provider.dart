@@ -11,11 +11,13 @@ class ScanDevice {
   final String deviceId;
   final String name;
   final int rssi;
+  final bool connectable;
 
   ScanDevice({
     required this.deviceId,
     required this.name,
     required this.rssi,
+    this.connectable = true,
   });
 }
 
@@ -84,19 +86,28 @@ class BleNotifier extends StateNotifier<BleState> {
 
     await _bleManager.startScan((result) {
       final device = result.device;
-      final name = (device.localName ?? '').trim();
+      // Prefer the advertised name, falling back to the OS-cached platform name
+      // (`localName` was removed/deprecated in newer flutter_blue_plus).
+      final advName = result.advertisementData.advName.trim();
+      final name = advName.isNotEmpty ? advName : device.platformName.trim();
       final displayName = name.isEmpty ? '未知设备' : name;
       devicesNotifier.addDevice(ScanDevice(
         deviceId: device.remoteId.toString(),
         name: displayName,
-        rssi: result.rssi ?? 0,
+        rssi: result.rssi,
+        connectable: result.advertisementData.connectable,
       ));
     });
   }
 
   void stopScan() {
     _bleManager.stopScan();
-    state = BleState.disconnected;
+    // Only fall back to disconnected if we were actually scanning. ScanPage's
+    // dispose() calls this even when it's being torn down *because* a connect
+    // succeeded — without this guard we'd clobber the fresh connected state.
+    if (state == BleState.scanning) {
+      state = BleState.disconnected;
+    }
   }
 
   Future<bool> connect(String deviceId, String deviceName) async {

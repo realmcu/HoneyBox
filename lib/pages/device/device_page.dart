@@ -34,31 +34,6 @@ class _DevicePageState extends ConsumerState<DevicePage>
       curve: Curves.easeOut,
     );
     _fadeController.forward();
-
-    Future.microtask(() {
-      ref.listen<ConnectedDeviceInfo?>(connectedDeviceProvider, (prev, next) {
-        if (prev != null && next == null && mounted) {
-          _fadeController.reverse();
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (ctx) => AlertDialog(
-              title: const Text('设备已断开'),
-              content: const Text('请重新搜索并连接设备'),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    Navigator.of(context).popUntil((r) => r.isFirst);
-                  },
-                  child: const Text('确定'),
-                ),
-              ],
-            ),
-          );
-        }
-      });
-    });
   }
 
   @override
@@ -81,8 +56,9 @@ class _DevicePageState extends ConsumerState<DevicePage>
           FilledButton(
             onPressed: () {
               Navigator.of(ctx).pop();
+              // Clearing the connection makes the root gate fall back to the
+              // scanner automatically.
               ref.read(bleNotifierProvider.notifier).disconnect();
-              Navigator.of(context).popUntil((r) => r.isFirst);
             },
             style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),

@@ -14,6 +14,6 @@ void main() {
     await tester.pumpWidget(const ProviderScope(child: EbadgeApp()));
     await tester.pump();
 
-    expect(find.text('搜索设备'), findsOneWidget);
+    expect(find.text('扫描设备'), findsOneWidget);
   });
 }

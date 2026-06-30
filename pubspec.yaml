@@ -23,11 +23,12 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  build_runner: ^2.4.9
-  riverpod_generator: ^2.4.3
-  json_annotation: ^4.9.0
-  custom_lint: ^0.6.8
-  riverpod_lint: ^2.3.13
+  # NOTE: build_runner / riverpod_generator / json_annotation / custom_lint /
+  # riverpod_lint were removed — they were unused scaffolding (no @riverpod,
+  # no .g.dart, no @JsonSerializable anywhere in lib/) and their pinned
+  # versions depend on the macros experiment, which was removed from the
+  # Dart SDK, breaking `pub get`. Re-add macros-free versions if codegen or
+  # custom lint rules are needed later.
   flutter_lints: ^4.0.0
 
 flutter:

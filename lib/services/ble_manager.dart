@@ -86,11 +86,24 @@ class BleManager {
 
   bool _disposed = false;
 
+  /// True only while a scan is meant to be delivering results. Flipped to false
+  /// synchronously the instant a scan is stopped or a connect begins — before
+  /// the async subscription cancel completes — so buffered `onScanResults`
+  /// batches that arrive mid-teardown are dropped instead of mutating providers
+  /// whose ScanPage widget is already being disposed (markNeedsBuild crash).
+  bool _scanActive = false;
+
   // --------------------------------------------------------------------------
   // Construction / disposal
   // --------------------------------------------------------------------------
 
-  BleManager();
+  BleManager() {
+    // flutter_blue_plus logs every scan result and BLE operation at its default
+    // (verbose) level, flooding logcat during continuous scanning — most
+    // noticeably when the scanner resumes right after a disconnect. Silence the
+    // plugin's own logger; the app-level debugPrint diagnostics below are kept.
+    FlutterBluePlus.setLogLevel(LogLevel.none);
+  }
 
   /// Release all resources. No methods should be called after this.
   void dispose() {
@@ -126,9 +139,14 @@ class BleManager {
     }
 
     _setState(BleState.scanning);
+    _scanActive = true;
 
     _scanSub = FlutterBluePlus.onScanResults.listen(
       (results) {
+        // Drop late/buffered batches once scanning has stopped or a
+        // connect/disconnect started — otherwise onDeviceFound → addDevice
+        // would notify a ScanPage element that is already defunct.
+        if (!_scanActive || _disposed) return;
         for (final result in results) {
           onDeviceFound(result);
         }
@@ -159,6 +177,7 @@ class BleManager {
 
   /// Stop an ongoing scan.
   void stopScan() {
+    _scanActive = false;
     _scanSub?.cancel();
     _scanSub = null;
     _scanErrorSub?.cancel();
@@ -340,6 +359,7 @@ class BleManager {
   }
 
   void _cleanup() {
+    _scanActive = false;
     _notificationSub?.cancel();
     _notificationSub = null;
     _connectionStateSub?.cancel();

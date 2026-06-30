@@ -18,7 +18,8 @@ class StreamPage extends ConsumerStatefulWidget {
   ConsumerState<StreamPage> createState() => _StreamPageState();
 }
 
-class _StreamPageState extends ConsumerState<StreamPage> {
+class _StreamPageState extends ConsumerState<StreamPage>
+    with WidgetsBindingObserver {
   CameraController? _cameraController;
   List<CameraDescription>? _cameras;
   bool _cameraReady = false;
@@ -32,7 +33,29 @@ class _StreamPageState extends ConsumerState<StreamPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initCameras();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final controller = _cameraController;
+    if (state == AppLifecycleState.resumed) {
+      // Re-acquire the camera when returning to the foreground.
+      if (controller == null || !controller.value.isInitialized) {
+        _initCameras();
+      }
+      return;
+    }
+    // Leaving the foreground (paused/inactive/hidden/detached): stop streaming
+    // and fully release the camera so it doesn't keep capturing — and flooding
+    // logcat — while the app sits in the background.
+    _streaming = false;
+    if (controller != null) {
+      _cameraController = null;
+      _cameraReady = false;
+      controller.dispose();
+    }
   }
 
   Future<void> _initCameras() async {
@@ -140,7 +163,9 @@ class _StreamPageState extends ConsumerState<StreamPage> {
         // FPS
         final now = DateTime.now().millisecondsSinceEpoch;
         _fpsTimestamps.add(now);
-        while (_fpsTimestamps.length > 10) _fpsTimestamps.removeAt(0);
+        while (_fpsTimestamps.length > 10) {
+          _fpsTimestamps.removeAt(0);
+        }
         if (_fpsTimestamps.length >= 2) {
           final span = (_fpsTimestamps.last - _fpsTimestamps.first) / 1000;
           if (span > 0 && mounted) {
@@ -157,8 +182,10 @@ class _StreamPageState extends ConsumerState<StreamPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _streaming = false;
     _cameraController?.dispose();
+    _cameraController = null;
     super.dispose();
   }
 
