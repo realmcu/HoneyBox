@@ -37,7 +37,7 @@ int crc32(Uint8List data) {
 // ---------------------------------------------------------------------------
 
 /// The command byte for all L2 file-transfer frames.
-const int l2Cmd = 0x0B;
+const int l2Cmd = 0x10;
 
 /// L2 sub-command keys.
 class K {
