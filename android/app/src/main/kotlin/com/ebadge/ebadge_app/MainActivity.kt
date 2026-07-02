@@ -14,9 +14,11 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val methodChannelName = "ebadge/encoder"
     private val eventChannelName = "ebadge/encoder/events"
+    private val wifiChannelName = "ebadge/wifi"
 
     private var encoder: CameraEncoder? = null
     private var eventSink: EventChannel.EventSink? = null
+    private var hotspot: HotspotManager? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -82,9 +84,51 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
+                "setZoom" -> {
+                    val zoom = call.argument<Double>("zoom") ?: 1.0
+                    encoder?.setZoom(zoom)
+                    result.success(null)
+                }
+
+                "setPreviewMode" -> {
+                    val encoded = call.argument<Boolean>("encoded") ?: false
+                    encoder?.setPreviewMode(encoded)
+                    result.success(null)
+                }
+
+                "requestKeyframe" -> {
+                    encoder?.requestKeyframe()
+                    result.success(null)
+                }
+
+                "requestEncoderFrame" -> {
+                    encoder?.requestEncoderFrame()
+                    result.success(null)
+                }
+
                 else -> result.notImplemented()
             }
         }
+
+        MethodChannel(messenger, wifiChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startHotspot" -> ensureHotspot().start(result)
+                "stopHotspot" -> {
+                    hotspot?.stop()
+                    result.success(null)
+                }
+                "isHotspotActive" -> result.success(hotspot?.isActive ?: false)
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun ensureHotspot(): HotspotManager {
+        val existing = hotspot
+        if (existing != null) return existing
+        val created = HotspotManager(applicationContext)
+        hotspot = created
+        return created
     }
 
     private fun parseConfig(call: MethodCall): EncoderConfig = EncoderConfig(
@@ -95,6 +139,11 @@ class MainActivity : FlutterActivity() {
         bitrate = call.argument<Int>("bitrate") ?: 2_000_000,
         iFrameIntervalSec = call.argument<Int>("iFrameIntervalSec") ?: 1,
         cropZoom = call.argument<Double>("cropZoom") ?: 1.0,
+        msv1Skip = call.argument<Boolean>("msv1Skip") ?: true,
+        msv1SkipThr = call.argument<Int>("msv1SkipThr") ?: 0,
+        jpegQuality = call.argument<Int>("jpegQuality") ?: 80,
+        recordToFile = call.argument<Boolean>("recordToFile") ?: false,
+        stream = call.argument<Boolean>("stream") ?: false,
     )
 
     private fun ensureEncoder(events: EncoderEvents): CameraEncoder {
@@ -108,6 +157,8 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         encoder?.closeCamera()
         encoder = null
+        hotspot?.stop()
+        hotspot = null
         super.onDestroy()
     }
 }

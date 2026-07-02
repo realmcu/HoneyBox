@@ -59,6 +59,31 @@ class GlRenderer(
     private var encoderW = 0
     private var encoderH = 0
 
+    // Encoder feed pacing (H.264 streaming): when [paceEncoder] is on, a camera
+    // frame is drawn to the encoder surface only while a permit is available —
+    // one permit is consumed per encoded frame and replenished by the app after
+    // that frame has been fully transmitted. This throttles production to the
+    // link (never dropping an already-encoded frame, which would break the H.264
+    // P-frame chain). Skipping a camera frame BEFORE encoding is harmless: the
+    // next encoded frame is simply a P-frame relative to the previous encoded one.
+    @Volatile private var paceEncoder = false
+    private val encoderPermits = java.util.concurrent.atomic.AtomicInteger(0)
+
+    // Encoder-feed fps throttle: skip camera frames so the encoder is fed at most
+    // [minEncoderIntervalNs] apart (0 = no throttle → feed every camera frame).
+    // Measured against camera-frame presentation timestamps (ns), not wall clock.
+    @Volatile private var minEncoderIntervalNs = 0L
+    private var lastEncoderFeedNs = 0L
+
+    // Offscreen readback (software MSV1/JPEG encode): render to a pbuffer and
+    // glReadPixels the top-down RGBA out to [onRgbaFrame].
+    private var readbackEgl: EGLSurface? = null
+    private var rbW = 0
+    private var rbH = 0
+    @Volatile private var softwareMode = false
+    private var rbBuffer: ByteBuffer? = null
+    var onRgbaFrame: ((ByteArray, Int, Int, Long) -> Unit)? = null
+
     // Render params (output aspect / crop / rotation), updated via setParams.
     @Volatile private var sensorOrientation = 90
     @Volatile private var mirror = false
@@ -168,6 +193,51 @@ class GlRenderer(
 
     fun cameraSurface(): Surface? = cameraSurface
 
+    /** Enable/disable encoder-feed pacing and seed the initial permit window. */
+    fun setPaceEncoder(enabled: Boolean, initialPermits: Int) {
+        paceEncoder = enabled
+        encoderPermits.set(if (enabled) initialPermits else 0)
+    }
+
+    /** Cap the encoder feed at [fps] frames/s (0 = no throttle). */
+    fun setEncoderTargetFps(fps: Int) {
+        minEncoderIntervalNs = if (fps > 0) (1_000_000_000L / fps) else 0L
+        lastEncoderFeedNs = 0L
+    }
+
+    /** Replenish one permit (call after a paced frame has been transmitted). */
+    fun grantEncoderPermit() {
+        if (paceEncoder) encoderPermits.incrementAndGet()
+    }
+
+    /** Enable offscreen readback at [w]×[h] for software encoding. */
+    fun setSoftwareReadback(w: Int, h: Int) {
+        val hh = handler ?: return
+        hh.post {
+            try {
+                readbackEgl?.let { egl?.releaseSurface(it) }
+                readbackEgl = egl?.createOffscreenSurface(w, h)
+                rbW = w
+                rbH = h
+                rbBuffer = ByteBuffer.allocateDirect(w * h * 4)
+                    .order(ByteOrder.nativeOrder())
+                softwareMode = true
+            } catch (e: Exception) {
+                onError("离屏缓冲创建失败: ${e.message}")
+            }
+        }
+    }
+
+    fun clearSoftwareReadback() {
+        softwareMode = false
+        val hh = handler ?: return
+        hh.post {
+            readbackEgl?.let { egl?.releaseSurface(it) }
+            readbackEgl = null
+            rbBuffer = null
+        }
+    }
+
     fun release() {
         val h = handler
         val t = thread
@@ -177,6 +247,7 @@ class GlRenderer(
             try {
                 previewEgl?.let { egl?.releaseSurface(it) }
                 encoderEgl?.let { egl?.releaseSurface(it) }
+                readbackEgl?.let { egl?.releaseSurface(it) }
                 offscreen?.let { egl?.releaseSurface(it) }
                 cameraSurfaceTexture?.release()
                 cameraSurface?.release()
@@ -203,11 +274,50 @@ class GlRenderer(
 
             previewEgl?.let { renderTo(core, it, previewW, previewH, presentNs = 0L) }
             encoderEgl?.let {
-                renderTo(core, it, encoderW, encoderH, presentNs = st.timestamp)
+                // Two independent gates decide whether this camera frame is fed to
+                // the encoder:
+                //  1. fps throttle — cap production at the configured target fps so
+                //     the encoder's frame-count GOP (iFrameInterval×fps) maps to the
+                //     intended wall-clock I-interval and bandwidth matches the setting.
+                //  2. link pacing — never encode faster than BLE drains (permit
+                //     window), so we never drop an already-encoded P-frame.
+                val ts = st.timestamp
+                val fpsOk = minEncoderIntervalNs <= 0L ||
+                    lastEncoderFeedNs == 0L ||
+                    ts - lastEncoderFeedNs >= minEncoderIntervalNs
+                val paceOk = !paceEncoder || encoderPermits.get() > 0
+                if (fpsOk && paceOk) {
+                    if (paceEncoder) encoderPermits.decrementAndGet()
+                    lastEncoderFeedNs = ts
+                    renderTo(core, it, encoderW, encoderH, presentNs = ts)
+                }
             }
+            if (softwareMode) renderReadback(core, st.timestamp)
         } catch (e: Exception) {
             onError("渲染失败: ${e.message}")
         }
+    }
+
+    /** Render to the offscreen pbuffer and read back top-down RGBA. */
+    private fun renderReadback(core: EglCore, presentNs: Long) {
+        val target = readbackEgl ?: return
+        val buf = rbBuffer ?: return
+        val cb = onRgbaFrame ?: return
+        // Draw the same cropped/scaled frame; do NOT swap (pbuffer back buffer
+        // would become undefined and glReadPixels must read the drawn buffer).
+        renderTo(core, target, rbW, rbH, presentNs = 0L, swap = false)
+        buf.position(0)
+        GLES20.glReadPixels(0, 0, rbW, rbH, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+        // glReadPixels is bottom-up; flip rows to top-down for the encoders.
+        val stride = rbW * 4
+        val bottomUp = ByteArray(rbW * rbH * 4)
+        buf.position(0)
+        buf.get(bottomUp)
+        val topDown = ByteArray(rbW * rbH * 4)
+        for (y in 0 until rbH) {
+            System.arraycopy(bottomUp, (rbH - 1 - y) * stride, topDown, y * stride, stride)
+        }
+        cb(topDown, rbW, rbH, presentNs)
     }
 
     private fun renderTo(
@@ -216,6 +326,7 @@ class GlRenderer(
         w: Int,
         h: Int,
         presentNs: Long,
+        swap: Boolean = true,
     ) {
         core.makeCurrent(target)
         GLES20.glViewport(0, 0, w, h)
@@ -244,7 +355,7 @@ class GlRenderer(
         GLES20.glDisableVertexAttribArray(aTexCoordLoc)
 
         if (presentNs > 0L) core.setPresentationTime(target, presentNs)
-        core.swapBuffers(target)
+        if (swap) core.swapBuffers(target)
     }
 
     /**

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import 'stream_transport.dart';
+
 /// Supported (and placeholder) encoder formats for the encoding test bench.
 ///
 /// Only [h264] is implemented natively today; [jpeg] and [mvs1] are reserved
@@ -22,11 +24,14 @@ extension EncoderFormatX on EncoderFormat {
         EncoderFormat.mvs1 => 'MVS1',
       };
 
-  /// Whether the format is wired up natively (vs. a placeholder).
-  bool get implemented => this == EncoderFormat.h264;
+  /// All three codecs are now wired up natively (H.264 via MediaCodec,
+  /// MSV1/JPEG via the software encoder).
+  bool get implemented => true;
 
-  /// Whether an I-frame interval applies to this format.
-  bool get hasIFrameInterval => this == EncoderFormat.h264;
+  /// Whether a key-frame interval applies to this format (H.264 IDR interval;
+  /// MSV1 periodic key-frame refresh for stream error recovery).
+  bool get hasIFrameInterval =>
+      this == EncoderFormat.h264 || this == EncoderFormat.mvs1;
 }
 
 /// Immutable encoder configuration mirrored by the native [EncoderConfig].
@@ -48,6 +53,20 @@ class EncoderConfig {
   /// I-frame (IDR) interval in seconds — H.264 only.
   final int iFrameIntervalSec;
 
+  /// Preferred streaming transport (BLE today; WiFi reserved).
+  final StreamTransportKind transport;
+
+  /// MSV1 inter-frame skip (P-frames) on/off, and its per-pixel RGB555 delta
+  /// threshold (0 = only skip identical blocks).
+  final bool msv1Skip;
+  final int msv1SkipThr;
+
+  /// JPEG quality (1..100).
+  final int jpegQuality;
+
+  /// Also save the encoded stream to a local file while projecting.
+  final bool recordToFile;
+
   const EncoderConfig({
     this.format = EncoderFormat.h264,
     this.width = 640,
@@ -56,6 +75,11 @@ class EncoderConfig {
     this.fps = 15,
     this.bitrate = 2000000,
     this.iFrameIntervalSec = 1,
+    this.transport = StreamTransportKind.ble,
+    this.msv1Skip = true,
+    this.msv1SkipThr = 0,
+    this.jpegQuality = 80,
+    this.recordToFile = false,
   });
 
   EncoderConfig copyWith({
@@ -66,6 +90,11 @@ class EncoderConfig {
     int? fps,
     int? bitrate,
     int? iFrameIntervalSec,
+    StreamTransportKind? transport,
+    bool? msv1Skip,
+    int? msv1SkipThr,
+    int? jpegQuality,
+    bool? recordToFile,
   }) {
     return EncoderConfig(
       format: format ?? this.format,
@@ -75,6 +104,11 @@ class EncoderConfig {
       fps: fps ?? this.fps,
       bitrate: bitrate ?? this.bitrate,
       iFrameIntervalSec: iFrameIntervalSec ?? this.iFrameIntervalSec,
+      transport: transport ?? this.transport,
+      msv1Skip: msv1Skip ?? this.msv1Skip,
+      msv1SkipThr: msv1SkipThr ?? this.msv1SkipThr,
+      jpegQuality: jpegQuality ?? this.jpegQuality,
+      recordToFile: recordToFile ?? this.recordToFile,
     );
   }
 
@@ -86,9 +120,13 @@ class EncoderConfig {
         'fps': fps,
         'bitrate': bitrate,
         'iFrameIntervalSec': iFrameIntervalSec,
+        'msv1Skip': msv1Skip,
+        'msv1SkipThr': msv1SkipThr,
+        'jpegQuality': jpegQuality,
+        'recordToFile': recordToFile,
       };
 
-  /// Persisted form (format stored by enum index).
+  /// Persisted form (enums stored by index).
   Map<String, dynamic> toJson() => {
         'format': format.index,
         'width': width,
@@ -97,10 +135,16 @@ class EncoderConfig {
         'fps': fps,
         'bitrate': bitrate,
         'iFrameIntervalSec': iFrameIntervalSec,
+        'transport': transport.index,
+        'msv1Skip': msv1Skip,
+        'msv1SkipThr': msv1SkipThr,
+        'jpegQuality': jpegQuality,
+        'recordToFile': recordToFile,
       };
 
   factory EncoderConfig.fromJson(Map<String, dynamic> json) {
     final fmtIndex = (json['format'] as num?)?.toInt() ?? 0;
+    final transIndex = (json['transport'] as num?)?.toInt() ?? 0;
     return EncoderConfig(
       format: (fmtIndex >= 0 && fmtIndex < EncoderFormat.values.length)
           ? EncoderFormat.values[fmtIndex]
@@ -111,6 +155,14 @@ class EncoderConfig {
       fps: (json['fps'] as num?)?.toInt() ?? 15,
       bitrate: (json['bitrate'] as num?)?.toInt() ?? 2000000,
       iFrameIntervalSec: (json['iFrameIntervalSec'] as num?)?.toInt() ?? 1,
+      transport: (transIndex >= 0 &&
+              transIndex < StreamTransportKind.values.length)
+          ? StreamTransportKind.values[transIndex]
+          : StreamTransportKind.ble,
+      msv1Skip: json['msv1Skip'] as bool? ?? true,
+      msv1SkipThr: (json['msv1SkipThr'] as num?)?.toInt() ?? 0,
+      jpegQuality: (json['jpegQuality'] as num?)?.toInt() ?? 80,
+      recordToFile: json['recordToFile'] as bool? ?? false,
     );
   }
 }
@@ -153,11 +205,15 @@ class EncoderStats {
   final int bytes;
   final double fps;
 
+  /// Size of the most recently encoded frame, in bytes.
+  final int lastBytes;
+
   const EncoderStats({
     this.frames = 0,
     this.keyframes = 0,
     this.bytes = 0,
     this.fps = 0,
+    this.lastBytes = 0,
   });
 }
 
@@ -194,6 +250,14 @@ class EncoderService {
   void Function(String message)? onError;
   void Function(String message)? onInfo;
 
+  /// Encoded-preview state change: [encoded] on/off, [textureId] of the decoded
+  /// preview texture (-1 when off), and its size.
+  void Function(bool encoded, int textureId, int width, int height)? onPreview;
+
+  /// One encoded frame ready to transmit over the stream. [key] marks a
+  /// self-contained key frame (MSV1 I-frame / every JPEG frame).
+  void Function(Uint8List data, bool key)? onFrame;
+
   /// Begin listening for native events. Call once before [openCamera].
   void listen() {
     _eventSub ??= _events.receiveBroadcastStream().listen(
@@ -225,6 +289,7 @@ class EncoderService {
           keyframes: (map['keyframes'] as num?)?.toInt() ?? 0,
           bytes: (map['bytes'] as num?)?.toInt() ?? 0,
           fps: (map['fps'] as num?)?.toDouble() ?? 0,
+          lastBytes: (map['lastBytes'] as num?)?.toInt() ?? 0,
         ));
         break;
       case 'started':
@@ -248,6 +313,20 @@ class EncoderService {
       case 'info':
         onInfo?.call(map['message'] as String? ?? '');
         break;
+      case 'preview':
+        onPreview?.call(
+          map['encoded'] as bool? ?? false,
+          (map['textureId'] as num?)?.toInt() ?? -1,
+          (map['width'] as num?)?.toInt() ?? 0,
+          (map['height'] as num?)?.toInt() ?? 0,
+        );
+        break;
+      case 'frame':
+        final data = map['data'];
+        if (data is Uint8List) {
+          onFrame?.call(data, map['key'] as bool? ?? false);
+        }
+        break;
     }
   }
 
@@ -263,10 +342,24 @@ class EncoderService {
   Future<void> setConfig(EncoderConfig config) =>
       _method.invokeMethod('setConfig', config.toWire());
 
-  Future<void> startEncoding(EncoderConfig config) =>
-      _method.invokeMethod('startEncoding', config.toWire());
+  /// Start encoding. When [stream] is true the native layer also emits each
+  /// encoded frame via [onFrame] for transmission over the active transport.
+  Future<void> startEncoding(EncoderConfig config, {bool stream = false}) =>
+      _method.invokeMethod('startEncoding', {
+        ...config.toWire(),
+        'stream': stream,
+      });
 
   Future<void> stopEncoding() => _method.invokeMethod('stopEncoding');
+
+  /// Ask the encoder to emit a fresh key frame (used to re-sync a congested
+  /// MSV1 stream without restarting).
+  Future<void> requestKeyframe() => _method.invokeMethod('requestKeyframe');
+
+  /// Permit one more paced (H.264 stream) encoder frame. Called after each
+  /// frame is transmitted so encoding tracks the transport instead of dropping.
+  Future<void> requestEncoderFrame() =>
+      _method.invokeMethod('requestEncoderFrame');
 
   /// Tap-to-focus at normalized [nx],[ny] (0..1) in the displayed preview.
   Future<void> focusAt(double nx, double ny) =>
@@ -274,6 +367,15 @@ class EncoderService {
 
   /// Set exposure compensation in EV stops.
   Future<void> setEv(double ev) => _method.invokeMethod('setEv', {'ev': ev});
+
+  /// Live digital zoom (pinch-to-zoom). [zoom] is the center-crop factor
+  /// (1.0 = full field of view); affects both preview and encoded output.
+  Future<void> setZoom(double zoom) =>
+      _method.invokeMethod('setZoom', {'zoom': zoom});
+
+  /// Toggle encoded preview (encode→decode→display; MSV1/JPEG only).
+  Future<void> setPreviewMode(bool encoded) =>
+      _method.invokeMethod('setPreviewMode', {'encoded': encoded});
 
   /// Release the native camera and stop listening for events.
   Future<void> dispose() async {

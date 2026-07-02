@@ -68,6 +68,12 @@ class L1Engine {
   /// Callback invoked when an ACK or ERROR L1 frame is received.
   void Function(int seq, bool ok)? onAck;
 
+  /// Callback invoked for the payload of *every* inbound L2 DATA frame, in
+  /// addition to the attached [FileTransferSession]. Used to route command-channel
+  /// L2 frames that don't belong to a file transfer (e.g. WiFi provisioning,
+  /// CMD 0x0D) without stealing them from the file-transfer session.
+  void Function(Uint8List payload)? onL2Data;
+
   L1Engine({required this.writeFn});
 
   // ---------------------------------------------------------------------------
@@ -104,6 +110,7 @@ class L1Engine {
     _rxBuf.clear();
     _session = null;
     onAck = null;
+    onL2Data = null;
   }
 
   // ---------------------------------------------------------------------------
@@ -228,9 +235,10 @@ class L1Engine {
         // Data frame → send back an ACK.
         _sendAck(frameSeq);
 
-        // Deliver the payload to the L2 session.
+        // Deliver the payload to the L2 session and any general listener.
         final payload = frameBytes.sublist(8);
         _session?.onL2Frame(payload);
+        onL2Data?.call(payload);
       }
       // Unknown control bytes are silently skipped.
     }

@@ -9,6 +9,7 @@ import 'pages/danmaku/danmaku_page.dart';
 import 'pages/gif/gif_page.dart';
 import 'pages/video/video_page.dart';
 import 'pages/stream/stream_page.dart';
+import 'pages/wifi/wifi_page.dart';
 
 class EbadgeApp extends StatelessWidget {
   const EbadgeApp({super.key});
@@ -53,6 +54,12 @@ class EbadgeApp extends StatelessWidget {
             break;
           case '/stream':
             page = StreamPage(
+              deviceName: args?['deviceName'] ?? '',
+              deviceId: args?['deviceId'] ?? '',
+            );
+            break;
+          case '/wifi':
+            page = WifiPage(
               deviceName: args?['deviceName'] ?? '',
               deviceId: args?['deviceId'] ?? '',
             );

@@ -1,6 +1,8 @@
 package com.ebadge.ebadge_app
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -33,9 +35,14 @@ data class EncoderConfig(
     val width: Int,
     val height: Int,
     val fps: Int,
-    val bitrate: Int,          // bits per second
+    val bitrate: Int,          // bits per second (H.264)
     val iFrameIntervalSec: Int,
     val cropZoom: Double,
+    val msv1Skip: Boolean,     // MSV1 inter-frame skip (P-frames)
+    val msv1SkipThr: Int,      // MSV1 skip threshold (per-pixel RGB555 delta)
+    val jpegQuality: Int,      // JPEG quality 1..100
+    val recordToFile: Boolean, // also mux encoded frames into a local file
+    val stream: Boolean,       // emit encoded frames to Dart for streaming
 )
 
 /** Sink for diagnostic / lifecycle events delivered back to Dart. */
@@ -107,9 +114,38 @@ class CameraEncoder(
     private var encWidth = 0
     private var encHeight = 0
 
+    // ── Software (MSV1 / JPEG) encode state ──────────────────────────────────
+    @Volatile private var software = false
+    @Volatile private var streaming = false   // emit frames to Dart
+    @Volatile private var recordToFile = false // mux frames into a local file
+    @Volatile private var forceKeyframe = false // re-sync request (drop skip once)
+    // MSV1 periodic key frame so lost-block corruption self-heals (0 = never).
+    private var swKeyIntervalFrames = 0
+    private var swFramesSinceKey = 0
+    private var swMode = "" // "mvs1" | "jpeg"
+
+    // Cached H.264 SPS/PPS (CODEC_CONFIG), prepended to each streamed IDR so a
+    // late-joining / re-syncing decoder gets the parameter sets.
+    private var h264Csd: ByteArray? = null
+    private val swFrames = ArrayList<ByteArray>()
+    private val swKeys = ArrayList<Boolean>()
+    private var prevRgba: ByteArray? = null
+    @Volatile private var swBusy = false
+    private var swBytes = 0L
+    private var swTruncated = false
+    private val swMaxFrames = 600
+    private val swMaxBytes = 96L * 1024 * 1024
+
+    // ── Encoded preview (encode→decode→display round trip; MSV1/JPEG only) ──
+    @Volatile private var previewEncoded = false
+    private var decodedEntry: TextureRegistry.SurfaceTextureEntry? = null
+    private var decodedSurface: Surface? = null
+    private var decodedArgb: IntArray? = null
+
     private var frameCount = 0
     private var keyframeCount = 0
     private var totalBytes = 0L
+    private var lastFrameBytes = 0
     private var firstPtsUs = -1L
     private var lastPtsUs = 0L
 
@@ -338,6 +374,21 @@ class CameraEncoder(
         issueRepeating()
     }
 
+    /**
+     * Live digital-zoom (pinch-to-zoom). Updates only the GL center-crop factor —
+     * the output aspect is unchanged, so no preview/texture resize is needed. Both
+     * the on-screen preview and the encoded/streamed frames follow immediately.
+     */
+    fun setZoom(zoom: Double) {
+        val cfg = config ?: return
+        val z = zoom.coerceAtLeast(1.0)
+        if (z == cfg.cropZoom) return
+        config = cfg.copy(cropZoom = z)
+        renderer?.setParams(
+            sensorOrientation, facingFront, cfg.width, cfg.height, z,
+        )
+    }
+
     /** Display-space visible width/height fractions after crop + zoom. */
     private fun visibleFraction(): Pair<Double, Double> {
         val cfg = config ?: return 1.0 to 1.0
@@ -386,6 +437,9 @@ class CameraEncoder(
 
         // Re-issue the repeating request so an updated FPS takes effect.
         issueRepeating()
+
+        // Re-evaluate encoded preview against the new codec / resolution.
+        if (previewEncoded) setPreviewMode(true)
     }
 
     fun closeCamera() {
@@ -409,6 +463,9 @@ class CameraEncoder(
         textureEntry?.release()
         textureEntry = null
 
+        previewEncoded = false
+        releaseDecodedTexture()
+
         stopCameraThread()
     }
 
@@ -421,47 +478,46 @@ class CameraEncoder(
             emitError("已在编码中")
             return
         }
-        if (cfg.format != "h264") {
-            emitError("${cfg.format.uppercase()} 编码暂未实现（占位）")
-            return
-        }
         if (cameraDevice == null || renderer == null) {
             emitError("摄像头未就绪")
             return
         }
+        when (cfg.format) {
+            "h264" -> startH264(cfg)
+            "mvs1", "jpeg" -> startSoftware(cfg)
+            else -> emitError("${cfg.format.uppercase()} 编码暂未实现")
+        }
+    }
+
+    private fun startH264(cfg: EncoderConfig) {
         config = cfg
+        software = false
+        streaming = cfg.stream
+        recordToFile = cfg.recordToFile
+        h264Csd = null
         encWidth = cfg.width
         encHeight = cfg.height
         renderer?.setParams(
             sensorOrientation, facingFront, cfg.width, cfg.height, cfg.cropZoom,
         )
-
         try {
-            prepareOutputFile(cfg)
+            if (cfg.recordToFile) prepareOutputFile(cfg) else outputFile = null
             configureCodec(cfg)
-
-            frameCount = 0
-            keyframeCount = 0
-            totalBytes = 0L
-            firstPtsUs = -1L
-            lastPtsUs = 0L
+            _resetStats()
             encoding = true
             finishing = false
-
             codec?.start()
-            // Route GL frames into the encoder input surface.
+            // Pace the encoder feed to the transport only when streaming (the
+            // link, not the camera, sets the rate). Recording-only runs full fps.
+            // Seed a small window so MediaCodec's initial buffering can't stall.
+            renderer?.setPaceEncoder(cfg.stream, 2)
+            // Throttle the encoder feed to the configured fps so the frame-count
+            // GOP (iFrameInterval×fps) maps to the intended wall-clock I-interval
+            // and the transmitted rate matches the setting. The camera itself
+            // often can't hit low fps (AE range floor), so we drop frames here.
+            renderer?.setEncoderTargetFps(cfg.fps)
             renderer?.setEncoderSurface(inputSurface, encWidth, encHeight)
-
-            mainHandler.post {
-                events.onEvent(
-                    mapOf(
-                        "event" to "started",
-                        "path" to outputFile?.absolutePath,
-                        "width" to encWidth,
-                        "height" to encHeight,
-                    ),
-                )
-            }
+            emitStarted()
         } catch (e: Exception) {
             encoding = false
             emitError("启动编码失败: ${e.message}")
@@ -469,16 +525,364 @@ class CameraEncoder(
         }
     }
 
+    /** MSV1 / JPEG software encode via GL offscreen readback. */
+    private fun startSoftware(cfg: EncoderConfig) {
+        config = cfg
+        software = true
+        streaming = cfg.stream
+        recordToFile = cfg.recordToFile
+        forceKeyframe = false
+        // Insert a key frame every iFrameIntervalSec seconds (MSV1 only) so a
+        // dropped block can't corrupt the P-frame chain indefinitely.
+        swKeyIntervalFrames = if (cfg.format == "mvs1") {
+            Math.max(1, cfg.iFrameIntervalSec) * Math.max(1, cfg.fps)
+        } else {
+            0
+        }
+        swFramesSinceKey = 0
+        swMode = cfg.format
+        // MSV1 requires 4-aligned dimensions; JPEG just even.
+        var w = cfg.width
+        var h = cfg.height
+        if (cfg.format == "mvs1") {
+            w = w and 3.inv(); h = h and 3.inv()
+            if (w < 4) w = 4; if (h < 4) h = 4
+        } else {
+            w = w and 1.inv(); h = h and 1.inv()
+        }
+        encWidth = w
+        encHeight = h
+        renderer?.setParams(
+            sensorOrientation, facingFront, cfg.width, cfg.height, cfg.cropZoom,
+        )
+        try {
+            swFrames.clear(); swKeys.clear()
+            prevRgba = null; swBusy = false; swBytes = 0L; swTruncated = false
+            _resetStats()
+            if (cfg.recordToFile) prepareSoftwareOutputFile(cfg) else outputFile = null
+            startCodecThread()
+            encoding = true
+            finishing = false
+
+            updateReadbackState()
+            emitStarted()
+        } catch (e: Exception) {
+            encoding = false
+            software = false
+            emitError("启动编码失败: ${e.message}")
+        }
+    }
+
+    /**
+     * GL thread: each readback frame is encoded on the codec thread (dropped if
+     * busy). Buffers it for the AVI while recording, and/or decodes it back and
+     * draws to the decoded-preview texture while encoded preview is on.
+     */
+    private fun handleRgbaFrame(rgba: ByteArray, w: Int, h: Int, ptsNs: Long) {
+        if (swBusy) return
+        val ch = codecHandler ?: return
+        val recording = encoding && software
+        val doPreview = previewEncoded
+        if (!recording && !doPreview) return
+        swBusy = true
+        ch.post {
+            try {
+                val cfg = config
+                val fmt = cfg?.format ?: "mvs1"
+                val encoded: ByteArray
+                val isKey: Boolean
+                if (fmt == "mvs1") {
+                    // A key frame is the first frame, a periodic refresh, or a
+                    // re-sync request; otherwise a skip (P-)frame when enabled.
+                    val periodic =
+                        swKeyIntervalFrames > 0 && swFramesSinceKey >= swKeyIntervalFrames
+                    val force = forceKeyframe || periodic
+                    if (forceKeyframe) forceKeyframe = false
+                    val prev = if (cfg?.msv1Skip != false && !force) prevRgba else null
+                    encoded = SoftwareCodec.encodeMsv1(rgba, w, h, prev, cfg?.msv1SkipThr ?: 0)
+                    isKey = prev == null
+                    swFramesSinceKey = if (isKey) 0 else swFramesSinceKey + 1
+                    prevRgba = rgba
+                } else {
+                    encoded = SoftwareCodec.encodeJpeg(rgba, w, h, cfg?.jpegQuality ?: 80)
+                    isKey = true
+                }
+                if (recording) {
+                    countFrame(encoded, isKey, ptsNs)
+                    if (recordToFile) bufferFrame(encoded, isKey)
+                    if (streaming) emitFrame(encoded, isKey)
+                }
+                if (doPreview) drawEncodedPreview(fmt, encoded, w, h)
+            } catch (e: Exception) {
+                emitError("软件编码失败: ${e.message}")
+            }
+            swBusy = false
+        }
+    }
+
+    /** Decode the just-encoded frame and blit it to the decoded-preview surface. */
+    private fun drawEncodedPreview(fmt: String, encoded: ByteArray, w: Int, h: Int) {
+        val s = decodedSurface ?: return
+        val bmp: Bitmap = try {
+            if (fmt == "mvs1") {
+                val arr = decodedArgb ?: return
+                SoftwareCodec.decodeMsv1(encoded, w, h, arr)
+                Bitmap.createBitmap(arr, w, h, Bitmap.Config.ARGB_8888)
+            } else {
+                BitmapFactory.decodeByteArray(encoded, 0, encoded.size) ?: return
+            }
+        } catch (_: Exception) {
+            return
+        }
+        try {
+            val canvas = s.lockCanvas(null)
+            canvas.drawBitmap(bmp, 0f, 0f, null)
+            s.unlockCanvasAndPost(canvas)
+        } catch (_: Exception) {
+        }
+        bmp.recycle()
+    }
+
+    /** Enable/disable the encoded-preview round trip (MSV1/JPEG only). */
+    fun setPreviewMode(encoded: Boolean) {
+        val cfg = config
+        val softwareFmt = cfg != null && (cfg.format == "mvs1" || cfg.format == "jpeg")
+        if (encoded && !softwareFmt) {
+            previewEncoded = false
+            releaseDecodedTexture()
+            updateReadbackState()
+            emitInfo("H.264 编码预览暂不支持，仍显示原画")
+            emitPreview()
+            return
+        }
+        previewEncoded = encoded && softwareFmt
+        if (previewEncoded) {
+            var w = cfg!!.width; var h = cfg.height
+            if (cfg.format == "mvs1") {
+                w = w and 3.inv(); h = h and 3.inv(); if (w < 4) w = 4; if (h < 4) h = 4
+            } else {
+                w = w and 1.inv(); h = h and 1.inv()
+            }
+            if (!(encoding && software)) { encWidth = w; encHeight = h }
+            ensureDecodedTexture(encWidth, encHeight)
+            prevRgba = null
+            decodedArgb = IntArray(encWidth * encHeight)
+        } else {
+            releaseDecodedTexture()
+        }
+        updateReadbackState()
+        emitPreview()
+    }
+
+    /** Turn the GL offscreen readback + encode callback on/off as needed. */
+    private fun updateReadbackState() {
+        val cfg = config
+        val softwareFmt = cfg != null && (cfg.format == "mvs1" || cfg.format == "jpeg")
+        val wantSw = softwareFmt && ((encoding && software) || previewEncoded)
+        if (wantSw) {
+            startCodecThread()
+            renderer?.onRgbaFrame = { rgba, w, h, pts -> handleRgbaFrame(rgba, w, h, pts) }
+            renderer?.setSoftwareReadback(encWidth, encHeight)
+        } else {
+            renderer?.onRgbaFrame = null
+            renderer?.clearSoftwareReadback()
+            if (!encoding) stopCodecThread()
+        }
+    }
+
+    private fun ensureDecodedTexture(w: Int, h: Int) {
+        val existing = decodedEntry
+        if (existing != null) {
+            existing.surfaceTexture().setDefaultBufferSize(w, h)
+            decodedSurface?.release()
+            decodedSurface = Surface(existing.surfaceTexture())
+            return
+        }
+        val entry = textureRegistry.createSurfaceTexture()
+        decodedEntry = entry
+        entry.surfaceTexture().setDefaultBufferSize(w, h)
+        decodedSurface = Surface(entry.surfaceTexture())
+    }
+
+    private fun releaseDecodedTexture() {
+        decodedSurface?.release()
+        decodedSurface = null
+        decodedEntry?.release()
+        decodedEntry = null
+        decodedArgb = null
+    }
+
+    private fun emitPreview() {
+        val encoded = previewEncoded
+        val id = if (encoded) (decodedEntry?.id() ?: -1L) else -1L
+        val w = encWidth
+        val h = encHeight
+        mainHandler.post {
+            events.onEvent(
+                mapOf(
+                    "event" to "preview",
+                    "encoded" to encoded,
+                    "textureId" to id,
+                    "width" to w,
+                    "height" to h,
+                ),
+            )
+        }
+    }
+
+    /** Update live stats for one encoded frame (streaming and/or recording). */
+    private fun countFrame(encoded: ByteArray, isKey: Boolean, ptsNs: Long) {
+        frameCount++
+        if (isKey) keyframeCount++
+        totalBytes += encoded.size
+        lastFrameBytes = encoded.size
+        val ptsUs = ptsNs / 1000
+        if (firstPtsUs < 0) firstPtsUs = ptsUs
+        lastPtsUs = ptsUs
+        maybeEmitStats()
+    }
+
+    /** Buffer one encoded frame for the AVI mux (record-to-file only). */
+    private fun bufferFrame(encoded: ByteArray, isKey: Boolean) {
+        swBytes += encoded.size
+        if (swBytes <= swMaxBytes && swFrames.size < swMaxFrames) {
+            swFrames.add(encoded)
+            swKeys.add(isKey)
+        } else if (!swTruncated) {
+            swTruncated = true
+            emitInfo("帧缓冲已达上限，后续帧不再写入文件（编码继续）")
+        }
+    }
+
+    /** Hand one encoded frame to Dart for transmission over the stream. */
+    private fun emitFrame(encoded: ByteArray, isKey: Boolean) {
+        mainHandler.post {
+            events.onEvent(
+                mapOf("event" to "frame", "data" to encoded, "key" to isKey),
+            )
+        }
+    }
+
+    /** Ask the encoder to emit a fresh key frame so a congested / re-synced
+     *  stream can recover without a full restart. MSV1 drops skip once; H.264
+     *  requests an on-demand sync (IDR) frame from MediaCodec. */
+    fun requestKeyframe() {
+        forceKeyframe = true
+        val c = codec
+        if (!software && c != null) {
+            try {
+                val params = android.os.Bundle()
+                params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+                c.setParameters(params)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Permit one more paced encoder frame (H.264 stream: called after each
+     *  frame is transmitted, so production tracks the link — never dropping). */
+    fun requestEncoderFrame() {
+        renderer?.grantEncoderPermit()
+    }
+
     fun stopEncoding() {
         if (!encoding) return
         encoding = false
-        // Stop feeding the encoder, then flush it with an end-of-stream signal.
+        if (software) {
+            finishSoftware()
+            return
+        }
+        // H.264: stop feeding the encoder, then flush with an EOS signal.
+        renderer?.setPaceEncoder(false, 0)
         renderer?.setEncoderSurface(null, 0, 0)
         try {
             codec?.signalEndOfInputStream()
         } catch (e: Exception) {
             finishEncoding()
         }
+    }
+
+    /** Stop software encode, mux the buffered frames into an AVI, emit stopped.
+     *  Keeps the readback/encode path alive if encoded preview is still on. */
+    private fun finishSoftware() {
+        software = false
+        streaming = false
+        val record = recordToFile
+        val ch = codecHandler
+        val file = if (record) outputFile else null
+        val frames = frameCount
+        val keyframes = keyframeCount
+        val bytes = totalBytes
+        if (ch == null) {
+            updateReadbackState()
+            _emitStopped(file, frames, keyframes, bytes)
+            return
+        }
+        // Runs after any queued encode tasks so all frames are muxed.
+        ch.post {
+            if (record) {
+                try {
+                    writeAvi(outputFile)
+                } catch (e: Exception) {
+                    emitError("写入 AVI 失败: ${e.message}")
+                }
+            }
+            mainHandler.post {
+                swFrames.clear(); swKeys.clear()
+                updateReadbackState() // stops readback/thread only if preview off
+                _emitStopped(file, frames, keyframes, bytes)
+            }
+        }
+    }
+
+    private fun writeAvi(file: File?) {
+        if (file == null || swFrames.isEmpty()) return
+        val fourcc = if (swMode == "mvs1") "MSVC" else "MJPG"
+        val bitCount = if (swMode == "mvs1") 16 else 24
+        val fps = config?.fps ?: 15
+        val keyFlags = if (swMode == "mvs1") {
+            BooleanArray(swKeys.size) { swKeys[it] }
+        } else {
+            null
+        }
+        val avi = SoftwareCodec.buildAvi(
+            swFrames, encWidth, encHeight, fps, fourcc, bitCount, keyFlags,
+        )
+        FileOutputStream(file).use { it.write(avi) }
+    }
+
+    private fun _resetStats() {
+        frameCount = 0
+        keyframeCount = 0
+        totalBytes = 0L
+        lastFrameBytes = 0
+        firstPtsUs = -1L
+        lastPtsUs = 0L
+    }
+
+    private fun emitStarted() {
+        val path = outputFile?.absolutePath
+        val w = encWidth
+        val h = encHeight
+        mainHandler.post {
+            events.onEvent(
+                mapOf(
+                    "event" to "started", "path" to path, "width" to w, "height" to h,
+                ),
+            )
+        }
+    }
+
+    private fun _emitStopped(file: File?, frames: Int, keyframes: Int, bytes: Long) {
+        events.onEvent(
+            mapOf(
+                "event" to "stopped",
+                "path" to file?.absolutePath,
+                "frames" to frames,
+                "keyframes" to keyframes,
+                "bytes" to bytes,
+            ),
+        )
     }
 
     private fun configureCodec(cfg: EncoderConfig) {
@@ -508,9 +912,11 @@ class CameraEncoder(
             format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
             format.setInteger(MediaFormat.KEY_LATENCY, 1)
         }
+        // CBR bounds per-frame size (esp. the IDR) far better than VBR at the
+        // low bitrates used for BLE streaming — VBR lets the key frame spike.
         format.setInteger(
             MediaFormat.KEY_BITRATE_MODE,
-            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR,
+            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR,
         )
 
         val mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
@@ -537,18 +943,27 @@ class CameraEncoder(
                     buffer.limit(info.offset + info.size)
                     val bytes = ByteArray(info.size)
                     buffer.get(bytes)
-                    outputStream?.write(bytes)
+                    if (recordToFile) outputStream?.write(bytes)
                     totalBytes += info.size
 
                     val isConfig =
                         (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
                     val isKey =
                         (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
-                    if (!isConfig) {
+                    if (isConfig) {
+                        // SPS/PPS — cache to prepend to each streamed IDR.
+                        h264Csd = bytes
+                    } else {
                         frameCount++
                         if (isKey) keyframeCount++
+                        lastFrameBytes = info.size
                         if (firstPtsUs < 0) firstPtsUs = info.presentationTimeUs
                         lastPtsUs = info.presentationTimeUs
+                        if (streaming) {
+                            val csd = h264Csd
+                            val out = if (isKey && csd != null) csd + bytes else bytes
+                            emitFrame(out, isKey)
+                        }
                         maybeEmitStats()
                     }
                 }
@@ -578,6 +993,7 @@ class CameraEncoder(
         val frames = frameCount
         val keyframes = keyframeCount
         val bytes = totalBytes
+        val lastB = lastFrameBytes
         mainHandler.post {
             events.onEvent(
                 mapOf(
@@ -586,6 +1002,7 @@ class CameraEncoder(
                     "keyframes" to keyframes,
                     "bytes" to bytes,
                     "fps" to fps,
+                    "lastBytes" to lastB,
                 ),
             )
         }
@@ -595,7 +1012,7 @@ class CameraEncoder(
     private fun finishEncoding() {
         if (finishing) return
         finishing = true
-        val file = outputFile
+        val file = if (recordToFile) outputFile else null
         val frames = frameCount
         val keyframes = keyframeCount
         val bytes = totalBytes
@@ -615,6 +1032,16 @@ class CameraEncoder(
 
     private fun stopEncodingInternal() {
         encoding = false
+        streaming = false
+        // Software encode teardown (abandon any buffered frames — used on
+        // error / camera close, not the normal AVI-writing stop path).
+        if (software) {
+            software = false
+            renderer?.onRgbaFrame = null
+            renderer?.clearSoftwareReadback()
+            swFrames.clear(); swKeys.clear(); prevRgba = null
+        }
+        renderer?.setPaceEncoder(false, 0)
         renderer?.setEncoderSurface(null, 0, 0)
         try {
             codec?.stop()
@@ -649,6 +1076,15 @@ class CameraEncoder(
         val file = File(dir, name)
         outputFile = file
         outputStream = FileOutputStream(file)
+    }
+
+    /** Software codecs are muxed into an AVI on stop; just pick the path here. */
+    private fun prepareSoftwareOutputFile(cfg: EncoderConfig) {
+        val dir = File(context.getExternalFilesDir(null), "encode_test")
+        if (!dir.exists()) dir.mkdirs()
+        val tag = if (cfg.format == "mvs1") "msv1" else "mjpg"
+        outputFile = File(dir, "enc_${tag}_${encWidth}x${encHeight}_${cfg.fps}fps_${nextSeq()}.avi")
+        outputStream = null
     }
 
     // -------------------------------------------------------------------------

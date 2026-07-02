@@ -43,26 +43,50 @@ class _DevicePageState extends ConsumerState<DevicePage>
   }
 
   void _onDisconnectTap() {
+    final cs = Theme.of(context).colorScheme;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('断开连接'),
+        title: const Text('断开连接', textAlign: TextAlign.center),
         content: const Text('确认断开设备连接？'),
+        // Two full-width buttons stacked vertically — identical style, distinct
+        // colors (destructive on top, neutral cancel below).
+        actionsOverflowDirection: VerticalDirection.down,
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              // Clearing the connection makes the root gate fall back to the
-              // scanner automatically.
-              ref.read(bleNotifierProvider.notifier).disconnect();
-            },
-            style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('断开'),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    // Clearing the connection makes the root gate fall back to
+                    // the scanner automatically.
+                    ref.read(bleNotifierProvider.notifier).disconnect();
+                  },
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    backgroundColor: cs.error,
+                    foregroundColor: cs.onError,
+                  ),
+                  child: const Text('断开'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    backgroundColor: cs.surfaceContainerHighest,
+                    foregroundColor: cs.onSurface,
+                  ),
+                  child: const Text('取消'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -95,6 +119,11 @@ class _DevicePageState extends ConsumerState<DevicePage>
         title: '流媒体',
         desc: '摄像头实时\n推流到设备',
         route: '/stream'),
+    _ActionItem(
+        icon: Icons.wifi_tethering,
+        title: 'WiFi 配网',
+        desc: '热点配网并连接\n用于 WiFi 投屏',
+        route: '/wifi'),
   ];
 
   @override
