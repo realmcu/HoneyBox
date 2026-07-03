@@ -4,15 +4,14 @@ import 'package:ebadge_app/services/l1_engine.dart';
 import 'package:ebadge_app/services/l2_file_transfer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-// CRC-16/CCITT-FALSE over the L2 payload only (PROTOCOL.md §2.1).
+// CRC-16/ARC (poly 0xA001 reflected, init 0) over the L2 payload only
+// (PROTOCOL.md §2.1).
 int crc16ForTest(List<int> data) {
-  int crc = 0xFFFF;
+  int crc = 0x0000;
   for (final byte in data) {
-    crc ^= (byte << 8) & 0xFFFF;
+    crc ^= byte;
     for (int i = 0; i < 8; i++) {
-      crc = (crc & 0x8000) != 0
-          ? (((crc << 1) ^ 0x1021) & 0xFFFF)
-          : ((crc << 1) & 0xFFFF);
+      crc = (crc & 1) != 0 ? ((crc >> 1) ^ 0xA001) : (crc >> 1);
     }
   }
   return crc & 0xFFFF;
@@ -34,7 +33,7 @@ Uint8List l1FrameForTest(int ctrl, int seq, List<int> payload) {
 }
 
 void main() {
-  test('sendL2 builds CRC-16/CCITT-FALSE over the L2 payload only', () {
+  test('sendL2 builds CRC-16/ARC over the L2 payload only', () {
     final writes = <int>[];
     final engine = L1Engine(writeFn: (chunk) => writes.addAll(chunk));
 
@@ -44,7 +43,7 @@ void main() {
     expect(writes, l1FrameForTest(0x00, 0, [0x0B, 0x00, 0x01]));
   });
 
-  test('sendL2 matches PROTOCOL.md BEGIN_REQ example bytes (crc=0xD69B)', () {
+  test('sendL2 matches PROTOCOL.md BEGIN_REQ example bytes (crc=0x2B6F)', () {
     final writes = <int>[];
     final engine = L1Engine(writeFn: (chunk) => writes.addAll(chunk));
 
@@ -56,12 +55,12 @@ void main() {
     engine.sendL2(Uint8List.fromList(payload));
 
     expect(writes, [
-      0xab, 0x00, 0x00, 0x12, 0xd6, 0x9b, 0x00, 0x00, //
+      0xab, 0x00, 0x00, 0x12, 0x2b, 0x6f, 0x00, 0x00, //
       ...payload,
     ]);
   });
 
-  test('data frame receive sends ACK (empty payload → CRC 0xFFFF)', () {
+  test('data frame receive sends ACK (empty payload → CRC 0x0000)', () {
     final writes = <int>[];
     final engine = L1Engine(writeFn: (chunk) => writes.addAll(chunk));
 

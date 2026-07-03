@@ -2,20 +2,20 @@ import 'dart:typed_data';
 
 import 'l2_file_transfer.dart';
 
-/// CRC-16/CCITT-FALSE — polynomial 0x1021, init 0xFFFF, no input/output
-/// reflection, no final XOR. Per desk-mate PROTOCOL.md §2.1 the L1 CRC16
-/// covers **only the L2 payload** (not the frame header / crc / seq fields);
-/// an empty payload (ACK frames) therefore yields the init value 0xFFFF.
-/// Self-check: crc16("123456789") == 0x29B1.
+/// CRC-16/ARC — polynomial 0x8005 (reflected 0xA001), init 0x0000, input/output
+/// reflected, no final XOR. Per desk-mate PROTOCOL.md §2.1 the L1 CRC16 covers
+/// **only the L2 payload** (not the frame header / crc / seq fields); an empty
+/// payload (ACK frames) therefore yields the init value 0x0000.
+/// Self-check: crc16("123456789") == 0xBB3D.
 int _crc16(Uint8List data) {
-  int crc = 0xFFFF;
+  int crc = 0x0000;
   for (int i = 0; i < data.length; i++) {
-    crc ^= (data[i] << 8) & 0xFFFF;
+    crc ^= data[i];
     for (int j = 0; j < 8; j++) {
-      if ((crc & 0x8000) != 0) {
-        crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+      if ((crc & 1) != 0) {
+        crc = (crc >> 1) ^ 0xA001;
       } else {
-        crc = (crc << 1) & 0xFFFF;
+        crc = crc >> 1;
       }
     }
   }
@@ -113,7 +113,7 @@ class L1Engine {
 
   /// Build a full L1 frame (header + payload) as a single [Uint8List].
   ///
-  /// Per desk-mate PROTOCOL.md §2.1 the CRC16 (CCITT-FALSE) covers **only the
+  /// Per desk-mate PROTOCOL.md §2.1 the CRC16 (CRC-16/ARC) covers **only the
   /// L2 payload** — not the header, crc, or seq fields.
   Uint8List _buildL1Frame(int ctrl, Uint8List payload, {int? seqOverride}) {
     final seq = seqOverride ?? _seq;
