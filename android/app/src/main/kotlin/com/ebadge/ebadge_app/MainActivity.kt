@@ -1,7 +1,9 @@
 package com.ebadge.ebadge_app
 
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -21,6 +23,7 @@ class MainActivity : FlutterActivity() {
     private val eventChannelName = "ebadge/encoder/events"
     private val wifiChannelName = "ebadge/wifi"
     private val converterChannelName = "ebadge/converter"
+    private val systemChannelName = "ebadge/system"
 
     private var encoder: CameraEncoder? = null
     private var eventSink: EventChannel.EventSink? = null
@@ -143,6 +146,20 @@ class MainActivity : FlutterActivity() {
                 "cancelConvert" -> {
                     convertCancel?.set(true)
                     result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(messenger, systemChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "openLocationSettings" -> {
+                    try {
+                        startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("no_activity", e.message, null)
+                    }
                 }
                 else -> result.notImplemented()
             }
