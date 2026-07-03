@@ -73,9 +73,12 @@ class _ImagePageState extends ConsumerState<ImagePage> {
 
   @override
   void dispose() {
-    final state = ref.read(transferProgressProvider);
-    if (state.status == TransferStatus.sending) {
-      ref.read(transferProgressProvider.notifier).abort();
+    // Reset send status on leave so re-entering never shows a stale result.
+    final notifier = ref.read(transferProgressProvider.notifier);
+    if (ref.read(transferProgressProvider).status == TransferStatus.sending) {
+      notifier.abort();
+    } else {
+      notifier.reset();
     }
     _srcImage?.dispose();
     super.dispose();

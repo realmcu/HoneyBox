@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'theme/app_theme.dart';
 import 'providers/ble_provider.dart';
+import 'providers/transfer_provider.dart';
 import 'pages/scan/scan_page.dart';
 import 'pages/device/device_page.dart';
 import 'pages/image/image_page.dart';
 import 'pages/danmaku/danmaku_page.dart';
-import 'pages/gif/gif_page.dart';
 import 'pages/video/video_page.dart';
 import 'pages/stream/stream_page.dart';
 import 'pages/wifi/wifi_page.dart';
@@ -36,12 +36,6 @@ class EbadgeApp extends StatelessWidget {
             break;
           case '/danmaku':
             page = DanmakuPage(
-              deviceName: args?['deviceName'] ?? '',
-              deviceId: args?['deviceId'] ?? '',
-            );
-            break;
-          case '/gif':
-            page = GifPage(
               deviceName: args?['deviceName'] ?? '',
               deviceId: args?['deviceId'] ?? '',
             );
@@ -94,6 +88,8 @@ class AppRoot extends ConsumerWidget {
     // back on the gate (which now renders the scanner) and notify the user.
     ref.listen<ConnectedDeviceInfo?>(connectedDeviceProvider, (prev, next) {
       if (prev != null && next == null) {
+        // Clear any lingering send status so the next connection/card starts clean.
+        ref.read(transferProgressProvider.notifier).reset();
         Navigator.of(context).popUntil((route) => route.isFirst);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('设备已断开')),

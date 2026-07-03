@@ -97,9 +97,12 @@ class _VideoPageState extends ConsumerState<VideoPage> {
 
   @override
   void dispose() {
-    final state = ref.read(transferProgressProvider);
-    if (state.status == TransferStatus.sending) {
-      ref.read(transferProgressProvider.notifier).abort();
+    // Reset send status on leave so re-entering never shows a stale result.
+    final notifier = ref.read(transferProgressProvider.notifier);
+    if (ref.read(transferProgressProvider).status == TransferStatus.sending) {
+      notifier.abort();
+    } else {
+      notifier.reset();
     }
     _rebuildSeq++;
     _converter.cancel();

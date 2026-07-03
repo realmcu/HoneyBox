@@ -105,14 +105,9 @@ class _DevicePageState extends ConsumerState<DevicePage>
         desc: '一行滚动文字\n发送到屏幕',
         route: '/danmaku'),
     _ActionItem(
-        icon: Icons.animation,
-        title: 'GIF',
-        desc: 'GIF 文件\n循环播放',
-        route: '/gif'),
-    _ActionItem(
-        icon: Icons.videocam_outlined,
-        title: '视频',
-        desc: '本地视频\nMP4 / MOV',
+        icon: Icons.movie_creation_outlined,
+        title: '视频 / GIF',
+        desc: 'MP4 / MOV / GIF\n转码后发送',
         route: '/video'),
     _ActionItem(
         icon: Icons.live_tv_outlined,
