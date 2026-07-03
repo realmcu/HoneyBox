@@ -119,6 +119,49 @@ Future<RgbaImage> cropResizeToRgba(
   return RgbaImage(bd.buffer.asUint8List(), targetW, targetH);
 }
 
+/// Render [img] into an [outSize]×[outSize] RGBA using an affine transform that
+/// maps source pixels to output pixels: `output = src * scale + (tx, ty)`.
+/// Anything outside the image (letterbox from the pinch-zoom viewport frame) is
+/// filled with [bgColor]. Used by the image page's viewport crop: the fixed
+/// square frame maps to the full output, so whatever is framed becomes the
+/// sent image.
+Future<RgbaImage> renderViewportRgba(
+  ui.Image img, {
+  required int outSize,
+  required double scale,
+  required double tx,
+  required double ty,
+  int bgColor = 0xFF000000,
+}) async {
+  final double s = outSize.toDouble();
+  final ui.PictureRecorder recorder = ui.PictureRecorder();
+  final ui.Canvas canvas = ui.Canvas(recorder, ui.Rect.fromLTWH(0, 0, s, s));
+  canvas.drawRect(
+    ui.Rect.fromLTWH(0, 0, s, s),
+    ui.Paint()..color = ui.Color(bgColor),
+  );
+  canvas.clipRect(ui.Rect.fromLTWH(0, 0, s, s));
+  canvas.translate(tx, ty);
+  canvas.scale(scale);
+  canvas.drawImage(
+    img,
+    ui.Offset.zero,
+    ui.Paint()
+      ..filterQuality = ui.FilterQuality.high
+      ..isAntiAlias = true,
+  );
+  final ui.Picture picture = recorder.endRecording();
+  final ui.Image out = await picture.toImage(outSize, outSize);
+  final ByteData? bd =
+      await out.toByteData(format: ui.ImageByteFormat.rawRgba);
+  out.dispose();
+  picture.dispose();
+  if (bd == null) {
+    throw StateError('图片像素读取失败');
+  }
+  return RgbaImage(bd.buffer.asUint8List(), outSize, outSize);
+}
+
 // ── Danmaku text rendering (ports renderDanmaku in text-bin.js) ──────────────
 
 /// Line-height factor (relative to font size). 1.1 is the smallest safe value

@@ -231,39 +231,70 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('发送弹幕')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildPreview(theme, cs),
-            const SizedBox(height: 16),
-            _buildTextField(theme, cs),
-            const SizedBox(height: 12),
-            _buildFontRow(theme, cs),
-            const SizedBox(height: 4),
-            _buildSizeSlider(theme, cs),
-            _buildBoldSwitch(theme, cs),
-            const SizedBox(height: 8),
-            _buildColorRow(theme, cs, '文字颜色', _textColors, _textColor,
-                _onTextColorTap),
-            const SizedBox(height: 8),
-            _buildColorRow(
-                theme, cs, '背景颜色', _bgColors, _bgColor, _onBgColorTap),
-            const SizedBox(height: 20),
-            if (sending)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: LinearProgressIndicator(
-                  value: transferState.progress,
-                  minHeight: 6,
-                  borderRadius: BorderRadius.circular(3),
-                ),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildPreview(theme, cs),
+                  const SizedBox(height: 16),
+                  _buildTextField(theme, cs),
+                  const SizedBox(height: 12),
+                  _buildFontRow(theme, cs),
+                  const SizedBox(height: 4),
+                  _buildSizeSlider(theme, cs),
+                  _buildBoldSwitch(theme, cs),
+                  const SizedBox(height: 8),
+                  _buildColorRow(theme, cs, '文字颜色', _textColors, _textColor,
+                      _onTextColorTap),
+                  const SizedBox(height: 8),
+                  _buildColorRow(
+                      theme, cs, '背景颜色', _bgColors, _bgColor, _onBgColorTap),
+                ],
               ),
-            _buildStatus(theme, cs, transferState),
-            const SizedBox(height: 12),
-            _buildActionButton(cs, sending),
-          ],
+            ),
+          ),
+          _buildBottomBar(theme, cs, transferState, sending),
+        ],
+      ),
+    );
+  }
+
+  // Pinned bottom bar: transfer progress + status + action button, always
+  // visible (does not scroll with the page content).
+  Widget _buildBottomBar(
+      ThemeData theme, ColorScheme cs, TransferState state, bool sending) {
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border:
+            Border(top: BorderSide(color: cs.outline.withValues(alpha: 0.3))),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (sending)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: LinearProgressIndicator(
+                    value: state.progress,
+                    minHeight: 6,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              _buildStatus(theme, cs, state),
+              const SizedBox(height: 12),
+              _buildActionButton(cs, sending),
+            ],
+          ),
         ),
       ),
     );
