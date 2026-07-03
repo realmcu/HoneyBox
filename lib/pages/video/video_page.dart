@@ -49,11 +49,7 @@ const List<int> _bgColors = [
   0xFFFFCC00,
 ];
 
-const double _previewMaxHRatio = 0.42;
-const double _minBox = 48;
-
-double _clampd(double v, double lo, double hi) =>
-    v < lo ? lo : (v > hi ? hi : v);
+const double _previewMaxHRatio = 0.5; // square viewport max height = 50% screen
 
 enum _ConvStatus { idle, converting, ready, error }
 
@@ -76,15 +72,14 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   int _size = 360;
   int _fps = 10;
   int _quality = 60;
-  bool _lockAspect = true; // true = 1:1 cover, false = free stretch
-  int _bgColor = 0xFF000000; // GIF transparent-background fill
+  int _bgColor = 0xFF000000; // GIF transparent bg + viewport letterbox fill
 
-  // Crop box, normalized (0..1) relative to the source/preview (uniform scale).
-  Rect _cropN = const Rect.fromLTWH(0, 0, 1, 1);
-  double _pvW = 0;
-  double _pvH = 0;
-  Rect? _dragStartBox;
-  Offset? _dragStartPos;
+  // Pinch-zoom viewport crop (mirrors the image page): the fixed square frame
+  // maps to the full output — whatever is framed is what gets encoded. On load
+  // the whole first frame fits (contain); pinch-zoom / pan reframes it.
+  final TransformationController _tc = TransformationController();
+  double _vp = 0; // square viewport side in px (set during layout)
+  int _viewportPointers = 0; // >0 → freeze page scroll while framing
 
   // Conversion result / state.
   Uint8List? _avi;
@@ -106,6 +101,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     }
     _rebuildSeq++;
     _converter.cancel();
+    _tc.dispose();
     _thumb?.dispose();
     super.dispose();
   }
@@ -241,38 +237,34 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       _convProgress = 0;
       _conv = _ConvStatus.idle;
       _convError = null;
-      _pvW = 0;
-      _pvH = 0;
-      _cropN = _initCrop(_lockAspect);
+      _tc.value = Matrix4.identity(); // reset zoom/pan to contain-fit
     });
     ref.read(transferProgressProvider.notifier).reset();
   }
 
-  // Initial normalized crop: lock → centered max square; free → full frame.
-  Rect _initCrop(bool lock) {
-    if (!lock || _srcW <= 0 || _srcH <= 0) {
-      return const Rect.fromLTWH(0, 0, 1, 1);
-    }
-    final double ar = _srcW / _srcH;
-    double nw, nh;
-    if (ar >= 1) {
-      nw = 1 / ar;
-      nh = 1;
-    } else {
-      nw = 1;
-      nh = ar;
-    }
-    return Rect.fromLTWH((1 - nw) / 2, (1 - nh) / 2, nw, nh);
-  }
-
   // ── Convert ────────────────────────────────────────────────────────────────
+  // Normalized source rect (relative to the source frame) that the square
+  // viewport currently frames, derived from the pinch-zoom transform. Inverts
+  // the image page's `output = src*scale + t` mapping, so nx/ny may be negative
+  // and nw/nh may exceed 1 (letterbox); the native side fills outside the frame
+  // with the background. Returns null when there's no preview to frame.
   CropN? _cropForConvert() {
-    if (_thumb == null || _pvW <= 0 || _pvH <= 0) return null;
+    if (_thumb == null || _vp <= 0 || _srcW <= 0 || _srcH <= 0) return null;
+    final double v = _vp;
+    final double s0 = min(v / _srcW, v / _srcH); // contain scale in v×v box
+    final double lx = (v - _srcW * s0) / 2;
+    final double ly = (v - _srcH * s0) / 2;
+    final m = _tc.value;
+    final double k = m.getMaxScaleOnAxis();
+    final double denom = k * s0;
+    if (denom <= 0) return null;
+    final double mtx = m.storage[12];
+    final double mty = m.storage[13];
     return (
-      nx: _cropN.left,
-      ny: _cropN.top,
-      nw: _cropN.width,
-      nh: _cropN.height,
+      nx: -(k * lx + mtx) / (denom * _srcW),
+      ny: -(k * ly + mty) / (denom * _srcH),
+      nw: v / (denom * _srcW),
+      nh: v / (denom * _srcH),
     );
   }
 
@@ -295,7 +287,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         height: _size,
         fps: _fps,
         quality: _quality,
-        cropMode: _lockAspect ? 'cover' : 'stretch',
+        cropMode: 'cover', // only used as the no-preview fallback
         crop: _cropForConvert(),
         bgColor: _bgColor,
         onProgress: (done, total) {
@@ -380,126 +372,10 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     _invalidate();
   }
 
-  void _onToggleLock() {
+  void _onResetView() {
     if (_isBusy) return;
-    final bool lock = !_lockAspect;
-    setState(() {
-      _lockAspect = lock;
-      if (lock && _pvW > 0 && _pvH > 0) {
-        final double wpx = _cropN.width * _pvW;
-        final double hpx = _cropN.height * _pvH;
-        if ((wpx - hpx).abs() > 0.5) {
-          final double side = min(wpx, hpx);
-          _cropN = Rect.fromLTWH(
-            _cropN.left,
-            _cropN.top,
-            side / _pvW,
-            side / _pvH,
-          );
-        }
-      }
-    });
+    _tc.value = Matrix4.identity();
     _invalidate();
-  }
-
-  void _onResetCrop() {
-    if (_isBusy) return;
-    setState(() => _cropN = _initCrop(_lockAspect));
-    _invalidate();
-  }
-
-  // ── Crop-box drag (move / resize) ─────────────────────────────────────────
-  Rect _boxPx() => Rect.fromLTWH(
-        _cropN.left * _pvW,
-        _cropN.top * _pvH,
-        _cropN.width * _pvW,
-        _cropN.height * _pvH,
-      );
-
-  void _setBoxPx(Rect b) {
-    if (_pvW <= 0 || _pvH <= 0) return;
-    setState(() {
-      _cropN = Rect.fromLTWH(
-        b.left / _pvW,
-        b.top / _pvH,
-        b.width / _pvW,
-        b.height / _pvH,
-      );
-    });
-  }
-
-  void _onMoveStart(DragStartDetails d) {
-    if (_isBusy || _pvW <= 0) return;
-    _invalidate();
-    _dragStartBox = _boxPx();
-    _dragStartPos = d.globalPosition;
-  }
-
-  void _onMoveUpdate(DragUpdateDetails d) {
-    final s = _dragStartBox;
-    final p = _dragStartPos;
-    if (s == null || p == null) return;
-    final double dx = d.globalPosition.dx - p.dx;
-    final double dy = d.globalPosition.dy - p.dy;
-    final double x = _clampd(s.left + dx, 0, _pvW - s.width);
-    final double y = _clampd(s.top + dy, 0, _pvH - s.height);
-    _setBoxPx(
-        Rect.fromLTWH(x.roundToDouble(), y.roundToDouble(), s.width, s.height));
-  }
-
-  void _onResizeStart(DragStartDetails d) {
-    if (_isBusy || _pvW <= 0) return;
-    _invalidate();
-    _dragStartBox = _boxPx();
-    _dragStartPos = d.globalPosition;
-  }
-
-  void _onResizeUpdate(DragUpdateDetails d, String corner) {
-    final s = _dragStartBox;
-    final p = _dragStartPos;
-    if (s == null || p == null) return;
-    final double dx = d.globalPosition.dx - p.dx;
-    final double dy = d.globalPosition.dy - p.dy;
-    _setBoxPx(_resizeBox(s, corner, dx, dy));
-  }
-
-  // From a dragged corner → new box: opposite corner fixed, dragged corner
-  // follows finger; lockAspect keeps it square. Ported from video.js.
-  Rect _resizeBox(Rect s, String corner, double dx, double dy) {
-    final double pw = _pvW, ph = _pvH;
-    final bool movingLeft = corner == 'tl' || corner == 'bl';
-    final bool movingTop = corner == 'tl' || corner == 'tr';
-    final double anchorX = movingLeft ? s.left + s.width : s.left;
-    final double anchorY = movingTop ? s.top + s.height : s.top;
-    final double px =
-        _clampd((movingLeft ? s.left : s.left + s.width) + dx, 0, pw);
-    final double py =
-        _clampd((movingTop ? s.top : s.top + s.height) + dy, 0, ph);
-    double w = (px - anchorX).abs();
-    double h = (py - anchorY).abs();
-    final double maxW = movingLeft ? anchorX : (pw - anchorX);
-    final double maxH = movingTop ? anchorY : (ph - anchorY);
-
-    if (_lockAspect) {
-      double side = min(w, h);
-      final double hi = min(maxW, maxH);
-      side = side < _minBox ? _minBox : (side > hi ? hi : side);
-      w = h = side;
-    } else {
-      w = w < _minBox ? _minBox : (w > maxW ? maxW : w);
-      h = h < _minBox ? _minBox : (h > maxH ? maxH : h);
-    }
-    return Rect.fromLTWH(
-      (movingLeft ? anchorX - w : anchorX).roundToDouble(),
-      (movingTop ? anchorY - h : anchorY).roundToDouble(),
-      w.roundToDouble(),
-      h.roundToDouble(),
-    );
-  }
-
-  void _onDragEnd() {
-    _dragStartBox = null;
-    _dragStartPos = null;
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
@@ -532,6 +408,11 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         children: [
           Expanded(
             child: SingleChildScrollView(
+              // Freeze page scroll while the user is framing inside the preview
+              // (pinch-zoom / pan) so the gesture never leaks into scrolling.
+              physics: _viewportPointers > 0
+                  ? const NeverScrollableScrollPhysics()
+                  : null,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -542,7 +423,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                     if (_thumb != null) ...[
                       _buildPreview(theme, cs),
                       const SizedBox(height: 8),
-                      _buildCropControls(theme, cs),
+                      _buildViewControls(theme, cs),
                     ] else
                       _buildNoPreview(theme, cs),
                     const SizedBox(height: 16),
@@ -655,61 +536,49 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     );
   }
 
+  // Fixed square viewport: the first frame is pinch-zoomed / panned underneath
+  // a fixed frame (contain-fit on load). Whatever the square frames is what gets
+  // encoded; areas outside the frame become the background (letterbox).
   Widget _buildPreview(ThemeData theme, ColorScheme cs) {
-    final double maxH = (MediaQuery.of(context).size.height * _previewMaxHRatio)
-        .clamp(180.0, 9999.0)
-        .toDouble();
+    final double maxH = MediaQuery.of(context).size.height * _previewMaxHRatio;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final double avail = constraints.maxWidth;
-        final double ar = (_srcW > 0 && _srcH > 0) ? _srcW / _srcH : 1;
-        double w = avail;
-        double h = w / ar;
-        if (h > maxH) {
-          h = maxH;
-          w = h * ar;
-        }
-        if (w > avail) {
-          w = avail;
-          h = w / ar;
-        }
-        _pvW = w;
-        _pvH = h;
-        final Rect box = _boxPx();
-
+        final double v = min(constraints.maxWidth, maxH);
+        _vp = v;
         return Center(
-          child: SizedBox(
-            width: w,
-            height: h,
-            child: Stack(
-              children: [
-                if (_isGif)
-                  Positioned.fill(child: ColoredBox(color: Color(_bgColor))),
-                Positioned.fill(
-                  child: RawImage(image: _thumb, fit: BoxFit.fill),
-                ),
-                ..._buildDimBands(box, w, h),
-                Positioned(
-                  left: box.left,
-                  top: box.top,
-                  width: box.width,
-                  height: box.height,
-                  child: GestureDetector(
-                    onPanStart: _onMoveStart,
-                    onPanUpdate: _onMoveUpdate,
-                    onPanEnd: (_) => _onDragEnd(),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: cs.primary, width: 2),
+          child: Listener(
+            // Track fingers on the viewport so page scroll can be frozen while
+            // the frame is being pinch-zoomed / panned (see SingleChildScrollView).
+            onPointerDown: (_) => setState(() => _viewportPointers++),
+            onPointerUp: (_) => setState(
+                () => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
+            onPointerCancel: (_) => setState(
+                () => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: v,
+                height: v,
+                child: Stack(
+                  children: [
+                    Positioned.fill(child: ColoredBox(color: Color(_bgColor))),
+                    InteractiveViewer(
+                      transformationController: _tc,
+                      minScale: 1.0,
+                      maxScale: 8.0,
+                      clipBehavior: Clip.hardEdge,
+                      // Reframing invalidates the converted result (re-convert
+                      // is expensive/native, so it's manual — not automatic).
+                      onInteractionEnd: (_) => _invalidate(),
+                      child: SizedBox(
+                        width: v,
+                        height: v,
+                        child: RawImage(image: _thumb, fit: BoxFit.contain),
                       ),
                     ),
-                  ),
+                  ],
                 ),
-                _buildHandle(box, 'tl', cs),
-                _buildHandle(box, 'tr', cs),
-                _buildHandle(box, 'bl', cs),
-                _buildHandle(box, 'br', cs),
-              ],
+              ),
             ),
           ),
         );
@@ -717,70 +586,20 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     );
   }
 
-  List<Widget> _buildDimBands(Rect box, double w, double h) {
-    const Color dim = Color(0x66000000);
-    Widget band(double l, double t, double bw, double bh) => Positioned(
-          left: l,
-          top: t,
-          width: bw < 0 ? 0 : bw,
-          height: bh < 0 ? 0 : bh,
-          child: IgnorePointer(child: Container(color: dim)),
-        );
-    return [
-      band(0, 0, w, box.top),
-      band(0, box.bottom, w, h - box.bottom),
-      band(0, box.top, box.left, box.height),
-      band(box.right, box.top, w - box.right, box.height),
-    ];
-  }
-
-  Widget _buildHandle(Rect box, String corner, ColorScheme cs) {
-    const double sz = 22;
-    final bool left = corner == 'tl' || corner == 'bl';
-    final bool top = corner == 'tl' || corner == 'tr';
-    final double cx = left ? box.left : box.right;
-    final double cy = top ? box.top : box.bottom;
-    return Positioned(
-      left: cx - sz / 2,
-      top: cy - sz / 2,
-      width: sz,
-      height: sz,
-      child: GestureDetector(
-        onPanStart: _onResizeStart,
-        onPanUpdate: (d) => _onResizeUpdate(d, corner),
-        onPanEnd: (_) => _onDragEnd(),
-        child: Center(
-          child: Container(
-            width: 14,
-            height: 14,
-            decoration: BoxDecoration(
-              color: cs.primary,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCropControls(ThemeData theme, ColorScheme cs) {
+  Widget _buildViewControls(ThemeData theme, ColorScheme cs) {
     return Row(
       children: [
+        Icon(Icons.pinch_outlined, size: 18, color: cs.onSurfaceVariant),
+        const SizedBox(width: 6),
         Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _isBusy ? null : _onToggleLock,
-            icon: Icon(_lockAspect ? Icons.lock_outline : Icons.crop_free),
-            label: Text(_lockAspect ? '1:1 裁剪' : '自由拉伸'),
-          ),
+          child: Text('双指缩放 / 拖动取景，框内即画面区域',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant)),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _isBusy ? null : _onResetCrop,
-            icon: const Icon(Icons.refresh),
-            label: const Text('重置裁剪'),
-          ),
+        TextButton.icon(
+          onPressed: _isBusy ? null : _onResetView,
+          icon: const Icon(Icons.refresh, size: 18),
+          label: const Text('重置'),
         ),
       ],
     );

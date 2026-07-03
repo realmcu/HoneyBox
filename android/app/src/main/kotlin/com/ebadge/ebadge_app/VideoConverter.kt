@@ -207,14 +207,37 @@ class VideoConverter {
         dstH: Int,
         cropMode: String,
         crop: DoubleArray?,
+        bgColor: Int,
         pixels: IntArray,
         rgba: ByteArray,
     ): ByteArray {
-        val r = srcRect(src.width, src.height, dstW, dstH, cropMode, crop)
-        val srcR = Rect(r[0], r[1], r[0] + r[2], r[1] + r[3])
-        val dstR = RectF(0f, 0f, dstW.toFloat(), dstH.toFloat())
-        canvas.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR)
-        canvas.drawBitmap(src, srcR, dstR, paint)
+        if (crop != null && crop.size == 4 && crop[2] > 0 && crop[3] > 0) {
+            // Viewport crop — matches the Flutter image page's renderViewportRgba.
+            // The normalized rect may extend beyond the frame (the user zoomed
+            // out / panned past an edge): map it onto the full output and fill
+            // anything outside the source with the opaque background so the
+            // letterbox looks the same as the on-screen preview.
+            val fw = src.width
+            val fh = src.height
+            val scaleX = (dstW / (crop[2] * fw)).toFloat()
+            val scaleY = (dstH / (crop[3] * fh)).toFloat()
+            val tx = (-crop[0] * dstW / crop[2]).toFloat()
+            val ty = (-crop[1] * dstH / crop[3]).toFloat()
+            canvas.drawColor(bgColor or 0xFF000000.toInt(), PorterDuff.Mode.SRC)
+            canvas.save()
+            canvas.translate(tx, ty)
+            canvas.scale(scaleX, scaleY)
+            canvas.drawBitmap(src, 0f, 0f, paint)
+            canvas.restore()
+        } else {
+            // No interactive crop (e.g. first frame unreadable) → centered
+            // cover-crop / stretch as before.
+            val r = srcRect(src.width, src.height, dstW, dstH, cropMode, null)
+            val srcR = Rect(r[0], r[1], r[0] + r[2], r[1] + r[3])
+            val dstR = RectF(0f, 0f, dstW.toFloat(), dstH.toFloat())
+            canvas.drawColor(0, PorterDuff.Mode.CLEAR)
+            canvas.drawBitmap(src, srcR, dstR, paint)
+        }
 
         dst.getPixels(pixels, 0, dstW, 0, 0, dstW, dstH)
         for (i in pixels.indices) {
@@ -298,7 +321,7 @@ class VideoConverter {
                     j++
                     continue
                 }
-                resizeFrame(bmp, dst, canvas, dstW, dstH, cropMode, crop, pixels, rgba)
+                resizeFrame(bmp, dst, canvas, dstW, dstH, cropMode, crop, bgColor, pixels, rgba)
                 bmp.recycle()
                 frames.add(enc.encode(rgba))
                 progress?.onProgress(frames.size, maxOf(estTotal, frames.size))
@@ -383,7 +406,7 @@ class VideoConverter {
                 srcCanvas.drawColor(opaqueBg, PorterDuff.Mode.SRC)
                 movie.setTime(tMs)
                 movie.draw(srcCanvas, 0f, 0f)
-                resizeFrame(srcBmp, dst, canvas, dstW, dstH, cropMode, crop, pixels, rgba)
+                resizeFrame(srcBmp, dst, canvas, dstW, dstH, cropMode, crop, bgColor, pixels, rgba)
                 frames.add(enc.encode(rgba))
                 progress?.onProgress(frames.size, maxOf(estTotal, frames.size))
                 j++
