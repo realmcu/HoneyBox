@@ -70,14 +70,33 @@ void main() {
     expect(writes, l1FrameForTest(0x10, 0x1234, const []));
   });
 
-  test('attach does not reset connection-level sequence number', () {
+  test('attach resets the L1 seq to 0 so each transfer starts at seq=0', () {
+    // PROTOCOL.md §三: every transfer's BEGIN_REQ goes out as L1[seq=0], and the
+    // desk-mate reference host resets seq on each attach(). This is what lets a
+    // SECOND transfer succeed after a first one has advanced the counter.
     final engine = L1Engine(writeFn: (_) {});
-    engine.sendL2(Uint8List.fromList([1]));
+    engine.sendL2(Uint8List.fromList([1])); // advance seq → 1
+    expect(engine.currentSeq, 1);
     final session = FileTransferSession(sendL2: engine.sendL2);
 
     engine.attach(session);
 
-    expect(engine.currentSeq, 1);
+    expect(engine.currentSeq, 0);
+  });
+
+  test('attach clears stale RX bytes from a prior transfer', () {
+    // A leftover partial frame from a previous transfer must not corrupt the
+    // parse of the new session's responses (desk-mate attach() clears _rx_buf).
+    final writes = <int>[];
+    final engine = L1Engine(writeFn: (chunk) => writes.addAll(chunk));
+    // Feed an incomplete frame (header claims 5 payload bytes, none delivered).
+    engine.onNotified(Uint8List.fromList([0xAB, 0x00, 0x00, 0x05, 0x00, 0x00]));
+
+    engine.attach(FileTransferSession(sendL2: engine.sendL2));
+    // A fresh, complete inbound data frame should now ACK cleanly at seq=7.
+    engine.onNotified(l1FrameForTest(0x00, 7, [0x0B, 0x00, 0x06, 0x00, 0x00]));
+
+    expect(writes, l1FrameForTest(0x10, 7, const []));
   });
 
   test('malformed oversized frame header does not block later valid frames',

@@ -49,6 +49,10 @@ class _ImagePageState extends ConsumerState<ImagePage> {
 
   // Square preview viewport side in px (set during layout; the frame == output).
   double _vp = 0;
+  // Active pointers over the preview viewport. While > 0 the page scroll is
+  // suppressed so a pinch-zoom / pan edits the image instead of scrolling the
+  // page out from under the user's fingers.
+  int _viewportPointers = 0;
 
   // Conversion options.
   int _size = kImageDefaultSize; // 360
@@ -248,6 +252,11 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         children: [
           Expanded(
             child: SingleChildScrollView(
+              // Freeze page scroll while the user is editing inside the preview
+              // (pinch-zoom / pan) so the gesture never leaks into scrolling.
+              physics: _viewportPointers > 0
+                  ? const NeverScrollableScrollPhysics()
+                  : null,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -345,27 +354,37 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         final double v = min(constraints.maxWidth, maxH);
         _vp = v;
         return Center(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              width: v,
-              height: v,
-              child: Stack(
-                children: [
-                  const Positioned.fill(child: ColoredBox(color: Color(_viewportBg))),
-                  InteractiveViewer(
-                    transformationController: _tc,
-                    minScale: 1.0,
-                    maxScale: 8.0,
-                    clipBehavior: Clip.hardEdge,
-                    onInteractionEnd: (_) => _rebuild(),
-                    child: SizedBox(
-                      width: v,
-                      height: v,
-                      child: RawImage(image: _srcImage, fit: BoxFit.contain),
+          child: Listener(
+            // Track fingers on the viewport so page scroll can be frozen while
+            // the image is being pinch-zoomed / panned (see SingleChildScrollView).
+            onPointerDown: (_) => setState(() => _viewportPointers++),
+            onPointerUp: (_) =>
+                setState(() => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
+            onPointerCancel: (_) =>
+                setState(() => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: v,
+                height: v,
+                child: Stack(
+                  children: [
+                    const Positioned.fill(
+                        child: ColoredBox(color: Color(_viewportBg))),
+                    InteractiveViewer(
+                      transformationController: _tc,
+                      minScale: 1.0,
+                      maxScale: 8.0,
+                      clipBehavior: Clip.hardEdge,
+                      onInteractionEnd: (_) => _rebuild(),
+                      child: SizedBox(
+                        width: v,
+                        height: v,
+                        child: RawImage(image: _srcImage, fit: BoxFit.contain),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

@@ -84,12 +84,24 @@ class L1Engine {
   // Session management
   // ---------------------------------------------------------------------------
 
-  /// Bind a [FileTransferSession].
+  /// Bind a [FileTransferSession] and reset the per-transfer L1 state.
   ///
-  /// Does NOT reset the sequence number — L1 seq is a connection-level counter.
-  /// Resetting on attach causes the device to discard BEGIN_REQ as a stale frame.
+  /// Per desk-mate PROTOCOL.md §三 every transfer's handshake is sent as
+  /// `L1[seq=0] { BEGIN_REQ }`, and the reference host (`protocols/l1_engine.py`
+  /// `attach()`) resets both the sequence counter and the RX buffer on each
+  /// attach. The device firmware is validated against that host, so it expects
+  /// each file-transfer session to start at seq 0 — the BEGIN_REQ handshake
+  /// re-syncs the device's own seq expectation.
+  ///
+  /// Without this, the FIRST transfer works (a fresh connection already sits at
+  /// seq 0) but a SECOND transfer would start at the continued counter, the
+  /// device ignores its BEGIN_REQ, and negotiation times out. The dedup guard in
+  /// §118 keys on the L2 `block_seq`, not the L1 seq, so resetting the L1 seq at
+  /// the start of every transfer is safe.
   void attach(FileTransferSession session) {
     _session = session;
+    _seq = 0;
+    _rxBuf.clear();
   }
 
   /// Detach the current session without sending any teardown.
