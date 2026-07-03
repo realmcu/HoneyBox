@@ -12,14 +12,16 @@ import '../../providers/transfer_provider.dart';
 import '../../services/converter.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
+import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 
 /// Page for converting a picked video **or GIF** to a device-playable
-/// AVI(CVID) and sending it over BLE. Mirrors the miniprogram video flow:
-/// pick (mp4/mov or GIF) → first-frame crop box (1:1 lock = cover / free =
-/// stretch) → size 240/360/480 → fps 10/15/20/24 → quality LOW/MED/HIGH →
-/// convert (native Cinepak) → send TYPE.video. For a transparent GIF the user
-/// can pick the background color composited under transparent pixels.
+/// AVI(CVID) and sending it over BLE. Flow: pick (mp4/mov or GIF) → frame the
+/// first frame in a fixed square pinch-zoom viewport (whatever is framed is
+/// encoded; outside-frame area = background) → size 240/360/480 → fps
+/// 10/15/20/24 → quality LOW/MED/HIGH → background color (the letterbox fill,
+/// and the fill under transparent GIF pixels) → convert (native Cinepak) →
+/// send TYPE.video.
 class VideoPage extends ConsumerStatefulWidget {
   final String deviceName;
   final String deviceId;
@@ -59,7 +61,6 @@ class _VideoPageState extends ConsumerState<VideoPage> {
 
   String? _selectedName;
   String? _srcPath;
-  bool _isGif = false;
   String _fileName = 'video.avi';
   int _sourceSize = 0;
 
@@ -152,8 +153,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       final video = await _picker.pickVideo(source: ImageSource.gallery);
       if (video == null) return;
       final len = await File(video.path).length();
-      await _loadMedia(
-          path: video.path, name: video.name, size: len, isGif: false);
+      await _loadMedia(path: video.path, name: video.name, size: len);
     } catch (e) {
       _snack('选择视频失败: $e');
     }
@@ -188,7 +188,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         _snack('这不是 GIF 动图（可能已被转为静态图）');
         return;
       }
-      await _loadMedia(path: path, name: f.name, size: f.size, isGif: true);
+      await _loadMedia(path: path, name: f.name, size: f.size);
     } catch (e) {
       _snack('选择 GIF 失败: $e');
     }
@@ -199,7 +199,6 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     required String path,
     required String name,
     required int size,
-    required bool isGif,
   }) async {
     ui.Image? thumb;
     int tw = 0;
@@ -225,7 +224,6 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     setState(() {
       _selectedName = name;
       _srcPath = path;
-      _isGif = isGif;
       _sourceSize = size;
       _fileName = '$base.avi';
       _thumb = thumb;
@@ -434,10 +432,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                         (f) => _onFpsTap(f), (f) => '$f'),
                     const SizedBox(height: 8),
                     _buildQualityRow(theme),
-                    if (_isGif) ...[
-                      const SizedBox(height: 8),
-                      _buildBgColorRow(theme, cs),
-                    ],
+                    const SizedBox(height: 8),
+                    _buildBgColorRow(theme, cs),
                     const SizedBox(height: 12),
                     _buildConvInfo(theme, cs),
                   ],
@@ -648,33 +644,26 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     );
   }
 
+  // Background fill: composited under transparent GIF pixels, and used as the
+  // letterbox color when the frame is zoomed out inside the square viewport.
   Widget _buildBgColorRow(ThemeData theme, ColorScheme cs) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-            width: 40, child: Text('背景', style: theme.textTheme.titleSmall)),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: SizedBox(
+              width: 40, child: Text('背景', style: theme.textTheme.titleSmall)),
+        ),
         const SizedBox(width: 8),
-        ..._bgColors.map((c) {
-          final bool sel = _bgColor == c;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GestureDetector(
-              onTap: _isBusy ? null : () => _onBgTap(c),
-              child: Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: Color(c),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: sel ? cs.primary : cs.outlineVariant,
-                    width: sel ? 3 : 1,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }),
+        Expanded(
+          child: ColorSwatchStrip(
+            presets: _bgColors,
+            selected: _bgColor,
+            onChanged: _onBgTap,
+            enabled: !_isBusy,
+          ),
+        ),
       ],
     );
   }

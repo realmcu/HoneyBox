@@ -238,3 +238,112 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
     );
   }
 }
+
+/// A row (wrapping) of preset color swatches followed by a palette button that
+/// opens the HSV [showColorPickerDialog]. The active color is highlighted; if
+/// it isn't one of [presets] (picked from the palette), an extra swatch for it
+/// is appended so the current choice stays visible. Colors are opaque ARGB ints.
+class ColorSwatchStrip extends StatelessWidget {
+  final List<int> presets;
+  final int selected;
+  final ValueChanged<int> onChanged;
+  final bool enabled;
+  final double size;
+
+  const ColorSwatchStrip({
+    super.key,
+    required this.presets,
+    required this.selected,
+    required this.onChanged,
+    this.enabled = true,
+    this.size = 28,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isCustom = !presets.contains(selected);
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final c in presets)
+          _Swatch(
+            color: c,
+            selected: c == selected,
+            size: size,
+            onTap: enabled ? () => onChanged(c) : null,
+          ),
+        if (isCustom) _Swatch(color: selected, selected: true, size: size),
+        _PaletteButton(
+          size: size,
+          onTap: enabled
+              ? () async {
+                  final picked = await showColorPickerDialog(context, selected);
+                  if (picked != null && context.mounted) onChanged(picked);
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
+class _Swatch extends StatelessWidget {
+  final int color;
+  final bool selected;
+  final double size;
+  final VoidCallback? onTap;
+
+  const _Swatch({
+    required this.color,
+    required this.selected,
+    required this.size,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: Color(color),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? cs.primary : cs.outlineVariant,
+            width: selected ? 3 : 1,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PaletteButton extends StatelessWidget {
+  final double size;
+  final VoidCallback? onTap;
+
+  const _PaletteButton({required this.size, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest,
+          shape: BoxShape.circle,
+          border: Border.all(color: cs.outlineVariant),
+        ),
+        child: Icon(Icons.palette_outlined, size: size * 0.55, color: cs.primary),
+      ),
+    );
+  }
+}

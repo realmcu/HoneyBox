@@ -408,9 +408,6 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
 
   Widget _buildColorRow(ThemeData theme, ColorScheme cs, String label,
       List<int> colors, int selected, void Function(int) onTap) {
-    // When the active color isn't one of the presets (picked from the palette),
-    // show it as an extra highlighted swatch so the current choice stays visible.
-    final bool isCustom = !colors.contains(selected);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -422,61 +419,14 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
           ),
         ),
         Expanded(
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              for (final c in colors)
-                _swatch(cs, c, sel: c == selected, onTap: () => onTap(c)),
-              if (isCustom) _swatch(cs, selected, sel: true),
-              _paletteButton(cs, selected, onTap),
-            ],
+          child: ColorSwatchStrip(
+            presets: colors,
+            selected: selected,
+            onChanged: onTap,
+            enabled: !_isSending,
           ),
         ),
       ],
-    );
-  }
-
-  Widget _swatch(ColorScheme cs, int color,
-      {required bool sel, VoidCallback? onTap}) {
-    return GestureDetector(
-      onTap: (_isSending || onTap == null) ? null : onTap,
-      child: Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          color: Color(color),
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: sel ? cs.primary : cs.outlineVariant,
-            width: sel ? 3 : 1,
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Opens the HSV palette; the picked color flows through the same [onTap]
-  // handler as the preset swatches (setState + rebuild).
-  Widget _paletteButton(ColorScheme cs, int current, void Function(int) onTap) {
-    return GestureDetector(
-      onTap: _isSending
-          ? null
-          : () async {
-              final picked = await showColorPickerDialog(context, current);
-              if (picked != null && mounted) onTap(picked);
-            },
-      child: Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerHighest,
-          shape: BoxShape.circle,
-          border: Border.all(color: cs.outlineVariant),
-        ),
-        child: Icon(Icons.palette_outlined, size: 16, color: cs.primary),
-      ),
     );
   }
 

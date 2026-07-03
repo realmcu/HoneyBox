@@ -11,6 +11,7 @@ import '../../providers/transfer_provider.dart';
 import '../../services/image_bin.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
+import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 
 /// Page for converting a picked image to a device RGB565 `.bin` and sending it
@@ -34,7 +35,17 @@ class ImagePage extends ConsumerStatefulWidget {
 
 const List<int> _sizePresets = [240, 360, 480];
 const double _previewMaxHRatio = 0.5; // viewport max height = 50% of screen
-const int _viewportBg = 0xFF000000; // letterbox / out-of-frame fill
+
+// Common background (letterbox / out-of-frame) colors; the palette button lets
+// the user pick any color beyond these.
+const List<int> _bgColors = [
+  0xFF000000, // black
+  0xFFFFFFFF, // white
+  0xFFFF3B30, // red
+  0xFF34C759, // green
+  0xFF007AFF, // blue
+  0xFFFFCC00, // yellow
+];
 
 class _ImagePageState extends ConsumerState<ImagePage> {
   final _picker = ImagePicker();
@@ -57,6 +68,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   // Conversion options.
   int _size = kImageDefaultSize; // 360
   bool _dither = false;
+  int _bgColor = 0xFF000000; // viewport letterbox / out-of-frame fill
 
   // Conversion result. RLE-compressed vs uncompressed are both computed; the
   // smaller wins automatically (no user toggle), and both sizes are shown.
@@ -177,7 +189,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         scale: scaleOut,
         tx: txOut,
         ty: tyOut,
-        bgColor: _viewportBg,
+        bgColor: _bgColor,
       );
       final ImageBinResult result = buildImageBinAdaptive(
         img.rgba,
@@ -213,6 +225,12 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   void _onDitherChange(bool v) {
     if (_isSending) return;
     setState(() => _dither = v);
+    _rebuild();
+  }
+
+  void _onBgColorTap(int c) {
+    if (_isSending) return;
+    setState(() => _bgColor = c);
     _rebuild();
   }
 
@@ -269,6 +287,8 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                     _buildViewControls(theme, cs),
                     const SizedBox(height: 16),
                     _buildSizeSelector(theme, cs),
+                    const SizedBox(height: 8),
+                    _buildBgColorRow(theme, cs),
                     const SizedBox(height: 8),
                     _buildToggles(theme, cs),
                     const SizedBox(height: 12),
@@ -369,8 +389,8 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                 height: v,
                 child: Stack(
                   children: [
-                    const Positioned.fill(
-                        child: ColoredBox(color: Color(_viewportBg))),
+                    Positioned.fill(
+                        child: ColoredBox(color: Color(_bgColor))),
                     InteractiveViewer(
                       transformationController: _tc,
                       minScale: 1.0,
@@ -425,6 +445,29 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                 onSelected: _isSending ? null : (_) => _onSizeTap(s),
               ),
             )),
+      ],
+    );
+  }
+
+  // Background fill for the letterbox / out-of-frame area (visible when the
+  // image is zoomed out or panned past an edge inside the square viewport).
+  Widget _buildBgColorRow(ThemeData theme, ColorScheme cs) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text('背景', style: theme.textTheme.titleSmall),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ColorSwatchStrip(
+            presets: _bgColors,
+            selected: _bgColor,
+            onChanged: _onBgColorTap,
+            enabled: !_isSending,
+          ),
+        ),
       ],
     );
   }
