@@ -9,6 +9,7 @@ import '../../providers/transfer_provider.dart';
 import '../../services/image_bin.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
+import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 
 /// Page for rendering danmaku text to a device RGB565 `.bin` (uncompressed)
@@ -37,7 +38,8 @@ const List<(String, String)> _fontFamilies = [
   ('等宽', 'monospace'),
 ];
 
-// Text colors — common pure colors that map cleanly to RGB565.
+// Text colors — the common ones; less-used cyan / magenta are dropped and
+// reachable via the palette button instead.
 const List<int> _textColors = [
   0xFFFFFFFF, // white
   0xFF000000, // black
@@ -45,8 +47,6 @@ const List<int> _textColors = [
   0xFFFF0000, // red
   0xFF00FF00, // green
   0xFF0000FF, // blue
-  0xFF00FFFF, // cyan
-  0xFFFF00FF, // magenta
 ];
 
 // Background — pure red / green / blue / white.
@@ -408,36 +408,75 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
 
   Widget _buildColorRow(ThemeData theme, ColorScheme cs, String label,
       List<int> colors, int selected, void Function(int) onTap) {
+    // When the active color isn't one of the presets (picked from the palette),
+    // show it as an extra highlighted swatch so the current choice stays visible.
+    final bool isCustom = !colors.contains(selected);
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-            width: 72,
-            child: Text(label, style: theme.textTheme.titleSmall)),
+          width: 72,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(label, style: theme.textTheme.titleSmall),
+          ),
+        ),
         Expanded(
           child: Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: colors.map((c) {
-              final bool sel = c == selected;
-              return GestureDetector(
-                onTap: _isSending ? null : () => onTap(c),
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: Color(c),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: sel ? cs.primary : cs.outlineVariant,
-                      width: sel ? 3 : 1,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              for (final c in colors)
+                _swatch(cs, c, sel: c == selected, onTap: () => onTap(c)),
+              if (isCustom) _swatch(cs, selected, sel: true),
+              _paletteButton(cs, selected, onTap),
+            ],
           ),
         ),
       ],
+    );
+  }
+
+  Widget _swatch(ColorScheme cs, int color,
+      {required bool sel, VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: (_isSending || onTap == null) ? null : onTap,
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: Color(color),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: sel ? cs.primary : cs.outlineVariant,
+            width: sel ? 3 : 1,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Opens the HSV palette; the picked color flows through the same [onTap]
+  // handler as the preset swatches (setState + rebuild).
+  Widget _paletteButton(ColorScheme cs, int current, void Function(int) onTap) {
+    return GestureDetector(
+      onTap: _isSending
+          ? null
+          : () async {
+              final picked = await showColorPickerDialog(context, current);
+              if (picked != null && mounted) onTap(picked);
+            },
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest,
+          shape: BoxShape.circle,
+          border: Border.all(color: cs.outlineVariant),
+        ),
+        child: Icon(Icons.palette_outlined, size: 16, color: cs.primary),
+      ),
     );
   }
 
