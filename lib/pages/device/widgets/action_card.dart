@@ -3,14 +3,12 @@ import 'package:flutter/material.dart';
 class ActionCard extends StatefulWidget {
   final IconData icon;
   final String title;
-  final String description;
   final VoidCallback? onTap;
 
   const ActionCard({
     super.key,
     required this.icon,
     required this.title,
-    required this.description,
     this.onTap,
   });
 
@@ -22,7 +20,6 @@ class _ActionCardState extends State<ActionCard>
     with SingleTickerProviderStateMixin {
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
-  bool _pressed = false;
 
   @override
   void initState() {
@@ -57,18 +54,9 @@ class _ActionCardState extends State<ActionCard>
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: widget.onTap,
-          onTapDown: (_) {
-            _pressed = true;
-            _scaleController.forward();
-          },
-          onTapUp: (_) {
-            _pressed = false;
-            _scaleController.reverse();
-          },
-          onTapCancel: () {
-            _pressed = false;
-            _scaleController.reverse();
-          },
+          onTapDown: (_) => _scaleController.forward(),
+          onTapUp: (_) => _scaleController.reverse(),
+          onTapCancel: () => _scaleController.reverse(),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -87,12 +75,6 @@ class _ActionCardState extends State<ActionCard>
                 Text(
                   widget.title,
                   style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  widget.description,
-                  style: tt.bodySmall?.copyWith(height: 1.4),
-                  textAlign: TextAlign.center,
                 ),
               ],
             ),

@@ -27,6 +27,9 @@ const int _rleRunLen2 = 0; // feature_2
 /// Default (square) output edge length, matching the miniprogram.
 const int kImageDefaultSize = 360;
 
+/// gui_rgb_data_head_t size in bytes — precedes the payload in both encodings.
+const int _rgbDataHeaderBytes = 8;
+
 // ── RGB565 conversion ────────────────────────────────────────────────────────
 int _rgbToRgb565(int r, int g, int b) {
   return (((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)) & 0xFFFF;
@@ -249,10 +252,21 @@ Uint8List buildImageBin(
   bool compress = true,
   bool dither = false,
 }) {
+  final Uint8List pixelData = rgbaToRgb565Bytes(rgba, width, height, dither);
+  return _buildFromPixels(pixelData, width, height, compress);
+}
+
+/// Build the `.bin` from already-converted RGB565 [pixelData]. Split out so the
+/// adaptive builder can convert pixels once and produce both variants cheaply.
+Uint8List _buildFromPixels(
+  Uint8List pixelData,
+  int width,
+  int height,
+  bool compress,
+) {
   const int format = _pixelFormatRgb565;
   const int pixelBytes = 2;
 
-  final Uint8List pixelData = rgbaToRgb565Bytes(rgba, width, height, dither);
   final Uint8List header = _packRgbDataHeader(width, height, format, compress);
 
   if (!compress) {
@@ -281,4 +295,58 @@ Uint8List buildImageBin(
       height * 4, (imdcOffset + rle.compressed.length) & 0xFFFFFFFF, Endian.little);
 
   return _concat([header, imdc, offsetTable, rle.compressed]);
+}
+
+/// Result of [buildImageBinAdaptive]: [bin] is the smaller of the uncompressed
+/// and RLE-compressed encodings; [rawSize]/[rleSize] expose both sizes for a
+/// before/after comparison, and [compressed] says which one won.
+class ImageBinResult {
+  final Uint8List bin;
+  final bool compressed;
+  final int rawSize;
+  final int rleSize;
+  const ImageBinResult({
+    required this.bin,
+    required this.compressed,
+    required this.rawSize,
+    required this.rleSize,
+  });
+}
+
+/// Convert [rgba] once, encode it both uncompressed and RLE-compressed, and
+/// return whichever is smaller. RLE can be *larger* than raw for noisy/photo
+/// content (per-line + offset-table overhead), so picking adaptively always
+/// yields the smallest transfer without asking the user to choose.
+ImageBinResult buildImageBinAdaptive(
+  Uint8List rgba,
+  int width,
+  int height, {
+  bool dither = false,
+}) {
+  const int pixelBytes = 2; // RGB565
+  final Uint8List pixelData = rgbaToRgb565Bytes(rgba, width, height, dither);
+
+  // The uncompressed size is fixed by geometry (header + w*h*2), so derive it
+  // directly instead of materializing those bytes just to measure them.
+  final int rawSize = _rgbDataHeaderBytes + width * height * pixelBytes;
+
+  // RLE is data-dependent — it must actually be built to know its size.
+  final Uint8List rle = _buildFromPixels(pixelData, width, height, true);
+  if (rle.length < rawSize) {
+    return ImageBinResult(
+      bin: rle,
+      compressed: true,
+      rawSize: rawSize,
+      rleSize: rle.length,
+    );
+  }
+
+  // RLE didn't shrink it — materialize the uncompressed variant only now.
+  final Uint8List raw = _buildFromPixels(pixelData, width, height, false);
+  return ImageBinResult(
+    bin: raw,
+    compressed: false,
+    rawSize: rawSize,
+    rleSize: rle.length,
+  );
 }

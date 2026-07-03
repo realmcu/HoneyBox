@@ -1156,7 +1156,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
     }
 
     return Text(
-      _error ?? '点击快门开始投屏（H.264 为本地录制测试）',
+      _error ?? '点击快门开始投屏',
       style: TextStyle(
         color: _error != null ? _kRec : Colors.white54,
         fontSize: 13,

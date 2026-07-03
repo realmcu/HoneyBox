@@ -50,7 +50,6 @@ class _ImagePageState extends ConsumerState<ImagePage> {
 
   // Conversion options.
   int _size = kImageDefaultSize; // 360
-  bool _compress = true;
   bool _dither = false;
   bool _lockAspect = true; // true = 1:1 cover, false = free stretch
 
@@ -65,9 +64,13 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   Rect? _dragStartBox;
   Offset? _dragStartPos;
 
-  // Conversion result.
+  // Conversion result. RLE-compressed vs uncompressed are both computed; the
+  // smaller wins automatically (no user toggle), and both sizes are shown.
   Uint8List? _bin;
   int _binSize = 0;
+  int _rawSize = 0; // uncompressed .bin size
+  int _rleSize = 0; // RLE-compressed .bin size
+  bool _usedCompress = false; // whether RLE (the smaller one) was chosen
   bool _converting = false;
   int _rebuildSeq = 0;
 
@@ -129,6 +132,8 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         _fileName = '$base.bin';
         _bin = null;
         _binSize = 0;
+        _rawSize = 0;
+        _rleSize = 0;
         _pvW = 0; // force preview + crop re-init on next layout
         _pvH = 0;
         _cropN = _initCrop(_lockAspect);
@@ -183,17 +188,19 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         crop: _cropRect(),
         cover: _lockAspect,
       );
-      final Uint8List bin = buildImageBin(
+      final ImageBinResult result = buildImageBinAdaptive(
         img.rgba,
         img.width,
         img.height,
-        compress: _compress,
         dither: _dither,
       );
       if (token != _rebuildSeq || !mounted) return;
       setState(() {
-        _bin = bin;
-        _binSize = bin.length;
+        _bin = result.bin;
+        _binSize = result.bin.length;
+        _rawSize = result.rawSize;
+        _rleSize = result.rleSize;
+        _usedCompress = result.compressed;
         _converting = false;
       });
     } catch (e) {
@@ -209,12 +216,6 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   void _onSizeTap(int size) {
     if (_isSending || size == _size) return;
     setState(() => _size = size);
-    _rebuild();
-  }
-
-  void _onCompressChange(bool v) {
-    if (_isSending) return;
-    setState(() => _compress = v);
     _rebuild();
   }
 
@@ -579,57 +580,96 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   }
 
   Widget _buildToggles(ThemeData theme, ColorScheme cs) {
+    // RLE compression is now chosen automatically (smaller of RLE/uncompressed),
+    // so only the dither option remains user-facing.
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: const Text('抖动 (Floyd–Steinberg)'),
+      subtitle: const Text('改善渐变，降低色带'),
+      value: _dither,
+      onChanged: _isSending ? null : _onDitherChange,
+    );
+  }
+
+  Widget _buildBinInfo(ThemeData theme, ColorScheme cs) {
+    final tt = theme.textTheme;
+
+    // While converting, or before the first result, keep a simple single line.
+    if (_converting || _binSize == 0) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text('原图 ${formatFileSize(_sourceSize)}',
+              style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+          Row(
+            children: [
+              if (_converting)
+                const Padding(
+                  padding: EdgeInsets.only(right: 8),
+                  child: SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                ),
+              Text(_converting ? '转换中…' : '—',
+                  style: tt.bodyMedium?.copyWith(
+                      color: cs.primary, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ],
+      );
+    }
+
+    // Before/after comparison: both encodings shown, the chosen (smaller) one
+    // highlighted; RLE compression is applied automatically.
+    final int savePct = _rawSize > 0 && _binSize < _rawSize
+        ? (100 * (_rawSize - _binSize) / _rawSize).round()
+        : 0;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('RLE 压缩'),
-          subtitle: const Text('减小体积、加快传输'),
-          value: _compress,
-          onChanged: _isSending ? null : _onCompressChange,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('原图 ${formatFileSize(_sourceSize)}',
+                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+            Text('$_size×$_size · 已用 ${formatFileSize(_binSize)}',
+                style: tt.bodyMedium?.copyWith(
+                    color: cs.primary, fontWeight: FontWeight.w600)),
+          ],
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('抖动 (Floyd–Steinberg)'),
-          subtitle: const Text('改善渐变，降低色带'),
-          value: _dither,
-          onChanged: _isSending ? null : _onDitherChange,
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _sizeTag(cs, tt, '未压缩', _rawSize, !_usedCompress),
+            const SizedBox(width: 8),
+            _sizeTag(cs, tt, 'RLE 压缩', _rleSize, _usedCompress),
+            const Spacer(),
+            if (savePct > 0)
+              Text('省 $savePct%',
+                  style: tt.bodySmall?.copyWith(
+                      color: cs.secondary, fontWeight: FontWeight.w600)),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildBinInfo(ThemeData theme, ColorScheme cs) {
-    String right;
-    if (_converting) {
-      right = '转换中…';
-    } else if (_binSize > 0) {
-      right = '$_size×$_size · ${formatFileSize(_binSize)}';
-    } else {
-      right = '—';
-    }
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text('原图 ${formatFileSize(_sourceSize)}',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: cs.onSurfaceVariant)),
-        Row(
-          children: [
-            if (_converting)
-              const Padding(
-                padding: EdgeInsets.only(right: 8),
-                child: SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-            Text(right,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: cs.primary, fontWeight: FontWeight.w600)),
-          ],
+  Widget _sizeTag(
+      ColorScheme cs, TextTheme tt, String label, int bytes, bool selected) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: selected ? cs.primaryContainer : cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        '$label ${formatFileSize(bytes)}',
+        style: tt.bodySmall?.copyWith(
+          color: selected ? cs.primary : cs.onSurfaceVariant,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
         ),
-      ],
+      ),
     );
   }
 

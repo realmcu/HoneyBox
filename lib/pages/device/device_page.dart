@@ -93,32 +93,25 @@ class _DevicePageState extends ConsumerState<DevicePage>
     );
   }
 
+  void _open(String route) {
+    Navigator.pushNamed(
+      context,
+      route,
+      arguments: {
+        'deviceName': widget.deviceName,
+        'deviceId': widget.deviceId,
+      },
+    );
+  }
+
   static const _actions = [
+    _ActionItem(icon: Icons.image_outlined, title: '图片', route: '/image'),
     _ActionItem(
-        icon: Icons.image_outlined,
-        title: '图片',
-        desc: 'JPG / PNG\n发送到设备屏幕',
-        route: '/image'),
+        icon: Icons.chat_bubble_outline, title: '弹幕', route: '/danmaku'),
     _ActionItem(
-        icon: Icons.chat_bubble_outline,
-        title: '弹幕',
-        desc: '一行滚动文字\n发送到屏幕',
-        route: '/danmaku'),
+        icon: Icons.movie_creation_outlined, title: '视频 / GIF', route: '/video'),
     _ActionItem(
-        icon: Icons.movie_creation_outlined,
-        title: '视频 / GIF',
-        desc: 'MP4 / MOV / GIF\n转码后发送',
-        route: '/video'),
-    _ActionItem(
-        icon: Icons.live_tv_outlined,
-        title: '流媒体',
-        desc: '摄像头实时\n推流到设备',
-        route: '/stream'),
-    _ActionItem(
-        icon: Icons.wifi_tethering,
-        title: 'WiFi 配网',
-        desc: '热点配网并连接\n用于 WiFi 投屏',
-        route: '/wifi'),
+        icon: Icons.live_tv_outlined, title: '流媒体', route: '/stream'),
   ];
 
   @override
@@ -134,7 +127,7 @@ class _DevicePageState extends ConsumerState<DevicePage>
             onPressed: _onDisconnectTap,
             icon: const Icon(Icons.link_off, size: 18),
             label: const Text('断开'),
-            style: TextButton.styleFrom(foregroundColor: cs.error),
+            style: TextButton.styleFrom(foregroundColor: cs.onPrimary),
           ),
         ],
       ),
@@ -160,16 +153,30 @@ class _DevicePageState extends ConsumerState<DevicePage>
                           color: cs.primary, size: 22),
                     ),
                     const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('已连接',
-                            style:
-                                tt.titleSmall?.copyWith(color: cs.secondary)),
-                        const SizedBox(height: 2),
-                        Text(widget.deviceName,
-                            style: tt.bodySmall?.copyWith(color: cs.outline)),
-                      ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('已连接',
+                              style: tt.titleSmall
+                                  ?.copyWith(color: cs.secondary)),
+                          const SizedBox(height: 2),
+                          Text(widget.deviceName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style:
+                                  tt.bodySmall?.copyWith(color: cs.outline)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => _open('/wifi'),
+                      icon: const Icon(Icons.wifi_tethering, size: 18),
+                      label: const Text('WiFi 配网'),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
                     ),
                   ],
                 ),
@@ -179,18 +186,13 @@ class _DevicePageState extends ConsumerState<DevicePage>
                   crossAxisCount: 2,
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
-                  childAspectRatio: 0.85,
+                  childAspectRatio: 1.25,
                   physics: const BouncingScrollPhysics(),
                   children: _actions
                       .map((a) => ActionCard(
                             icon: a.icon,
                             title: a.title,
-                            description: a.desc,
-                            onTap: () => Navigator.pushNamed(context, a.route,
-                                arguments: {
-                                  'deviceName': widget.deviceName,
-                                  'deviceId': widget.deviceId,
-                                }),
+                            onTap: () => _open(a.route),
                           ))
                       .toList(),
                 ),
@@ -206,11 +208,7 @@ class _DevicePageState extends ConsumerState<DevicePage>
 class _ActionItem {
   final IconData icon;
   final String title;
-  final String desc;
   final String route;
   const _ActionItem(
-      {required this.icon,
-      required this.title,
-      required this.desc,
-      required this.route});
+      {required this.icon, required this.title, required this.route});
 }

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class AppTheme {
   AppTheme._();
 
-  static const Color primary = Color(0xFF1A73E8);
+  // Realtek brand blue — used as the app's primary accent and all app-bar
+  // backgrounds (with white foreground).
+  static const Color primary = Color(0xFF0072BC);
   static const Color onPrimary = Colors.white;
   static const Color primaryContainer = Color(0xFFD3E3FD);
   static const Color secondary = Color(0xFF34A853);
@@ -37,16 +40,17 @@ class AppTheme {
       colorScheme: _lightColorScheme,
       scaffoldBackgroundColor: background,
 
-      // ── AppBar ──
+      // ── AppBar ── (Realtek blue with white title/icons)
       appBarTheme: const AppBarTheme(
         scrolledUnderElevation: 0,
         centerTitle: true,
-        backgroundColor: surface,
-        foregroundColor: textPrimary,
+        backgroundColor: primary,
+        foregroundColor: onPrimary,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
         titleTextStyle: TextStyle(
-          color: textPrimary,
+          color: onPrimary,
           fontSize: 18,
           fontWeight: FontWeight.w600,
         ),
