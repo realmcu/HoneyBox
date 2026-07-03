@@ -175,11 +175,10 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     final src = _srcImage;
     if (src == null) return;
     final int token = ++_rebuildSeq;
-    setState(() {
-      _converting = true;
-      _bin = null;
-      _binSize = 0;
-    });
+    // Keep the previous result (bin + sizes) visible while re-converting so the
+    // info row and send button don't collapse/flash on every crop adjustment;
+    // they update in place once the (fast) conversion finishes.
+    setState(() => _converting = true);
     try {
       final RgbaImage img = await cropResizeToRgba(
         src,
@@ -594,8 +593,10 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   Widget _buildBinInfo(ThemeData theme, ColorScheme cs) {
     final tt = theme.textTheme;
 
-    // While converting, or before the first result, keep a simple single line.
-    if (_converting || _binSize == 0) {
+    // Only before the very first result show the simple single line. During a
+    // re-convert we keep the previous comparison rendered (below) so the row
+    // never collapses/reflows while dragging the crop box.
+    if (_binSize == 0) {
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -724,7 +725,9 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         ),
       );
     }
-    final bool canSend = _bin != null && !_converting && _selectedImage != null;
+    // Stay enabled during a re-convert (the retained bin is still valid) to
+    // avoid a color flash on each crop tweak; _send() no-ops while _converting.
+    final bool canSend = _bin != null && _selectedImage != null;
     return FilledButton.icon(
       onPressed: canSend ? _send : null,
       icon: const Icon(Icons.send),
