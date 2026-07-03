@@ -2,16 +2,20 @@ import 'dart:typed_data';
 
 import 'l2_file_transfer.dart';
 
-/// CRC-16/ARC with polynomial 0x8408 (reflected, init=0).
+/// CRC-16/CCITT-FALSE — polynomial 0x1021, init 0xFFFF, no input/output
+/// reflection, no final XOR. Per desk-mate PROTOCOL.md §2.1 the L1 CRC16
+/// covers **only the L2 payload** (not the frame header / crc / seq fields);
+/// an empty payload (ACK frames) therefore yields the init value 0xFFFF.
+/// Self-check: crc16("123456789") == 0x29B1.
 int _crc16(Uint8List data) {
-  int crc = 0;
+  int crc = 0xFFFF;
   for (int i = 0; i < data.length; i++) {
-    crc ^= data[i];
+    crc ^= (data[i] << 8) & 0xFFFF;
     for (int j = 0; j < 8; j++) {
-      if (crc & 1 != 0) {
-        crc = (crc >> 1) ^ 0x8408;
+      if ((crc & 0x8000) != 0) {
+        crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
       } else {
-        crc = crc >> 1;
+        crc = (crc << 1) & 0xFFFF;
       }
     }
   }
@@ -25,16 +29,6 @@ void _writeU16(Uint8List data, int offset, int value) {
 
 int _readU16(List<int> data, int offset) {
   return (data[offset] << 8) | data[offset + 1];
-}
-
-/// Build the CRC input bytes for an L1 frame: [0xAB, ctrl, len_hi, len_lo] + payload.
-Uint8List _crcInput(int ctrl, Uint8List payload) {
-  final input = Uint8List(4 + payload.length);
-  input[0] = 0xAB;
-  input[1] = ctrl;
-  _writeU16(input, 2, payload.length);
-  input.setRange(4, 4 + payload.length, payload);
-  return input;
 }
 
 /// L1 frame control byte values.
@@ -119,8 +113,8 @@ class L1Engine {
 
   /// Build a full L1 frame (header + payload) as a single [Uint8List].
   ///
-  /// CRC covers: [0xAB, ctrl, len_hi, len_lo] + payload (not the seq field,
-  /// matching the miniprogram reference implementation).
+  /// Per desk-mate PROTOCOL.md §2.1 the CRC16 (CCITT-FALSE) covers **only the
+  /// L2 payload** — not the header, crc, or seq fields.
   Uint8List _buildL1Frame(int ctrl, Uint8List payload, {int? seqOverride}) {
     final seq = seqOverride ?? _seq;
     final header = Uint8List(8);
@@ -128,7 +122,7 @@ class L1Engine {
     header[1] = ctrl;
     _writeU16(header, 2, payload.length);
 
-    final crc = _crc16(_crcInput(ctrl, payload));
+    final crc = _crc16(payload);
     _writeU16(header, 4, crc);
     _writeU16(header, 6, seq);
 
@@ -212,18 +206,11 @@ class L1Engine {
       //    validation fails, we don't want to re-parse the same bytes).
       _rxBuf.removeRange(0, 8 + payloadLen);
 
-      // 7. Validate CRC.
-      final receivedCrc = _readU16(frameBytes, 4);
+      // 7. Parse header. Per PROTOCOL.md §6.1 the host does NOT validate the
+      //    inbound L1 CRC16 — framing relies on the 0xAB sync byte + length
+      //    field (only the device validates CRC strictly, on frames we send).
       final ctrl = frameBytes[1];
-      final crcPayload = frameBytes.sublist(8);
-      final expectedCrc = _crc16(_crcInput(ctrl, crcPayload));
-
       final frameSeq = _readU16(frameBytes, 6);
-
-      if (receivedCrc != expectedCrc) {
-        // Checksum mismatch; skip this frame and continue.
-        continue;
-      }
 
       // 8. Dispatch by control byte.
       if (ctrl == _Ctrl.ack) {

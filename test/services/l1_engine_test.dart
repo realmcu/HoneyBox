@@ -4,26 +4,22 @@ import 'package:ebadge_app/services/l1_engine.dart';
 import 'package:ebadge_app/services/l2_file_transfer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+// CRC-16/CCITT-FALSE over the L2 payload only (PROTOCOL.md §2.1).
 int crc16ForTest(List<int> data) {
-  int crc = 0;
+  int crc = 0xFFFF;
   for (final byte in data) {
-    crc ^= byte;
+    crc ^= (byte << 8) & 0xFFFF;
     for (int i = 0; i < 8; i++) {
-      crc = (crc & 1) != 0 ? ((crc >> 1) ^ 0x8408) : (crc >> 1);
+      crc = (crc & 0x8000) != 0
+          ? (((crc << 1) ^ 0x1021) & 0xFFFF)
+          : ((crc << 1) & 0xFFFF);
     }
   }
   return crc & 0xFFFF;
 }
 
 Uint8List l1FrameForTest(int ctrl, int seq, List<int> payload) {
-  final crcInput = <int>[
-    0xAB,
-    ctrl,
-    payload.length >> 8,
-    payload.length & 0xFF,
-    ...payload
-  ];
-  final crc = crc16ForTest(crcInput);
+  final crc = crc16ForTest(payload); // payload only, no header
   return Uint8List.fromList([
     0xAB,
     ctrl,
@@ -38,7 +34,7 @@ Uint8List l1FrameForTest(int ctrl, int seq, List<int> payload) {
 }
 
 void main() {
-  test('sendL2 builds CRC over magic, control, length, and payload', () {
+  test('sendL2 builds CRC-16/CCITT-FALSE over the L2 payload only', () {
     final writes = <int>[];
     final engine = L1Engine(writeFn: (chunk) => writes.addAll(chunk));
 
@@ -48,8 +44,24 @@ void main() {
     expect(writes, l1FrameForTest(0x00, 0, [0x0B, 0x00, 0x01]));
   });
 
-  test('data frame receive sends ACK whose CRC includes magic and ack control',
-      () {
+  test('sendL2 matches PROTOCOL.md BEGIN_REQ example bytes (crc=0xD69B)', () {
+    final writes = <int>[];
+    final engine = L1Engine(writeFn: (chunk) => writes.addAll(chunk));
+
+    // PROTOCOL.md §5 example ①: BEGIN_REQ L2 payload (18 bytes), seq=0.
+    const payload = <int>[
+      0x10, 0x00, 0x01, 0x00, 0x0d, 0x01, 0x00, 0x00, 0x27, 0x10, //
+      0x08, 0x00, 0x05, 0x61, 0x2e, 0x70, 0x6e, 0x67,
+    ];
+    engine.sendL2(Uint8List.fromList(payload));
+
+    expect(writes, [
+      0xab, 0x00, 0x00, 0x12, 0xd6, 0x9b, 0x00, 0x00, //
+      ...payload,
+    ]);
+  });
+
+  test('data frame receive sends ACK (empty payload → CRC 0xFFFF)', () {
     final writes = <int>[];
     final engine = L1Engine(writeFn: (chunk) => writes.addAll(chunk));
 
