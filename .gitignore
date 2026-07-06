@@ -1,0 +1,33 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+
+# Kotlin local cache
+.kotlin/
+
+# Android Studio (ignore entire IDE config)
+.idea/
+
+# Signing keys / keystores (sensitive - never commit)
+*.jks
+*.keystore
+
+# API keys and secrets (sensitive - never commit)
+assert/amap.key
+*.key
+
+# Temporary demo files
+assert/_demo_tmp/
+assert/send_jpg_sequence.py
+local.properties
