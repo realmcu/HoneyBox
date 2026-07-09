@@ -217,12 +217,16 @@ class EncoderStats {
   /// Size of the most recently encoded frame, in bytes.
   final int lastBytes;
 
+  /// Cumulative bytes of key (I) frames, so the UI can average I vs P separately.
+  final int keyBytes;
+
   const EncoderStats({
     this.frames = 0,
     this.keyframes = 0,
     this.bytes = 0,
     this.fps = 0,
     this.lastBytes = 0,
+    this.keyBytes = 0,
   });
 }
 
@@ -299,6 +303,7 @@ class EncoderService {
           bytes: (map['bytes'] as num?)?.toInt() ?? 0,
           fps: (map['fps'] as num?)?.toDouble() ?? 0,
           lastBytes: (map['lastBytes'] as num?)?.toInt() ?? 0,
+          keyBytes: (map['keyBytes'] as num?)?.toInt() ?? 0,
         ));
         break;
       case 'started':

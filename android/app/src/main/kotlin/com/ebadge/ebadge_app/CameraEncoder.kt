@@ -145,6 +145,7 @@ class CameraEncoder(
     private var frameCount = 0
     private var keyframeCount = 0
     private var totalBytes = 0L
+    private var keyframeBytes = 0L // cumulative key (I) frame bytes, for I/P avg
     private var lastFrameBytes = 0
     private var firstPtsUs = -1L
     private var lastPtsUs = 0L
@@ -738,7 +739,10 @@ class CameraEncoder(
     /** Update live stats for one encoded frame (streaming and/or recording). */
     private fun countFrame(encoded: ByteArray, isKey: Boolean, ptsNs: Long) {
         frameCount++
-        if (isKey) keyframeCount++
+        if (isKey) {
+            keyframeCount++
+            keyframeBytes += encoded.size
+        }
         totalBytes += encoded.size
         lastFrameBytes = encoded.size
         val ptsUs = ptsNs / 1000
@@ -860,6 +864,7 @@ class CameraEncoder(
         frameCount = 0
         keyframeCount = 0
         totalBytes = 0L
+        keyframeBytes = 0L
         lastFrameBytes = 0
         firstPtsUs = -1L
         lastPtsUs = 0L
@@ -960,7 +965,10 @@ class CameraEncoder(
                         h264Csd = bytes
                     } else {
                         frameCount++
-                        if (isKey) keyframeCount++
+                        if (isKey) {
+                            keyframeCount++
+                            keyframeBytes += info.size
+                        }
                         lastFrameBytes = info.size
                         if (firstPtsUs < 0) firstPtsUs = info.presentationTimeUs
                         lastPtsUs = info.presentationTimeUs
@@ -998,6 +1006,7 @@ class CameraEncoder(
         val frames = frameCount
         val keyframes = keyframeCount
         val bytes = totalBytes
+        val keyBytes = keyframeBytes
         val lastB = lastFrameBytes
         mainHandler.post {
             events.onEvent(
@@ -1006,6 +1015,7 @@ class CameraEncoder(
                     "frames" to frames,
                     "keyframes" to keyframes,
                     "bytes" to bytes,
+                    "keyBytes" to keyBytes,
                     "fps" to fps,
                     "lastBytes" to lastB,
                 ),

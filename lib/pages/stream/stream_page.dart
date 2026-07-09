@@ -110,12 +110,18 @@ class _StreamPageState extends ConsumerState<StreamPage>
   int _sentFrames = 0;
   int _sentKeys = 0;
   int _sentBytes = 0;
+  int _sentKeyBytes = 0; // key (I) frame bytes, for the H.264 I/P average
   final Stopwatch _sendClock = Stopwatch();
 
   /// Size of the latest frame (encoded, or transmitted while streaming), shown
   /// in the top-left info chip and refreshed on [_infoTimer].
   int _lastFrameBytes = 0;
   Timer? _infoTimer;
+
+  /// ~1 Hz snapshots of cumulative frame accounting — (epochMs, frames, keys,
+  /// bytes, keyBytes) — so the info-chip average can cover just a recent window
+  /// (last 5 s, or one I-frame interval for H.264) instead of the whole run.
+  final List<(int, int, int, int, int)> _frameSnaps = [];
 
   /// Rolling measurement of the *actual* transmitted rate + key-frame spacing,
   /// so we can confirm whether the run honours the configured fps / I-interval.
@@ -155,6 +161,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
           _result = null;
           _stats = const EncoderStats();
           _lastFrameBytes = 0;
+          _frameSnaps.clear();
           _actualW = w;
           _actualH = h;
         });
@@ -361,6 +368,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
     _sentFrames = 0;
     _sentKeys = 0;
     _sentBytes = 0;
+    _sentKeyBytes = 0;
     _tickFrames = 0;
     _tickMs = 0;
     _lastKeyIndex = -1;
@@ -398,6 +406,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
     _sentFrames = 0;
     _sentKeys = 0;
     _sentBytes = 0;
+    _sentKeyBytes = 0;
     _tickFrames = 0;
     _tickMs = 0;
     _lastKeyIndex = -1;
@@ -461,6 +470,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
         _tickFrames = _sentFrames;
         _tickMs = nowMs;
       }
+      _snapshotFrameTotals();
       if (mounted) setState(() {});
     });
   }
@@ -485,6 +495,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
           _sentBytes += frame.length;
           if (isKey) {
             _sentKeys++;
+            _sentKeyBytes += frame.length;
             final nowMs = _sendClock.elapsedMilliseconds;
             if (_lastKeyIndex >= 0) {
               final df = _sentFrames - _lastKeyIndex;
@@ -763,6 +774,61 @@ class _StreamPageState extends ConsumerState<StreamPage>
   String _transportTag(EncoderConfig c) =>
       c.transport == StreamTransportKind.wifi ? 'WiFi' : 'BLE';
 
+  /// Current cumulative frame accounting — (frames, keys, bytes, keyBytes) —
+  /// from the active source: transmitted sums while streaming (matching the
+  /// transmitted "当前帧"), otherwise the native encoded stats.
+  (int, int, int, int) _frameTotals() => _streaming
+      ? (_sentFrames, _sentKeys, _sentBytes, _sentKeyBytes)
+      : (_stats.frames, _stats.keyframes, _stats.bytes, _stats.keyBytes);
+
+  /// Record a timestamped snapshot of [_frameTotals] for the rolling-window
+  /// average, dropping any older than the longest window we might report.
+  void _snapshotFrameTotals() {
+    final (frames, keys, bytes, keyBytes) = _frameTotals();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    _frameSnaps.add((nowMs, frames, keys, bytes, keyBytes));
+    const retainMs = 60 * 1000;
+    while (_frameSnaps.length > 2 && nowMs - _frameSnaps.first.$1 > retainMs) {
+      _frameSnaps.removeAt(0);
+    }
+  }
+
+  /// Average frame size over a recent window for the info chip, or null before
+  /// any frame lands in the window. The window is the last 5 s, or one I-frame
+  /// interval for H.264 (so it tracks the current GOP rather than the whole
+  /// run); it's measured as the delta of [_frameTotals] against a ~windowMs-old
+  /// snapshot, falling back to the run start until the window fills. H.264 is
+  /// split into average I-frame / P-frame; other formats report one average.
+  String? _avgFrameText() {
+    final isH264 = _config.format == EncoderFormat.h264;
+    final windowMs = (isH264 ? _config.iFrameIntervalSec : 5) * 1000;
+    final (frames, keys, bytes, keyBytes) = _frameTotals();
+    // Baseline = newest snapshot at least windowMs old; if none is that old the
+    // window hasn't filled yet, so measure from the run start (zeros).
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    int bFrames = 0, bKeys = 0, bBytes = 0, bKeyBytes = 0;
+    for (final s in _frameSnaps) {
+      if (nowMs - s.$1 < windowMs) break; // ordered old→new; rest are in-window
+      bFrames = s.$2;
+      bKeys = s.$3;
+      bBytes = s.$4;
+      bKeyBytes = s.$5;
+    }
+    final dFrames = frames - bFrames;
+    if (dFrames <= 0) return null;
+    final dKeys = keys - bKeys;
+    final dBytes = bytes - bBytes;
+    final dKeyBytes = keyBytes - bKeyBytes;
+    if (isH264) {
+      final dP = dFrames - dKeys;
+      final parts = <String>[];
+      if (dKeys > 0) parts.add('I ${_formatBytes(dKeyBytes ~/ dKeys)}');
+      if (dP > 0) parts.add('P ${_formatBytes((dBytes - dKeyBytes) ~/ dP)}');
+      return parts.isEmpty ? null : '平均 ${parts.join(' · ')}';
+    }
+    return '平均 ${_formatBytes(dBytes ~/ dFrames)}';
+  }
+
   /// Compact info chip (channel · format · resolution · fps) pinned to the
   /// preview's top-left. Shows the actual encoded size while recording.
   Widget _buildInfoChip() {
@@ -770,6 +836,10 @@ class _StreamPageState extends ConsumerState<StreamPage>
     final w = _encoding && _actualW > 0 ? _actualW : c.width;
     final h = _encoding && _actualH > 0 ? _actualH : c.height;
     final showFrame = _encoding && _lastFrameBytes > 0;
+    final avg = showFrame ? _avgFrameText() : null;
+    final frameLine = avg == null
+        ? '当前帧 ${_formatBytes(_lastFrameBytes)}'
+        : '当前帧 ${_formatBytes(_lastFrameBytes)} · $avg';
     return IgnorePointer(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -793,7 +863,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
             ),
             if (showFrame)
               Text(
-                '当前帧 ${_formatBytes(_lastFrameBytes)}',
+                frameLine,
                 style: const TextStyle(
                   color: _kAccent,
                   fontSize: 11,
