@@ -46,7 +46,13 @@ class TransferProgressNotifier extends StateNotifier<TransferState> {
   TransferProgressNotifier(this._ref) : super(const TransferState());
 
   /// Send a file via BLE. Sets up progress/complete/error callbacks.
-  void send(int fileType, Uint8List buffer, String filename) {
+  ///
+  /// When [trailingByte] is non-null it is appended as one extra byte at the
+  /// very end of [buffer], becoming the last byte of the transferred payload.
+  /// Used to tag the kind of a TYPE.image file for the device: 0 = picture,
+  /// 1 = danmaku.
+  void send(int fileType, Uint8List buffer, String filename,
+      {int? trailingByte}) {
     final bleManager = _ref.read(bleManagerProvider);
     final session = bleManager.session;
     if (session == null) {
@@ -82,7 +88,14 @@ class TransferProgressNotifier extends StateNotifier<TransferState> {
       );
     };
 
-    session.send(fileType, buffer, filename);
+    // Optionally append the one-byte content-kind tag (image=0, danmaku=1) so
+    // it rides along as the final byte of the payload.
+    final payload = trailingByte == null
+        ? buffer
+        : (Uint8List(buffer.length + 1)
+          ..setRange(0, buffer.length, buffer)
+          ..[buffer.length] = trailingByte & 0xFF);
+    session.send(fileType, payload, filename);
   }
 
   void abort() {

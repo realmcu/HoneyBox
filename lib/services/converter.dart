@@ -161,6 +161,43 @@ class ConverterService {
     }
   }
 
+  /// Compose a set of pre-framed RGBA [frames] (each [size]×[size], viewport
+  /// crop + background already baked in Dart) into a slideshow AVI(CVID) for the
+  /// 多图轮播 feature. Each image is encoded as a self-decodable key frame, then
+  /// held for `holds[i]` displayed frames so the muxed clip plays at [fps] for
+  /// the user's chosen total duration (`sum(holds) / fps` seconds). [holds] must
+  /// have the same length as [frames], each ≥ 1.
+  Future<VideoConvertResult> encodeSlideshow({
+    required List<Uint8List> frames,
+    required List<int> holds,
+    required int size,
+    int fps = 10,
+    int quality = 60,
+    void Function(int done, int total)? onProgress,
+  }) async {
+    _ensureHandler();
+    _activeProgress = onProgress;
+    try {
+      final res = await _method.invokeMethod('encodeFrames', {
+        'frames': frames,
+        'holds': holds,
+        'size': size,
+        'fps': fps,
+        'quality': quality,
+      });
+      final map = (res as Map).cast<dynamic, dynamic>();
+      return VideoConvertResult(
+        avi: map['avi'] as Uint8List,
+        width: (map['width'] as num).toInt(),
+        height: (map['height'] as num).toInt(),
+        frameCount: (map['frameCount'] as num).toInt(),
+        fps: (map['fps'] as num).toDouble(),
+      );
+    } finally {
+      _activeProgress = null;
+    }
+  }
+
   /// Convert the video or GIF at [path] to a device-playable AVI(CVID). Frames
   /// are sampled at [fps] (capped at the source rate), cropped/resized to
   /// [width]×[height] (must be multiples of 4), Cinepak-encoded and muxed. The

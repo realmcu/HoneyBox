@@ -342,6 +342,7 @@ class BleManager {
           _l1!.detach();
           _l1!.onAck = null;
         },
+        onLog: (String message) => debugPrint('L2: $message'),
       );
 
       // Enable the Stream Service notify (FFD5) if the device exposes it.

@@ -244,7 +244,9 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   void _send() {
     final bin = _bin;
     if (bin == null || _converting || _isSending) return;
-    ref.read(transferProgressProvider.notifier).send(TYPE.image, bin, _fileName);
+    ref
+        .read(transferProgressProvider.notifier)
+        .send(TYPE.image, bin, _fileName, trailingByte: 0); // 0 = 图片
   }
 
   @override

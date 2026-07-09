@@ -119,13 +119,13 @@ Future<RgbaImage> cropResizeToRgba(
   return RgbaImage(bd.buffer.asUint8List(), targetW, targetH);
 }
 
-/// Render [img] into an [outSize]×[outSize] RGBA using an affine transform that
-/// maps source pixels to output pixels: `output = src * scale + (tx, ty)`.
+/// Render [img] into an [outSize]×[outSize] [ui.Image] using an affine transform
+/// that maps source pixels to output pixels: `output = src * scale + (tx, ty)`.
 /// Anything outside the image (letterbox from the pinch-zoom viewport frame) is
-/// filled with [bgColor]. Used by the image page's viewport crop: the fixed
-/// square frame maps to the full output, so whatever is framed becomes the
-/// sent image.
-Future<RgbaImage> renderViewportRgba(
+/// filled with [bgColor]. The caller owns the returned image and must dispose
+/// it. Shared by [renderViewportRgba] (encode path) and the multi-image page's
+/// on-screen framed thumbnails, so both frame identically.
+Future<ui.Image> renderViewportImage(
   ui.Image img, {
   required int outSize,
   required double scale,
@@ -152,10 +152,33 @@ Future<RgbaImage> renderViewportRgba(
   );
   final ui.Picture picture = recorder.endRecording();
   final ui.Image out = await picture.toImage(outSize, outSize);
+  picture.dispose();
+  return out;
+}
+
+/// Render [img] into an [outSize]×[outSize] RGBA using the same affine transform
+/// as [renderViewportImage]. Used by the image page's viewport crop: the fixed
+/// square frame maps to the full output, so whatever is framed becomes the
+/// sent image.
+Future<RgbaImage> renderViewportRgba(
+  ui.Image img, {
+  required int outSize,
+  required double scale,
+  required double tx,
+  required double ty,
+  int bgColor = 0xFF000000,
+}) async {
+  final ui.Image out = await renderViewportImage(
+    img,
+    outSize: outSize,
+    scale: scale,
+    tx: tx,
+    ty: ty,
+    bgColor: bgColor,
+  );
   final ByteData? bd =
       await out.toByteData(format: ui.ImageByteFormat.rawRgba);
   out.dispose();
-  picture.dispose();
   if (bd == null) {
     throw StateError('图片像素读取失败');
   }

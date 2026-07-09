@@ -614,6 +614,78 @@ class VideoConverter {
         return Result(avi, size, size, frames.size, safeFps.toDouble())
     }
 
+    // ── multi-image carousel (多图轮播) ───────────────────────────────────────
+    // Compose a set of pre-framed RGBA images into a slideshow AVI(CVID). Each
+    // image is already rendered to size×size on the Flutter side (its viewport
+    // crop + background baked in), so there is no crop/resize here — just VQ.
+    //
+    // Each image becomes a forced key frame (self-decodable — "关键帧"); it is
+    // then held for holds[i] displayed frames so the muxed clip plays at [fps]
+    // for the user's chosen total duration. The held repeats are inter frames:
+    // once an inter frame reproduces itself byte-for-byte the encoder recon is a
+    // fixed point, so that frame is an idempotent no-op on the decoder and the
+    // rest of the hold can be duplicated without re-running the (costly) VQ —
+    // bounding real encodes to a few per image regardless of duration.
+    fun encodeFrames(
+        frames: List<ByteArray>,
+        holds: IntArray,
+        size: Int,
+        fps: Int,
+        quality: Int,
+        cancel: AtomicBoolean,
+        progress: Progress?,
+    ): Result {
+        require(size and 3 == 0) { "分辨率必须是 4 的倍数" }
+        require(frames.isNotEmpty()) { "没有图片" }
+        require(holds.size == frames.size) { "帧参数不匹配" }
+        val need = size * size * 4
+        val safeFps = maxOf(1, fps)
+
+        var total = 0
+        for (h in holds) total += maxOf(1, h)
+
+        val enc = CinepakEncoder.Encoder(
+            size, size,
+            CinepakEncoder.Options(quality = quality, refine = 3, strips = 2, skipThresh = 720, keyint = 0),
+        )
+        val out = ArrayList<ByteArray>(total)
+
+        for (i in frames.indices) {
+            if (cancel.get()) throw Cancelled()
+            val rgba = frames[i]
+            require(rgba.size >= need) { "图片像素数据不完整" }
+
+            out.add(enc.encode(rgba, forceKey = true))
+            progress?.onProgress(out.size, total)
+
+            val hold = maxOf(1, holds[i])
+            var h = 1
+            var prevInter: ByteArray? = null
+            while (h < hold) {
+                if (cancel.get()) throw Cancelled()
+                val inter = enc.encode(rgba, forceKey = false)
+                out.add(inter)
+                h++
+                progress?.onProgress(out.size, total)
+                if (prevInter != null && inter.contentEquals(prevInter)) {
+                    // Fixed point reached — duplicate the settled frame for the
+                    // remaining holds (idempotent on the decoder).
+                    while (h < hold) {
+                        out.add(inter)
+                        h++
+                        progress?.onProgress(out.size, total)
+                    }
+                    break
+                }
+                prevInter = inter
+            }
+        }
+
+        if (out.isEmpty()) throw RuntimeException("未能编码任何帧")
+        val avi = CvidAviMuxer.buildAvi(out, size, size, safeFps)
+        return Result(avi, size, size, out.size, safeFps.toDouble())
+    }
+
     private fun releaseRetriever(r: MediaMetadataRetriever) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) r.close() else r.release()

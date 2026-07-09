@@ -286,7 +286,7 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
     if (bin == null) return;
     ref
         .read(transferProgressProvider.notifier)
-        .send(TYPE.image, bin, 'danmaku.bin');
+        .send(TYPE.image, bin, 'danmaku.bin', trailingByte: 1); // 1 = 弹幕
   }
 
   @override

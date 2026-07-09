@@ -111,6 +111,8 @@ class _DevicePageState extends ConsumerState<DevicePage>
     _ActionItem(
         icon: Icons.movie_creation_outlined, title: '视频 / GIF', route: '/video'),
     _ActionItem(
+        icon: Icons.burst_mode_outlined, title: '多图轮播', route: '/slideshow'),
+    _ActionItem(
         icon: Icons.live_tv_outlined, title: '流媒体', route: '/stream'),
   ];
 

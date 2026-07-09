@@ -153,6 +153,7 @@ class MainActivity : FlutterActivity() {
                 "previewFrames" -> handlePreviewFrames(call, result)
                 "convertVideo" -> handleConvertVideo(call, result)
                 "encodeScroll" -> handleEncodeScroll(call, result)
+                "encodeFrames" -> handleEncodeFrames(call, result)
                 "cancelConvert" -> {
                     convertCancel?.set(true)
                     result.success(null)
@@ -356,6 +357,56 @@ class MainActivity : FlutterActivity() {
                 mainHandler.post { result.error("cancelled", "已取消", null) }
             } catch (e: Exception) {
                 mainHandler.post { result.error("encode_failed", e.message ?: "字幕滚动生成失败", null) }
+            }
+        }
+    }
+
+    // Compose pre-framed RGBA images (each size×size) into a slideshow AVI(CVID).
+    private fun handleEncodeFrames(call: MethodCall, result: MethodChannel.Result) {
+        val framesRaw = call.argument<List<Any?>>("frames")
+        val holdsRaw = call.argument<List<Any?>>("holds")
+        if (framesRaw == null || framesRaw.isEmpty() || holdsRaw == null ||
+            holdsRaw.size != framesRaw.size
+        ) {
+            result.error("bad_args", "frames/holds required", null)
+            return
+        }
+        val frames = try {
+            framesRaw.map { it as ByteArray }
+        } catch (_: Exception) {
+            result.error("bad_args", "frames must be byte arrays", null)
+            return
+        }
+        val holds = IntArray(holdsRaw.size) { (holdsRaw[it] as? Number)?.toInt() ?: 1 }
+        val size = call.argument<Int>("size") ?: 360
+        val fps = call.argument<Int>("fps") ?: 10
+        val quality = call.argument<Int>("quality") ?: 60
+
+        val cancel = AtomicBoolean(false)
+        convertCancel = cancel
+        val channel = converterChannel
+        converterExecutor.execute {
+            try {
+                val res = converter.encodeFrames(frames, holds, size, fps, quality, cancel) { done, total ->
+                    mainHandler.post {
+                        channel?.invokeMethod("onProgress", mapOf("done" to done, "total" to total))
+                    }
+                }
+                mainHandler.post {
+                    result.success(
+                        mapOf(
+                            "avi" to res.avi,
+                            "width" to res.width,
+                            "height" to res.height,
+                            "frameCount" to res.frameCount,
+                            "fps" to res.fps,
+                        ),
+                    )
+                }
+            } catch (e: VideoConverter.Cancelled) {
+                mainHandler.post { result.error("cancelled", "已取消", null) }
+            } catch (e: Exception) {
+                mainHandler.post { result.error("encode_failed", e.message ?: "合成失败", null) }
             }
         }
     }

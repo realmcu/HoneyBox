@@ -293,6 +293,13 @@ class FileTransferSession {
   void Function()? onComplete;
   void Function(String reason)? onError;
 
+  /// Optional diagnostic sink for handshake / control frames (BEGIN, END,
+  /// ABORT) and their L1 ACK/NAKs. DATA frames are deliberately **not** logged
+  /// through this (a transfer can have thousands — they would flood the log).
+  /// Kept as a callback so this class stays Flutter-free; the BLE layer routes
+  /// it to `debugPrint`.
+  void Function(String message)? onLog;
+
   // --------------------------------------------------------------------------
   // Construction
   // --------------------------------------------------------------------------
@@ -304,6 +311,7 @@ class FileTransferSession {
     this.onProgress,
     this.onComplete,
     this.onError,
+    this.onLog,
     TimerProvider? timerProvider,
   }) : _timerProvider = timerProvider;
 
@@ -353,12 +361,15 @@ class FileTransferSession {
     // Send BEGIN_REQ.
     final l2 = buildBeginReq(fileType, _totalSize, _chunkSize, filename);
     _pendingL1Seq = sendL2(l2);
+    _log('→ BEGIN_REQ  type=$fileType size=$_totalSize chunk=$_chunkSize '
+        'crc=${_hex(_crc32Val, 8)} name="$filename" (L1 seq=$_pendingL1Seq)');
     _startTimer(_negotiationTimeout, 'Wait for BEGIN_RSP timed out');
   }
 
   /// Abort the current transfer.
   void abort() {
     if (_state == L2State.idle) return;
+    _log('→ ABORT (user requested, state=$_state)');
     sendL2(buildAbort(0x01));
     _cleanUp();
   }
@@ -366,7 +377,10 @@ class FileTransferSession {
   /// Called by the L1 engine when an L2 frame arrives.
   void onL2Frame(Uint8List raw) {
     final frame = parseL2Frame(raw);
-    if (frame == null) return;
+    if (frame == null) {
+      _log('← malformed L2 frame (${raw.length} bytes)');
+      return;
+    }
 
     switch (frame.key) {
       case K.beginRsp:
@@ -376,8 +390,13 @@ class FileTransferSession {
         _onEndRsp(frame.value);
         break;
       case K.abort:
+        _log('← ABORT (peer, reason='
+            '${frame.value.isNotEmpty ? _hex(frame.value[0], 2) : "?"})');
         _fail('Peer aborted');
         break;
+      default:
+        _log('← unexpected L2 key=${_hex(frame.key, 2)} '
+            'len=${frame.value.length}');
     }
   }
 
@@ -387,17 +406,23 @@ class FileTransferSession {
     if (_state == L2State.idle) return;
 
     if (!ok) {
+      _log('← L1 NAK  seq=$seq (state=$_state)');
       _fail('NAK for seq $seq');
       return;
     }
 
-    if (_state == L2State.transferring) {
+    if (_state == L2State.negotiating) {
+      // L1-level ACK confirming BEGIN_REQ was delivered; the data phase still
+      // waits on the L2 BEGIN_RSP.
+      _log('← L1 ACK  BEGIN_REQ delivered (seq=$seq), awaiting BEGIN_RSP');
+    } else if (_state == L2State.transferring) {
       _clearTimer();
       _sentBytes += _lastChunkLen;
       if (_sentBytes > _totalSize) _sentBytes = _totalSize;
       onProgress?.call(_sentBytes, _totalSize);
       _sendNextChunk();
     } else if (_state == L2State.verifying) {
+      _log('← L1 ACK  END_REQ delivered (seq=$seq), awaiting END_RSP');
       // END_REQ was ACK'd -- wait for END_RSP.
       _startTimer(_verifyTimeout, 'Wait for END_RSP timed out');
     }
@@ -407,12 +432,21 @@ class FileTransferSession {
   // Internal helpers
   // --------------------------------------------------------------------------
 
+  void _log(String message) => onLog?.call(message);
+
+  /// Fixed-width lowercase hex, e.g. `_hex(0x1a, 2)` → `0x1a` (diagnostics).
+  String _hex(int value, int width) =>
+      '0x${value.toRadixString(16).padLeft(width, '0')}';
+
   void _sendNextChunk() {
     if (_sentBytes >= _totalSize) {
       // All data sent -- send END_REQ.
       _state = L2State.verifying;
       final l2 = buildEndReq(_crc32Val);
       _pendingL1Seq = sendL2(l2);
+      _log('→ END_REQ  crc=${_hex(_crc32Val, 8)} '
+          '($_dataSeq data frames / $_sentBytes bytes sent) '
+          '(L1 seq=$_pendingL1Seq)');
       _startTimer(_verifyTimeout, 'Wait for END_RSP timed out');
       return;
     }
@@ -429,7 +463,10 @@ class FileTransferSession {
   }
 
   void _onBeginRsp(Uint8List value) {
-    if (_state != L2State.negotiating) return;
+    if (_state != L2State.negotiating) {
+      _log('← BEGIN_RSP ignored (unexpected in state=$_state)');
+      return;
+    }
     _clearTimer();
 
     final status = value.isNotEmpty ? value[0] : 0;
@@ -439,6 +476,7 @@ class FileTransferSession {
         0x02: '存储空间不足',
         0x03: '不支持的文件类型',
       };
+      _log('← BEGIN_RSP REJECTED status=${_hex(status, 2)}');
       _fail('握手被拒绝: ${reasons[status] ?? '0x${status.toRadixString(16)}'}');
       return;
     }
@@ -448,13 +486,18 @@ class FileTransferSession {
       if (agreedChunkSize > 0) _chunkSize = agreedChunkSize;
     }
 
+    _log('← BEGIN_RSP ACCEPTED, agreed chunk=$_chunkSize — begin data phase');
     _state = L2State.transferring;
     _sendNextChunk();
   }
 
   void _onEndRsp(Uint8List value) {
-    if (_state != L2State.verifying) return;
+    if (_state != L2State.verifying) {
+      _log('← END_RSP ignored (unexpected in state=$_state)');
+      return;
+    }
     _clearTimer();
+    _log('← END_RSP  transfer complete & verified');
     _state = L2State.idle;
     onComplete?.call();
     _cleanUp();
@@ -484,7 +527,10 @@ class FileTransferSession {
   void _fail(String reason) {
     _clearTimer();
     if (_state != L2State.idle) {
+      _log('✗ FAIL (state=$_state): $reason → sending ABORT');
       sendL2(buildAbort(0x01));
+    } else {
+      _log('✗ FAIL: $reason');
     }
     onError?.call(reason);
     _cleanUp();

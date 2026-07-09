@@ -8,6 +8,7 @@ import 'pages/device/device_page.dart';
 import 'pages/image/image_page.dart';
 import 'pages/danmaku/danmaku_page.dart';
 import 'pages/video/video_page.dart';
+import 'pages/slideshow/slideshow_page.dart';
 import 'pages/stream/stream_page.dart';
 import 'pages/wifi/wifi_page.dart';
 
@@ -42,6 +43,12 @@ class EbadgeApp extends StatelessWidget {
             break;
           case '/video':
             page = VideoPage(
+              deviceName: args?['deviceName'] ?? '',
+              deviceId: args?['deviceId'] ?? '',
+            );
+            break;
+          case '/slideshow':
+            page = SlideshowPage(
               deviceName: args?['deviceName'] ?? '',
               deviceId: args?['deviceId'] ?? '',
             );
