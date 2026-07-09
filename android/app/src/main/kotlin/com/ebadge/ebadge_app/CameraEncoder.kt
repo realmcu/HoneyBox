@@ -682,6 +682,11 @@ class CameraEncoder(
         if (wantSw) {
             startCodecThread()
             renderer?.onRgbaFrame = { rgba, w, h, pts -> handleRgbaFrame(rgba, w, h, pts) }
+            // Throttle the readback feed to the configured fps (mirrors the H.264
+            // encoder-surface throttle set in startH264). Without it the software
+            // JPEG/MSV1 encoder ran on every camera frame, so the streamed frame
+            // rate followed the camera's AE-floor fps rather than the setting.
+            renderer?.setEncoderTargetFps(cfg?.fps ?: 0)
             renderer?.setSoftwareReadback(encWidth, encHeight)
         } else {
             renderer?.onRgbaFrame = null

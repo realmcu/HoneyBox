@@ -9,6 +9,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.view.TextureRegistry
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -24,10 +25,16 @@ class MainActivity : FlutterActivity() {
     private val wifiChannelName = "ebadge/wifi"
     private val converterChannelName = "ebadge/converter"
     private val systemChannelName = "ebadge/system"
+    private val playerChannelName = "ebadge/player"
 
     private var encoder: CameraEncoder? = null
     private var eventSink: EventChannel.EventSink? = null
     private var hotspot: HotspotManager? = null
+
+    // In-page video preview players (native MediaPlayer → Flutter texture),
+    // keyed by their texture id. One at a time in practice, but keyed for safety.
+    private var textureRegistry: TextureRegistry? = null
+    private val players = mutableMapOf<Long, VideoPreviewPlayer>()
 
     private val converter = VideoConverter()
     private var converterChannel: MethodChannel? = null
@@ -39,6 +46,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
 
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        textureRegistry = flutterEngine.renderer
 
         EventChannel(messenger, eventChannelName).setStreamHandler(
             object : EventChannel.StreamHandler {
@@ -142,9 +150,35 @@ class MainActivity : FlutterActivity() {
         converterCh.setMethodCallHandler { call, result ->
             when (call.method) {
                 "getVideoThumbnail" -> handleThumbnail(call, result)
+                "previewFrames" -> handlePreviewFrames(call, result)
                 "convertVideo" -> handleConvertVideo(call, result)
+                "encodeScroll" -> handleEncodeScroll(call, result)
                 "cancelConvert" -> {
                     convertCancel?.set(true)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(messenger, playerChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "create" -> handleCreatePlayer(call, result)
+                "play" -> {
+                    playerFor(call)?.play()
+                    result.success(null)
+                }
+                "pause" -> {
+                    playerFor(call)?.pause()
+                    result.success(null)
+                }
+                "seekTo" -> {
+                    playerFor(call)?.seekTo(call.argument<Int>("positionMs") ?: 0)
+                    result.success(null)
+                }
+                "dispose" -> {
+                    val id = (call.argument<Number>("id"))?.toLong()
+                    (if (id != null) players.remove(id) else null)?.release()
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -187,6 +221,31 @@ class MainActivity : FlutterActivity() {
                 }
             } catch (e: Exception) {
                 mainHandler.post { result.error("thumb_failed", e.message ?: "读取视频失败", null) }
+            }
+        }
+    }
+
+    private fun handlePreviewFrames(call: MethodCall, result: MethodChannel.Result) {
+        val path = call.argument<String>("path")
+        if (path == null) {
+            result.error("bad_args", "path required", null)
+            return
+        }
+        val maxCount = call.argument<Int>("maxCount") ?: 48
+        val maxEdge = call.argument<Int>("maxEdge") ?: 240
+        converterExecutor.execute {
+            try {
+                val clip = converter.previewFrames(path, maxCount, maxEdge)
+                mainHandler.post {
+                    result.success(
+                        mapOf(
+                            "frames" to clip.frames,
+                            "intervalMs" to clip.intervalMs,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                mainHandler.post { result.error("preview_failed", e.message ?: "读取预览帧失败", null) }
             }
         }
     }
@@ -253,6 +312,98 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun handleEncodeScroll(call: MethodCall, result: MethodChannel.Result) {
+        val strip = call.argument<ByteArray>("strip")
+        val stripW = call.argument<Int>("stripW") ?: 0
+        val stripH = call.argument<Int>("stripH") ?: 0
+        if (strip == null || stripW <= 0 || stripH <= 0) {
+            result.error("bad_args", "strip/stripW/stripH required", null)
+            return
+        }
+        val size = call.argument<Int>("size") ?: 360
+        // bgColor arrives as an int64 (ARGB > 0x7FFFFFFF), so read via Number.
+        val bgColor = (call.argument<Number>("bgColor"))?.toInt() ?: 0xFF000000.toInt()
+        val speed = call.argument<Int>("speed") ?: 120
+        val fps = call.argument<Int>("fps") ?: 15
+        val gap = call.argument<Int>("gap") ?: size
+        val quality = call.argument<Int>("quality") ?: 80
+        val maxFrames = call.argument<Int>("maxFrames") ?: 300
+
+        val cancel = AtomicBoolean(false)
+        convertCancel = cancel
+        val channel = converterChannel
+        converterExecutor.execute {
+            try {
+                val res = converter.encodeScrollAvi(
+                    strip, stripW, stripH, size, bgColor, speed, fps, gap, quality, maxFrames, cancel,
+                ) { done, total ->
+                    mainHandler.post {
+                        channel?.invokeMethod("onProgress", mapOf("done" to done, "total" to total))
+                    }
+                }
+                mainHandler.post {
+                    result.success(
+                        mapOf(
+                            "avi" to res.avi,
+                            "width" to res.width,
+                            "height" to res.height,
+                            "frameCount" to res.frameCount,
+                            "fps" to res.fps,
+                        ),
+                    )
+                }
+            } catch (e: VideoConverter.Cancelled) {
+                mainHandler.post { result.error("cancelled", "已取消", null) }
+            } catch (e: Exception) {
+                mainHandler.post { result.error("encode_failed", e.message ?: "字幕滚动生成失败", null) }
+            }
+        }
+    }
+
+    private fun playerFor(call: MethodCall): VideoPreviewPlayer? {
+        val id = (call.argument<Number>("id"))?.toLong() ?: return null
+        return players[id]
+    }
+
+    // Create a MediaPlayer-backed preview texture for [path]; the result is
+    // delivered only once the player is prepared (first frame renderable).
+    private fun handleCreatePlayer(call: MethodCall, result: MethodChannel.Result) {
+        val path = call.argument<String>("path")
+        val registry = textureRegistry
+        if (path == null || registry == null) {
+            result.error("bad_args", "path required", null)
+            return
+        }
+        val entry = registry.createSurfaceTexture()
+        val player = VideoPreviewPlayer(entry)
+        players[player.textureId] = player
+        var done = false
+        player.open(
+            path,
+            onReady = { w, h, dur ->
+                if (!done) {
+                    done = true
+                    result.success(
+                        mapOf(
+                            "textureId" to player.textureId,
+                            "width" to w,
+                            "height" to h,
+                            "durationMs" to dur,
+                        ),
+                    )
+                }
+            },
+            onError = { msg ->
+                if (!done) {
+                    done = true
+                    players.remove(player.textureId)
+                    player.release()
+                    result.error("player_failed", msg, null)
+                }
+            },
+        )
+    }
+
     private fun ensureHotspot(): HotspotManager {
         val existing = hotspot
         if (existing != null) return existing
@@ -289,6 +440,9 @@ class MainActivity : FlutterActivity() {
         encoder = null
         hotspot?.stop()
         hotspot = null
+        players.values.forEach { it.release() }
+        players.clear()
+        textureRegistry = null
         convertCancel?.set(true)
         converterChannel = null
         converterExecutor.shutdownNow()

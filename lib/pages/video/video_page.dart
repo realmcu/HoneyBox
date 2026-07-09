@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' show min;
 import 'dart:ui' as ui;
@@ -10,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../providers/transfer_provider.dart';
 import '../../services/converter.dart';
+import '../../services/video_preview_player.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
 import '../shared/color_picker_dialog.dart';
@@ -17,11 +19,14 @@ import '../shared/file_send_layout.dart';
 
 /// Page for converting a picked video **or GIF** to a device-playable
 /// AVI(CVID) and sending it over BLE. Flow: pick (mp4/mov or GIF) → frame the
-/// first frame in a fixed square pinch-zoom viewport (whatever is framed is
-/// encoded; outside-frame area = background) → size 240/360/480 → fps
-/// 10/15/20/24 → quality LOW/MED/HIGH → background color (the letterbox fill,
-/// and the fill under transparent GIF pixels) → convert (native Cinepak) →
-/// send TYPE.video.
+/// first frame in a fixed circular pinch-zoom viewport matching the round
+/// 360×360 screen (whatever is framed is encoded; outside-frame area =
+/// background) → size 240/360/480 → fps 10/15/20/24 → quality LOW/MED/HIGH →
+/// background color (the letterbox fill, and the fill under transparent GIF
+/// pixels) → convert (native Cinepak) → send TYPE.video. The preview also
+/// offers play/pause/stop to preview the clip's motion before converting:
+/// real videos play the original via a native MediaPlayer texture, GIFs cycle a
+/// few extracted frames — both inside the same circular framing viewport.
 class VideoPage extends ConsumerStatefulWidget {
   final String deviceName;
   final String deviceId;
@@ -51,9 +56,12 @@ const List<int> _bgColors = [
   0xFFFFCC00,
 ];
 
-const double _previewMaxHRatio = 0.5; // square viewport max height = 50% screen
+const double _previewMaxHRatio = 0.5; // circular viewport max height = 50% screen
 
 enum _ConvStatus { idle, converting, ready, error }
+
+// Motion-preview transport state for the in-page player.
+enum _PlayState { stopped, playing, paused }
 
 class _VideoPageState extends ConsumerState<VideoPage> {
   final _picker = ImagePicker();
@@ -68,6 +76,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   ui.Image? _thumb;
   int _srcW = 0;
   int _srcH = 0;
+  bool _isGif = false; // GIF source → preview via extracted frames, not MediaPlayer
 
   // Conversion options.
   int _size = 360;
@@ -91,6 +100,18 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   String? _convError;
   int _rebuildSeq = 0;
 
+  // Motion preview. Real videos play the original through [_player] (native
+  // MediaPlayer → Flutter texture). GIFs (which MediaPlayer can't play) fall
+  // back to a short set of downscaled frames cycled by [_playTimer]. Both are
+  // lazily initialised on first Play. [_loadingFrames] covers either warm-up.
+  final NativeVideoPlayer _player = NativeVideoPlayer();
+  List<ui.Image>? _frames;
+  int _frameIdx = 0;
+  int _frameIntervalMs = 100;
+  _PlayState _play = _PlayState.stopped;
+  bool _loadingFrames = false;
+  Timer? _playTimer;
+
   @override
   void dispose() {
     // Reset send status on leave so re-entering never shows a stale result.
@@ -102,6 +123,9 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     }
     _rebuildSeq++;
     _converter.cancel();
+    _playTimer?.cancel();
+    _disposeFrames();
+    unawaited(_player.dispose()); // release native player + texture
     _tc.dispose();
     _thumb?.dispose();
     super.dispose();
@@ -203,11 +227,13 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     ui.Image? thumb;
     int tw = 0;
     int th = 0;
+    bool isGif = false;
     try {
       final t = await _converter.getVideoThumbnail(path);
       thumb = await decodeUiImage(t.bytes);
       tw = t.width;
       th = t.height;
+      isGif = t.isGif;
     } catch (_) {
       // No preview — conversion still works with cover cropping.
     }
@@ -218,6 +244,13 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     }
 
     _thumb?.dispose();
+    _stopPlayback();
+    _disposeFrames(); // old clip's frames no longer match the new source
+    await _player.dispose(); // release the previous source's video player
+    if (!mounted) {
+      thumb?.dispose();
+      return;
+    }
     final base =
         name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : name;
 
@@ -229,12 +262,14 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       _thumb = thumb;
       _srcW = tw;
       _srcH = th;
+      _isGif = isGif;
       _avi = null;
       _binSize = 0;
       _frameCount = 0;
       _convProgress = 0;
       _conv = _ConvStatus.idle;
       _convError = null;
+      _loadingFrames = false;
       _tc.value = Matrix4.identity(); // reset zoom/pan to contain-fit
     });
     ref.read(transferProgressProvider.notifier).reset();
@@ -269,6 +304,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   Future<void> _convert() async {
     final path = _srcPath;
     if (path == null || _isBusy) return;
+    _stopPlayback(); // halt the motion preview while converting
     final int token = ++_rebuildSeq;
     setState(() {
       _conv = _ConvStatus.converting;
@@ -381,6 +417,143 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     final avi = _avi;
     if (avi == null || _conv != _ConvStatus.ready || _sending) return;
     ref.read(transferProgressProvider.notifier).send(TYPE.video, avi, _fileName);
+  }
+
+  // ── Motion preview (play / pause / stop) ────────────────────────────────────
+  // Lazily fetch a short set of downscaled frames for the current source. Frames
+  // are tied to the source path (not the crop) — the framing transform is
+  // applied live on top when they're displayed, so they stay valid while reframing.
+  // Video: create the native MediaPlayer texture for the current source (lazy,
+  // on first Play). Completes when the first frame is renderable.
+  Future<void> _ensurePlayer() async {
+    if (_player.isReady || _loadingFrames) return;
+    final path = _srcPath;
+    if (path == null) return;
+    setState(() => _loadingFrames = true);
+    try {
+      await _player.open(path);
+      if (!mounted || _srcPath != path) {
+        await _player.dispose();
+        if (mounted) setState(() => _loadingFrames = false);
+        return;
+      }
+      setState(() => _loadingFrames = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingFrames = false);
+      _snack('预览播放失败: $e');
+    }
+  }
+
+  Future<void> _ensureFrames() async {
+    if (_frames != null || _loadingFrames) return;
+    final path = _srcPath;
+    if (path == null) return;
+    setState(() => _loadingFrames = true);
+    try {
+      final preview = await _converter.getVideoFrames(path);
+      final imgs = <ui.Image>[];
+      for (final png in preview.frames) {
+        imgs.add(await decodeUiImage(png));
+      }
+      if (!mounted || _srcPath != path) {
+        for (final im in imgs) {
+          im.dispose();
+        }
+        if (mounted) setState(() => _loadingFrames = false);
+        return;
+      }
+      setState(() {
+        _frames = imgs;
+        _frameIntervalMs = preview.intervalMs;
+        _loadingFrames = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingFrames = false);
+      _snack('预览播放失败: $e');
+    }
+  }
+
+  void _startTimer() {
+    _playTimer?.cancel();
+    final frames = _frames;
+    if (frames == null || frames.isEmpty) return;
+    _playTimer = Timer.periodic(
+      Duration(milliseconds: _frameIntervalMs.clamp(30, 500)),
+      (_) {
+        if (!mounted) return;
+        setState(() => _frameIdx = (_frameIdx + 1) % frames.length);
+      },
+    );
+  }
+
+  Future<void> _onPlayPause() async {
+    if (_conv == _ConvStatus.converting) return;
+    if (_isGif) {
+      // GIF: cycle extracted frames (Flutter exposes no GIF frame control).
+      if (_play == _PlayState.playing) {
+        _playTimer?.cancel();
+        setState(() => _play = _PlayState.paused);
+        return;
+      }
+      if (_frames == null) {
+        await _ensureFrames();
+        if (!mounted || _frames == null) return;
+      }
+      setState(() => _play = _PlayState.playing);
+      _startTimer();
+      return;
+    }
+    // Video: play the original through the native texture player.
+    if (_play == _PlayState.playing) {
+      await _player.pause();
+      if (!mounted) return;
+      setState(() => _play = _PlayState.paused);
+      return;
+    }
+    if (!_player.isReady) {
+      await _ensurePlayer();
+      if (!mounted || !_player.isReady) return;
+    }
+    await _player.play();
+    if (!mounted) return;
+    setState(() => _play = _PlayState.playing);
+  }
+
+  void _onStop() {
+    _playTimer?.cancel();
+    _playTimer = null;
+    if (!_isGif && _player.isReady) {
+      unawaited(_player.pause());
+      unawaited(_player.seekTo(0)); // rewind so the next Play starts from the top
+    }
+    setState(() {
+      _play = _PlayState.stopped;
+      _frameIdx = 0; // stop returns to the first frame (the still thumbnail)
+    });
+  }
+
+  // Halt playback without a setState (callers wrap their own / are disposing).
+  void _stopPlayback() {
+    _playTimer?.cancel();
+    _playTimer = null;
+    if (!_isGif && _player.isReady) {
+      unawaited(_player.pause());
+      unawaited(_player.seekTo(0));
+    }
+    _play = _PlayState.stopped;
+    _frameIdx = 0;
+  }
+
+  void _disposeFrames() {
+    final frames = _frames;
+    _frames = null;
+    if (frames != null) {
+      for (final im in frames) {
+        im.dispose();
+      }
+    }
   }
 
   @override
@@ -532,9 +705,12 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     );
   }
 
-  // Fixed square viewport: the first frame is pinch-zoomed / panned underneath
-  // a fixed frame (contain-fit on load). Whatever the square frames is what gets
-  // encoded; areas outside the frame become the background (letterbox).
+  // Fixed circular viewport representing the device's round 360×360 screen: the
+  // first frame is pinch-zoomed / panned underneath (contain-fit on load). The
+  // encoded bitmap stays square (crop math unchanged) — the circle just marks
+  // what the round screen shows. The bottom-right corner hosts play/pause/stop
+  // for a motion preview: while playing, a few downscaled frames cycle (looping)
+  // under the same framing transform; stop returns to the first frame.
   Widget _buildPreview(ThemeData theme, ColorScheme cs) {
     final double maxH = MediaQuery.of(context).size.height * _previewMaxHRatio;
     return LayoutBuilder(
@@ -542,43 +718,139 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         final double v = min(constraints.maxWidth, maxH);
         _vp = v;
         return Center(
-          child: Listener(
-            // Track fingers on the viewport so page scroll can be frozen while
-            // the frame is being pinch-zoomed / panned (see SingleChildScrollView).
-            onPointerDown: (_) => setState(() => _viewportPointers++),
-            onPointerUp: (_) => setState(
-                () => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
-            onPointerCancel: (_) => setState(
-                () => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                width: v,
-                height: v,
-                child: Stack(
-                  children: [
-                    Positioned.fill(child: ColoredBox(color: Color(_bgColor))),
-                    InteractiveViewer(
-                      transformationController: _tc,
-                      minScale: 1.0,
-                      maxScale: 8.0,
-                      clipBehavior: Clip.hardEdge,
-                      // Reframing invalidates the converted result (re-convert
-                      // is expensive/native, so it's manual — not automatic).
-                      onInteractionEnd: (_) => _invalidate(),
-                      child: SizedBox(
-                        width: v,
-                        height: v,
-                        child: RawImage(image: _thumb, fit: BoxFit.contain),
+          child: SizedBox(
+            width: v,
+            height: v,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Listener(
+                    // Track fingers on the viewport so page scroll can be frozen
+                    // while the frame is being pinch-zoomed / panned.
+                    onPointerDown: (_) => setState(() => _viewportPointers++),
+                    onPointerUp: (_) => setState(() =>
+                        _viewportPointers =
+                            (_viewportPointers - 1).clamp(0, 99)),
+                    onPointerCancel: (_) => setState(() =>
+                        _viewportPointers =
+                            (_viewportPointers - 1).clamp(0, 99)),
+                    child: Container(
+                      // Ring marks the round-screen boundary; drawn over content.
+                      foregroundDecoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: cs.outlineVariant.withValues(alpha: 0.6)),
+                      ),
+                      child: ClipOval(
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                                child: ColoredBox(color: Color(_bgColor))),
+                            InteractiveViewer(
+                              transformationController: _tc,
+                              minScale: 1.0,
+                              maxScale: 8.0,
+                              clipBehavior: Clip.hardEdge,
+                              // Reframing invalidates the converted result
+                              // (re-convert is native/expensive → manual).
+                              onInteractionEnd: (_) => _invalidate(),
+                              child: SizedBox(
+                                width: v,
+                                height: v,
+                                child: _buildMediaContent(),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
+                Positioned(
+                  right: 6,
+                  bottom: 6,
+                  child: _buildPlayControls(cs),
+                ),
+              ],
             ),
           ),
         );
       },
+    );
+  }
+
+  // The pixels shown inside the framing viewport. Stopped → the still first
+  // frame. Playing/paused → the live video texture (real videos) or the cycling
+  // extracted frames (GIFs). Every branch is contain-fit into the same v×v box
+  // that hosts the still thumb, so the pinch-zoom transform and crop math
+  // (`_cropForConvert`) are identical regardless of the source.
+  Widget _buildMediaContent() {
+    if (_play != _PlayState.stopped) {
+      if (_isGif) {
+        final frames = _frames;
+        if (frames != null && frames.isNotEmpty) {
+          return RawImage(
+              image: frames[_frameIdx % frames.length], fit: BoxFit.contain);
+        }
+      } else if (_player.isReady && _srcW > 0 && _srcH > 0) {
+        // Real video via the native MediaPlayer texture, laid out at the source
+        // aspect so it frames exactly like the still thumbnail.
+        return FittedBox(
+          fit: BoxFit.contain,
+          child: SizedBox(
+            width: _srcW.toDouble(),
+            height: _srcH.toDouble(),
+            child: Texture(textureId: _player.textureId),
+          ),
+        );
+      }
+    }
+    return RawImage(image: _thumb, fit: BoxFit.contain);
+  }
+
+  // Translucent play/pause + stop pill, floated over the preview's bottom-right.
+  // Disabled while converting; the play slot shows a spinner while frames load.
+  Widget _buildPlayControls(ColorScheme cs) {
+    final bool canPlay = _conv != _ConvStatus.converting;
+    final bool isPlaying = _play == _PlayState.playing;
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(24),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _loadingFrames
+              ? const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  ),
+                )
+              : IconButton(
+                  onPressed: canPlay ? _onPlayPause : null,
+                  icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+                  iconSize: 22,
+                  color: Colors.white,
+                  disabledColor: Colors.white38,
+                  visualDensity: VisualDensity.compact,
+                  tooltip: isPlaying ? '暂停' : '播放',
+                ),
+          IconButton(
+            onPressed:
+                canPlay && _play != _PlayState.stopped ? _onStop : null,
+            icon: const Icon(Icons.stop),
+            iconSize: 22,
+            color: Colors.white,
+            disabledColor: Colors.white38,
+            visualDensity: VisualDensity.compact,
+            tooltip: '停止',
+          ),
+        ],
+      ),
     );
   }
 
@@ -588,7 +860,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         Icon(Icons.pinch_outlined, size: 18, color: cs.onSurfaceVariant),
         const SizedBox(width: 6),
         Expanded(
-          child: Text('双指缩放 / 拖动取景，框内即画面区域',
+          child: Text('双指缩放 / 拖动取景，圆内即屏幕显示区域',
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: cs.onSurfaceVariant)),
         ),
@@ -645,7 +917,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   }
 
   // Background fill: composited under transparent GIF pixels, and used as the
-  // letterbox color when the frame is zoomed out inside the square viewport.
+  // letterbox color when the frame is zoomed out inside the circular viewport.
   Widget _buildBgColorRow(ThemeData theme, ColorScheme cs) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,

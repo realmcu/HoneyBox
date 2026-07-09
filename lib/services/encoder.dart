@@ -34,6 +34,12 @@ extension EncoderFormatX on EncoderFormat {
       this == EncoderFormat.h264 || this == EncoderFormat.mvs1;
 }
 
+/// H.264 bitrate slider bounds (bits per second). The upper bound is capped at
+/// 300 kbps for Bluetooth screen mirroring — encoded frames must fit within the
+/// BLE credit window, so higher rates would stall the link.
+const int kH264MinBitrate = 50000;
+const int kH264MaxBitrate = 300000;
+
 /// Immutable encoder configuration mirrored by the native [EncoderConfig].
 class EncoderConfig {
   final EncoderFormat format;
@@ -69,12 +75,12 @@ class EncoderConfig {
 
   const EncoderConfig({
     this.format = EncoderFormat.h264,
-    this.width = 640,
-    this.height = 480,
+    this.width = 368,
+    this.height = 368,
     this.cropZoom = 1.0,
     this.fps = 15,
-    this.bitrate = 2000000,
-    this.iFrameIntervalSec = 1,
+    this.bitrate = 150000, // 150 kbps
+    this.iFrameIntervalSec = 6,
     this.transport = StreamTransportKind.ble,
     this.msv1Skip = true,
     this.msv1SkipThr = 0,
@@ -149,12 +155,15 @@ class EncoderConfig {
       format: (fmtIndex >= 0 && fmtIndex < EncoderFormat.values.length)
           ? EncoderFormat.values[fmtIndex]
           : EncoderFormat.h264,
-      width: (json['width'] as num?)?.toInt() ?? 640,
-      height: (json['height'] as num?)?.toInt() ?? 480,
+      width: (json['width'] as num?)?.toInt() ?? 368,
+      height: (json['height'] as num?)?.toInt() ?? 368,
       cropZoom: (json['cropZoom'] as num?)?.toDouble() ?? 1.0,
       fps: (json['fps'] as num?)?.toInt() ?? 15,
-      bitrate: (json['bitrate'] as num?)?.toInt() ?? 2000000,
-      iFrameIntervalSec: (json['iFrameIntervalSec'] as num?)?.toInt() ?? 1,
+      // Clamp so a value persisted before the 300 kbps cap snaps into range.
+      bitrate: (((json['bitrate'] as num?)?.toInt() ?? 150000)
+              .clamp(kH264MinBitrate, kH264MaxBitrate))
+          .toInt(),
+      iFrameIntervalSec: (json['iFrameIntervalSec'] as num?)?.toInt() ?? 6,
       transport: (transIndex >= 0 &&
               transIndex < StreamTransportKind.values.length)
           ? StreamTransportKind.values[transIndex]

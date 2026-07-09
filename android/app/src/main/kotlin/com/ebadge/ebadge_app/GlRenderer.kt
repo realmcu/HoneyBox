@@ -69,11 +69,15 @@ class GlRenderer(
     @Volatile private var paceEncoder = false
     private val encoderPermits = java.util.concurrent.atomic.AtomicInteger(0)
 
-    // Encoder-feed fps throttle: skip camera frames so the encoder is fed at most
-    // [minEncoderIntervalNs] apart (0 = no throttle → feed every camera frame).
-    // Measured against camera-frame presentation timestamps (ns), not wall clock.
+    // Encode-feed fps throttle: skip camera frames so the active encode feed is fed
+    // at most [minEncoderIntervalNs] apart (0 = no throttle → feed every camera
+    // frame). Shared by both feeds — the MediaCodec encoder surface (H.264) and the
+    // software readback (JPEG/MSV1) — which are mutually exclusive per session but
+    // keep independent last-feed accumulators. Measured against camera-frame
+    // presentation timestamps (ns), not wall clock.
     @Volatile private var minEncoderIntervalNs = 0L
     private var lastEncoderFeedNs = 0L
+    private var lastReadbackFeedNs = 0L
 
     // Offscreen readback (software MSV1/JPEG encode): render to a pbuffer and
     // glReadPixels the top-down RGBA out to [onRgbaFrame].
@@ -199,10 +203,11 @@ class GlRenderer(
         encoderPermits.set(if (enabled) initialPermits else 0)
     }
 
-    /** Cap the encoder feed at [fps] frames/s (0 = no throttle). */
+    /** Cap both encode feeds (encoder surface + software readback) at [fps] fps (0 = no throttle). */
     fun setEncoderTargetFps(fps: Int) {
         minEncoderIntervalNs = if (fps > 0) (1_000_000_000L / fps) else 0L
         lastEncoderFeedNs = 0L
+        lastReadbackFeedNs = 0L
     }
 
     /** Replenish one permit (call after a paced frame has been transmitted). */
@@ -292,7 +297,23 @@ class GlRenderer(
                     renderTo(core, it, encoderW, encoderH, presentNs = ts)
                 }
             }
-            if (softwareMode) renderReadback(core, st.timestamp)
+            if (softwareMode) {
+                // fps throttle (same target as the encoder surface): the software
+                // JPEG/MSV1 encoder is fed from this readback, so cap it at the
+                // configured fps. Without this the readback ran on every camera
+                // frame, so the streamed rate followed the camera's AE-floor fps
+                // instead of the setting. Skipping a frame before readback is
+                // harmless — MSV1 P-frames are relative to the previous *encoded*
+                // frame (prevRgba updates only on encoded frames).
+                val ts = st.timestamp
+                val fpsOk = minEncoderIntervalNs <= 0L ||
+                    lastReadbackFeedNs == 0L ||
+                    ts - lastReadbackFeedNs >= minEncoderIntervalNs
+                if (fpsOk) {
+                    lastReadbackFeedNs = ts
+                    renderReadback(core, ts)
+                }
+            }
         } catch (e: Exception) {
             onError("渲染失败: ${e.message}")
         }

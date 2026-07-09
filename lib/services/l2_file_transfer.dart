@@ -92,9 +92,12 @@ int _readU16(Uint8List data, int offset) {
 // ---------------------------------------------------------------------------
 
 const int _defaultChunkSize = 2048;
-const Duration _negotiationTimeout = Duration(seconds: 5);
-const Duration _dataAckTimeout = Duration(seconds: 10);
-const Duration _verifyTimeout = Duration(seconds: 8);
+// Host-waits-for-slave-reply timeouts, unified to 25 s: a slow device may erase
+// flash before replying with BEGIN_RSP, or verify the CRC and commit the file
+// before END_RSP, so give ample headroom before declaring the transfer failed.
+const Duration _negotiationTimeout = Duration(seconds: 25); // BEGIN_RSP
+const Duration _dataAckTimeout = Duration(seconds: 25); // DATA L1 ACK
+const Duration _verifyTimeout = Duration(seconds: 25); // END_RSP
 
 // ---------------------------------------------------------------------------
 // Parsed L2 frame

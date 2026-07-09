@@ -51,6 +51,9 @@ class VideoConverter {
 
     class Thumb(val png: ByteArray, val width: Int, val height: Int, val isGif: Boolean)
 
+    /** A short set of downscaled PNG frames + the real-time interval between them. */
+    class PreviewClip(val frames: List<ByteArray>, val intervalMs: Int)
+
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG).apply {
         isFilterBitmap = true
     }
@@ -110,6 +113,109 @@ class VideoConverter {
         bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
         bmp.recycle()
         return Thumb(out.toByteArray(), w, h, true)
+    }
+
+    // ── playback-preview frames (video / GIF) ────────────────────────────────
+    // A short, downscaled set of frames the Flutter side cycles to preview the
+    // clip's motion inside the framing viewport (before conversion). Frames keep
+    // the source aspect ratio so the on-screen contain-fit is identical to the
+    // still thumbnail; GIF frames keep their alpha so the chosen background shows
+    // through transparent pixels live (same as the thumbnail).
+    fun previewFrames(path: String, maxCount: Int, maxEdge: Int): PreviewClip {
+        if (isGif(path)) return gifPreviewFrames(path, maxCount, maxEdge)
+        val r = MediaMetadataRetriever()
+        try {
+            r.setDataSource(path)
+            val durationMs =
+                r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val durationSec = durationMs / 1000.0
+
+            var nativeFps = 25.0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val fc = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)
+                    ?.toIntOrNull() ?: 0
+                if (fc > 0 && durationSec > 0) nativeFps = fc / durationSec
+            }
+            if (nativeFps <= 0) nativeFps = 25.0
+
+            val previewFps = minOf(12.0, nativeFps)
+            var count = if (durationSec > 0) floor(durationSec * previewFps).toInt() else 1
+            if (count < 1) count = 1
+            if (count > maxCount) count = maxCount
+
+            val frames = ArrayList<ByteArray>(count)
+            for (j in 0 until count) {
+                val tUs = if (durationMs > 0) Math.round(durationMs * 1000.0 * j / count) else 0L
+                val bmp = r.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                    ?: r.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: continue
+                frames.add(scaledPng(bmp, maxEdge))
+                bmp.recycle()
+            }
+            if (frames.isEmpty()) {
+                val bmp = r.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: r.getFrameAtTime(-1)
+                if (bmp != null) {
+                    frames.add(scaledPng(bmp, maxEdge))
+                    bmp.recycle()
+                }
+            }
+            if (frames.isEmpty()) throw RuntimeException("无法读取视频帧")
+            val interval = if (durationMs > 0) (durationMs / frames.size).toInt().coerceIn(50, 200) else 100
+            return PreviewClip(frames, interval)
+        } finally {
+            releaseRetriever(r)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun gifPreviewFrames(path: String, maxCount: Int, maxEdge: Int): PreviewClip {
+        val bytes = File(path).readBytes()
+        val movie = android.graphics.Movie.decodeByteArray(bytes, 0, bytes.size)
+            ?: throw RuntimeException("无法解析 GIF")
+        val gw = movie.width()
+        val gh = movie.height()
+        if (gw <= 0 || gh <= 0) throw RuntimeException("GIF 尺寸无效")
+
+        val durationMs = movie.duration()
+        val frameCount = countGifFrames(bytes)
+        var count = if (frameCount > 0) frameCount else 12
+        if (durationMs <= 0) count = 1 // static GIF → single frame
+        if (count > maxCount) count = maxCount
+        if (count < 1) count = 1
+
+        val src = Bitmap.createBitmap(gw, gh, Bitmap.Config.ARGB_8888)
+        val c = Canvas(src)
+        val frames = ArrayList<ByteArray>(count)
+        try {
+            for (j in 0 until count) {
+                var tMs = if (durationMs > 0) Math.round(durationMs.toDouble() * j / count).toInt() else 0
+                if (durationMs > 0 && tMs >= durationMs) tMs = durationMs - 1
+                c.drawColor(0, PorterDuff.Mode.CLEAR) // keep transparency for live bg compositing
+                movie.setTime(tMs)
+                movie.draw(c, 0f, 0f)
+                frames.add(scaledPng(src, maxEdge))
+            }
+        } finally {
+            src.recycle()
+        }
+        val interval = if (durationMs > 0) (durationMs / count).coerceIn(50, 200) else 100
+        return PreviewClip(frames, interval)
+    }
+
+    // Proportionally downscale [src] so its longest edge ≤ [maxEdge], then
+    // PNG-encode (alpha preserved when the source bitmap has it).
+    private fun scaledPng(src: Bitmap, maxEdge: Int): ByteArray {
+        val w = src.width
+        val h = src.height
+        val scale = minOf(1.0, maxEdge.toDouble() / maxOf(w, h))
+        val dstW = maxOf(1, Math.round(w * scale).toInt())
+        val dstH = maxOf(1, Math.round(h * scale).toInt())
+        val scaled = if (dstW == w && dstH == h) src else Bitmap.createScaledBitmap(src, dstW, dstH, true)
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.PNG, 100, out)
+        if (scaled !== src) scaled.recycle()
+        return out.toByteArray()
     }
 
     // Count GIF image frames by walking the block structure (no LZW decode) so
@@ -420,6 +526,92 @@ class VideoConverter {
         val muxFps = maxOf(1, Math.round(outFps).toInt())
         val avi = CvidAviMuxer.buildAvi(frames, dstW, dstH, muxFps)
         return Result(avi, dstW, dstH, frames.size, outFps)
+    }
+
+    // ── scrolling-text video (danmaku "scroll" mode) ─────────────────────────
+    // The firmware has no scrolling-text primitive, so a danmaku that should
+    // scroll is rendered here as a seamless looping AVI: the pre-rendered text
+    // bitmap [strip] (RGBA, stripW×stripH) is tiled every period = stripW + gap
+    // pixels and swept right→left across a size×size opaque canvas (marquee
+    // style — text enters from the right, exits left). One loop
+    // period is exactly frameCount frames, so the step from the last frame back
+    // to frame 0 advances by exactly period/frameCount px — the device's native
+    // AVI looping is therefore seamless even if frameCount is capped. The strip
+    // is drawn at 1:1 (the chosen font size is already in device pixels) and
+    // vertically centered, matching the on-screen scroll preview.
+    fun encodeScrollAvi(
+        strip: ByteArray,
+        stripW: Int,
+        stripH: Int,
+        size: Int,
+        bgColor: Int,
+        speedPxPerSec: Int,
+        fps: Int,
+        gap: Int,
+        quality: Int,
+        maxFrames: Int,
+        cancel: AtomicBoolean,
+        progress: Progress?,
+    ): Result {
+        require(size and 3 == 0) { "分辨率必须是 4 的倍数" }
+        require(stripW > 0 && stripH > 0) { "字幕尺寸无效" }
+        require(strip.size >= stripW * stripH * 4) { "字幕像素数据不完整" }
+
+        val stripBmp = Bitmap.createBitmap(stripW, stripH, Bitmap.Config.ARGB_8888)
+        stripBmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(strip))
+
+        val speed = maxOf(1, speedPxPerSec)
+        val safeFps = maxOf(1, fps)
+        val period = stripW + maxOf(0, gap)
+        var frameCount = Math.round(period.toDouble() / speed * safeFps).toInt()
+        if (frameCount < 1) frameCount = 1
+        if (frameCount > maxFrames) frameCount = maxFrames
+
+        val opaqueBg = bgColor or 0xFF000000.toInt()
+        val yOff = ((size - stripH) / 2.0).toFloat()
+
+        val dst = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(dst)
+        val pixels = IntArray(size * size)
+        val rgba = ByteArray(size * size * 4)
+        val enc = CinepakEncoder.Encoder(
+            size, size,
+            CinepakEncoder.Options(quality = quality, refine = 3, strips = 2, skipThresh = 720, keyint = 0),
+        )
+        val frames = ArrayList<ByteArray>(frameCount)
+
+        try {
+            for (j in 0 until frameCount) {
+                if (cancel.get()) throw Cancelled()
+                // right→left: baseX runs period→0 as j advances, so every tiled
+                // copy shifts left each frame (seamless because tiling is periodic).
+                val baseX = period.toDouble() * (frameCount - j) / frameCount
+                canvas.drawColor(opaqueBg, PorterDuff.Mode.SRC)
+                var x = baseX - period // one copy off the left edge, tiled rightward
+                while (x < size) {
+                    canvas.drawBitmap(stripBmp, x.toFloat(), yOff, paint)
+                    x += period
+                }
+                dst.getPixels(pixels, 0, size, 0, 0, size, size)
+                for (i in pixels.indices) {
+                    val c = pixels[i]
+                    val o = i * 4
+                    rgba[o] = ((c shr 16) and 0xFF).toByte()     // R
+                    rgba[o + 1] = ((c shr 8) and 0xFF).toByte()  // G
+                    rgba[o + 2] = (c and 0xFF).toByte()          // B
+                    rgba[o + 3] = ((c shr 24) and 0xFF).toByte() // A
+                }
+                frames.add(enc.encode(rgba))
+                progress?.onProgress(frames.size, frameCount)
+            }
+        } finally {
+            stripBmp.recycle()
+            dst.recycle()
+        }
+
+        if (frames.isEmpty()) throw RuntimeException("字幕滚动帧生成失败")
+        val avi = CvidAviMuxer.buildAvi(frames, size, size, safeFps)
+        return Result(avi, size, size, frames.size, safeFps.toDouble())
     }
 
     private fun releaseRetriever(r: MediaMetadataRetriever) {

@@ -47,7 +47,11 @@ class _EncoderSettingsSheetState extends State<EncoderSettingsSheet> {
   @override
   void initState() {
     super.initState();
-    _cfg = widget.initial;
+    // Snap a bitrate persisted above the 300 kbps cap into the slider's range
+    // so the readout and the thumb agree from the first frame.
+    _cfg = widget.initial.bitrate > kH264MaxBitrate
+        ? widget.initial.copyWith(bitrate: kH264MaxBitrate)
+        : widget.initial;
     _widthCtrl = TextEditingController(text: '${_cfg.width}');
     _heightCtrl = TextEditingController(text: '${_cfg.height}');
     _fpsCtrl = TextEditingController(text: '${_cfg.fps}');
@@ -201,19 +205,19 @@ class _EncoderSettingsSheetState extends State<EncoderSettingsSheet> {
                         value: _formatBitrate(_cfg.bitrate),
                       ),
                       _slider(
-                        // 50 kbps … 4 Mbps in 50-kbps steps. The low end is for BLE
+                        // 50 … 300 kbps in 50-kbps steps. Capped for BLE
                         // streaming (frames must fit the credit window).
-                        value: (_cfg.bitrate / 1000).clamp(50, 4000).toDouble(),
+                        value: (_cfg.bitrate / 1000).clamp(50, 300).toDouble(),
                         min: 50,
-                        max: 4000,
-                        divisions: 79,
+                        max: 300,
+                        divisions: 5,
                         onChanged: (v) => setState(() {
                           _cfg = _cfg.copyWith(bitrate: v.round() * 1000);
                         }),
                       ),
                       const SizedBox(height: 4),
                       const Text(
-                        '蓝牙投屏建议 ≤ 300 kbps,并配合低分辨率/帧率减小每帧体积',
+                        '范围 50–300 kbps；配合低分辨率/帧率进一步减小每帧体积',
                         style: TextStyle(color: Colors.white38, fontSize: 12),
                       ),
                       const SizedBox(height: 8),

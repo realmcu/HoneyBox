@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show min;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -12,10 +13,18 @@ import '../../services/l2_file_transfer.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 
-/// Page for rendering danmaku text to a device RGB565 `.bin` (uncompressed)
-/// and sending it over BLE as TYPE.image. Mirrors the miniprogram danmaku flow:
-/// text + font family + size + bold + text/bg color → auto-sized bitmap →
-/// buildImageBin(compress:false) → send 'danmaku.bin'.
+/// Page for rendering danmaku text and sending it over BLE.
+///
+/// Conversion/send is always the same: the whole text is rendered to a device
+/// RGB565 `.bin` (uncompressed) and sent as TYPE.image, mirroring the
+/// miniprogram flow: text + font + size + bold + text/bg color → auto-sized
+/// bitmap → buildImageBin(compress:false) → send 'danmaku.bin'.
+///
+/// A mode toggle changes the *preview only* — it never changes what is sent:
+///  * 全览 (overview) — the whole text bitmap, contain-fit.
+///  * 滚动 (scroll) — a circular 360×360 viewport animating the strip right→left
+///    (marquee style), showing how the image will look scrolling on the round
+///    screen. Purely a preview; the firmware still receives the full-text image.
 class DanmakuPage extends ConsumerStatefulWidget {
   final String deviceName;
   final String deviceId;
@@ -57,7 +66,19 @@ const List<int> _bgColors = [
   0xFFFFFFFF,
 ];
 
-class _DanmakuPageState extends ConsumerState<DanmakuPage> {
+// The device's round screen side (px). Scroll videos are rendered at this size,
+// and the blank gap between scroll repeats defaults to one full screen.
+const int _screenSize = 360;
+const int _scrollGap = 360;
+// Fixed medium scroll speed (px/sec on the 360px screen); not user-adjustable.
+const int _scrollSpeed = 120;
+
+// Preview only — both modes send the same full-text image (TYPE.image).
+// 全览 = show the whole text at once; 滚动 = animate it scrolling for preview.
+enum _DanmakuMode { overview, scroll }
+
+class _DanmakuPageState extends ConsumerState<DanmakuPage>
+    with TickerProviderStateMixin {
   final _controller = TextEditingController();
 
   String _fontFamily = 'sans-serif';
@@ -73,9 +94,18 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
   int _binSize = 0;
   int _rebuildSeq = 0;
 
+  // Scroll mode drives the circular preview animation only; the send payload is
+  // the full-text image from _rebuild (identical in both preview modes).
+  _DanmakuMode _mode = _DanmakuMode.overview;
+  late final AnimationController _scrollCtl;
+
   @override
   void initState() {
     super.initState();
+    _scrollCtl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3), // replaced per period in _syncScrollAnim
+    );
     _controller.addListener(_onTextChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _rebuild());
   }
@@ -91,6 +121,7 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
     }
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
+    _scrollCtl.dispose();
     _previewImage?.dispose();
     super.dispose();
   }
@@ -140,6 +171,7 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
       await _setPreview(img, token);
       if (token != _rebuildSeq || !mounted) return;
       // Uncompressed: simplest layout for the device to address by offset.
+      // Built in both preview modes — the send payload is mode-independent.
       final Uint8List bin =
           buildImageBin(img.rgba, img.width, img.height, compress: false);
       if (token != _rebuildSeq || !mounted) return;
@@ -169,6 +201,7 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
       _imgH = img.height;
     });
     old?.dispose();
+    if (_mode == _DanmakuMode.scroll) _syncScrollAnim();
   }
 
   Future<ui.Image> _rgbaToImage(RgbaImage img) {
@@ -208,15 +241,49 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
     _rebuild();
   }
 
-  void _send() {
-    final bin = _bin;
-    if (bin == null || _isSending) return;
-    if (_controller.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入弹幕内容')),
-      );
+  // The mode toggle only changes the preview; the send payload (_bin) is
+  // mode-independent, so it is neither invalidated nor rebuilt here.
+  void _onModeChange(_DanmakuMode m) {
+    if (_isSending || m == _mode) return;
+    setState(() => _mode = m);
+    if (m == _DanmakuMode.scroll) {
+      _syncScrollAnim();
+    } else {
+      _scrollCtl.stop();
+    }
+  }
+
+  // Re-time the circular preview loop so its on-screen speed matches what the
+  // device will play: one full period (strip + gap) takes period/speed seconds.
+  void _syncScrollAnim() {
+    if (_mode != _DanmakuMode.scroll || _previewImage == null) {
+      _scrollCtl.stop();
       return;
     }
+    final double period = (_imgW + _scrollGap).toDouble();
+    final double speed = _scrollSpeed <= 0 ? 1 : _scrollSpeed.toDouble();
+    final int ms = (period / speed * 1000).round().clamp(300, 60000);
+    _scrollCtl.duration = Duration(milliseconds: ms);
+    _scrollCtl
+      ..reset()
+      ..repeat();
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // Always sends the full-text image, regardless of the preview mode.
+  void _send() {
+    if (_isSending) return;
+    if (_controller.text.trim().isEmpty) {
+      _snack('请输入弹幕内容');
+      return;
+    }
+    final bin = _bin;
+    if (bin == null) return;
     ref
         .read(transferProgressProvider.notifier)
         .send(TYPE.image, bin, 'danmaku.bin');
@@ -241,6 +308,8 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
                 children: [
                   _buildPreview(theme, cs),
                   const SizedBox(height: 16),
+                  _buildModeRow(theme, cs),
+                  const SizedBox(height: 12),
                   _buildTextField(theme, cs),
                   const SizedBox(height: 12),
                   _buildFontRow(theme, cs),
@@ -301,6 +370,13 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
   }
 
   Widget _buildPreview(ThemeData theme, ColorScheme cs) {
+    return _mode == _DanmakuMode.scroll
+        ? _buildScrollPreview(theme, cs)
+        : _buildOverviewPreview(theme, cs);
+  }
+
+  // 全览: the whole text bitmap, contain-fit in a rounded rectangle.
+  Widget _buildOverviewPreview(ThemeData theme, ColorScheme cs) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.22,
       decoration: BoxDecoration(
@@ -334,6 +410,73 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
                 ),
               ],
             ),
+    );
+  }
+
+  // 滚动: a circular viewport (the round 360×360 screen) with the text strip
+  // sweeping right→left, looping — the same motion the device will play.
+  Widget _buildScrollPreview(ThemeData theme, ColorScheme cs) {
+    final double maxH = MediaQuery.of(context).size.height * 0.3;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double v = min(constraints.maxWidth, maxH);
+        return Center(
+          child: Container(
+            width: v,
+            height: v,
+            foregroundDecoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border:
+                  Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
+            ),
+            child: ClipOval(
+              child: _previewImage == null
+                  ? ColoredBox(color: Color(_bgColor))
+                  : AnimatedBuilder(
+                      animation: _scrollCtl,
+                      builder: (_, __) => CustomPaint(
+                        size: Size(v, v),
+                        painter: _ScrollPreviewPainter(
+                          strip: _previewImage!,
+                          bgColor: _bgColor,
+                          phase: _scrollCtl.value,
+                          gap: _scrollGap.toDouble(),
+                          screen: _screenSize.toDouble(),
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildModeRow(ThemeData theme, ColorScheme cs) {
+    return Row(
+      children: [
+        Text('模式', style: theme.textTheme.titleSmall),
+        const SizedBox(width: 12),
+        Expanded(
+          child: SegmentedButton<_DanmakuMode>(
+            segments: const [
+              ButtonSegment(
+                value: _DanmakuMode.overview,
+                label: Text('全览'),
+                icon: Icon(Icons.fit_screen_outlined),
+              ),
+              ButtonSegment(
+                value: _DanmakuMode.scroll,
+                label: Text('滚动'),
+                icon: Icon(Icons.slideshow_outlined),
+              ),
+            ],
+            selected: {_mode},
+            onSelectionChanged:
+                _isSending ? null : (s) => _onModeChange(s.first),
+          ),
+        ),
+      ],
     );
   }
 
@@ -488,4 +631,58 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage> {
       style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
     );
   }
+}
+
+// Preview-only painter: shows the danmaku strip scrolling right→left across the
+// round screen, looping seamlessly, so the user can gauge how the full-text
+// image will read while marqueeing. The strip is drawn at 1:1 device pixels
+// (scaled to the on-screen box) and tiled every `period = stripWidth + gap`;
+// [phase] (0..1) advances the sweep.
+class _ScrollPreviewPainter extends CustomPainter {
+  final ui.Image strip;
+  final int bgColor;
+  final double phase;
+  final double gap; // device px
+  final double screen; // device px (360)
+
+  _ScrollPreviewPainter({
+    required this.strip,
+    required this.bgColor,
+    required this.phase,
+    required this.gap,
+    required this.screen,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = Color(bgColor));
+
+    final double scale = size.width / screen; // on-screen px per device px
+    final double stripW = strip.width.toDouble();
+    final double stripH = strip.height.toDouble();
+    final double period = stripW + gap;
+    // right→left: baseX runs period→0 as phase advances (matches native encode).
+    final double baseX = period * (1 - phase);
+    final double dy = (screen - stripH) / 2 * scale; // vertical centering
+    final double dstW = stripW * scale;
+    final double dstH = stripH * scale;
+    final src = Rect.fromLTWH(0, 0, stripW, stripH);
+    final paint = Paint()..filterQuality = FilterQuality.low;
+
+    // One copy starts off the left edge; tile rightward until past the screen.
+    double x = baseX - period;
+    while (x < screen) {
+      canvas.drawImageRect(
+          strip, src, Rect.fromLTWH(x * scale, dy, dstW, dstH), paint);
+      x += period;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScrollPreviewPainter old) =>
+      old.phase != phase ||
+      old.strip != strip ||
+      old.bgColor != bgColor ||
+      old.gap != gap ||
+      old.screen != screen;
 }

@@ -364,9 +364,10 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     );
   }
 
-  // Fixed square viewport: image pinch-zoomed / panned underneath a fixed
-  // frame. On first load the whole image fits (contain), centered. Whatever is
-  // framed by the square is what gets sent.
+  // Fixed circular viewport representing the device's round 360×360 screen. The
+  // image is pinch-zoomed / panned underneath; on first load it fits (contain),
+  // centered. The sent bitmap is still square (crop math unchanged) — the circle
+  // just marks what the round screen actually shows, so frame content within it.
   Widget _buildPreview(ThemeData theme, ColorScheme cs) {
     final double maxH = MediaQuery.of(context).size.height * _previewMaxHRatio;
     return LayoutBuilder(
@@ -382,28 +383,38 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                 setState(() => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
             onPointerCancel: (_) =>
                 setState(() => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                width: v,
-                height: v,
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                        child: ColoredBox(color: Color(_bgColor))),
-                    InteractiveViewer(
-                      transformationController: _tc,
-                      minScale: 1.0,
-                      maxScale: 8.0,
-                      clipBehavior: Clip.hardEdge,
-                      onInteractionEnd: (_) => _rebuild(),
-                      child: SizedBox(
-                        width: v,
-                        height: v,
-                        child: RawImage(image: _srcImage, fit: BoxFit.contain),
+            child: Container(
+              width: v,
+              height: v,
+              // Ring marks the round-screen boundary; drawn over the content.
+              foregroundDecoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.6)),
+              ),
+              child: ClipOval(
+                child: SizedBox(
+                  width: v,
+                  height: v,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                          child: ColoredBox(color: Color(_bgColor))),
+                      InteractiveViewer(
+                        transformationController: _tc,
+                        minScale: 1.0,
+                        maxScale: 8.0,
+                        clipBehavior: Clip.hardEdge,
+                        onInteractionEnd: (_) => _rebuild(),
+                        child: SizedBox(
+                          width: v,
+                          height: v,
+                          child:
+                              RawImage(image: _srcImage, fit: BoxFit.contain),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -419,7 +430,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         Icon(Icons.pinch_outlined, size: 18, color: cs.onSurfaceVariant),
         const SizedBox(width: 6),
         Expanded(
-          child: Text('双指缩放 / 拖动取景，框内即发送区域',
+          child: Text('双指缩放 / 拖动取景，圆内即屏幕显示区域',
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: cs.onSurfaceVariant)),
         ),
@@ -450,7 +461,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   }
 
   // Background fill for the letterbox / out-of-frame area (visible when the
-  // image is zoomed out or panned past an edge inside the square viewport).
+  // image is zoomed out or panned past an edge inside the circular viewport).
   Widget _buildBgColorRow(ThemeData theme, ColorScheme cs) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
