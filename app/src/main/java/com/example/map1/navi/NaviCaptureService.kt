@@ -504,15 +504,24 @@ class NaviCaptureService : Service() {
         private var naviView: AMapNaviView? = null
 
         override fun onCreate(savedInstanceState: Bundle?) {
-            // Presentation 本质是 Dialog，从 Service（无 Activity token）显示时必须使用
-            // overlay 类型的窗口，否则抛 BadTokenException: token null is not for an application。
-            val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
+            // Android 12(S)+：Presentation 自带一个绑定到 display 的 window context（R 引入），
+            // 其窗口类型固定为 TYPE_PRESENTATION(2030)，从 Service 显示也自带合法 token，无需
+            // Activity token。此时若再把窗口类型强设为 TYPE_APPLICATION_OVERLAY(2038)，会与
+            // window context 的类型不一致，触发 assertWindowContextTypeMatches 抛出：
+            //   IllegalArgumentException: Window type mismatch. ... 2030 ... 2038
+            // 导致 Presentation.show() 崩溃、Service 自杀、TCP sender 被关。故 S+ 保持默认的
+            // TYPE_PRESENTATION，不再覆盖窗口类型。
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                // R 以下的 Presentation 没有 window context，从 Service（无 Activity token）显示
+                // 必须用 overlay 类型窗口，否则抛 BadTokenException: token null is not for an application。
                 @Suppress("DEPRECATION")
-                WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+                val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
+                }
+                window?.setType(overlayType)
             }
-            window?.setType(overlayType)
             // 让投屏窗口在锁屏界面上仍保持可见/持续渲染，避免虚拟屏输出黑帧。
             @Suppress("DEPRECATION")
             window?.addFlags(
