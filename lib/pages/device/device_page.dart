@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
+import '../shared/app_drawer.dart';
 import 'widgets/action_card.dart';
 
 class DevicePage extends ConsumerStatefulWidget {
@@ -112,8 +113,12 @@ class _DevicePageState extends ConsumerState<DevicePage>
         icon: Icons.movie_creation_outlined, title: '视频 / GIF', route: '/video'),
     _ActionItem(
         icon: Icons.burst_mode_outlined, title: '多图轮播', route: '/slideshow'),
+    // 拍照投屏 — Apple-style AirPlay/screen-mirroring glyph.
     _ActionItem(
-        icon: Icons.live_tv_outlined, title: '流媒体', route: '/stream'),
+        icon: Icons.airplay, title: '拍照投屏', route: '/stream'),
+    // OTA 升级 — reserved; the internal page is intentionally empty for now.
+    _ActionItem(
+        icon: Icons.system_update_alt, title: 'OTA 升级', route: '/ota'),
   ];
 
   @override
@@ -122,12 +127,16 @@ class _DevicePageState extends ConsumerState<DevicePage>
     final tt = Theme.of(context).textTheme;
 
     return Scaffold(
+      drawer: const AppDrawer(),
+      // Let a rightward swipe from the left half of the screen open the drawer.
+      drawerEdgeDragWidth: MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
         title: Text(widget.deviceName),
         actions: [
           TextButton.icon(
             onPressed: _onDisconnectTap,
-            icon: const Icon(Icons.link_off, size: 18),
+            // Red icon flags the destructive action; the label stays white.
+            icon: Icon(Icons.link_off, size: 18, color: cs.error),
             label: const Text('断开'),
             style: TextButton.styleFrom(foregroundColor: cs.onPrimary),
           ),

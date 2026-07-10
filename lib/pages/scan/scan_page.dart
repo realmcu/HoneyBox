@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../providers/ble_provider.dart';
 import '../../services/system_settings.dart';
+import '../shared/app_drawer.dart';
 import 'widgets/device_tile.dart';
 
 /// Default name filter — the app is built for eBadge devices, so we hide the
@@ -21,7 +23,7 @@ class ScanPage extends ConsumerStatefulWidget {
 }
 
 class _ScanPageState extends ConsumerState<ScanPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final TextEditingController _filterCtrl =
       TextEditingController(text: _kDefaultFilter);
   String _filter = _kDefaultFilter;
@@ -29,6 +31,13 @@ class _ScanPageState extends ConsumerState<ScanPage>
   String? _connectingId;
   bool _locationOff = false;
   late BleNotifier _bleNotifier;
+
+  // Polls the OS location-service state so we can react (stop/resume scanning)
+  // even when it's toggled from quick-settings without leaving the app.
+  Timer? _locationPoll;
+  // Drives the short left-right shake of the "location off" banner when the
+  // user tries to scan while location is disabled.
+  late final AnimationController _shakeCtl;
 
   @override
   void initState() {
@@ -40,13 +49,27 @@ class _ScanPageState extends ConsumerState<ScanPage>
         setState(() => _filter = _filterCtrl.text);
       }
     });
-    _checkLocationService();
-    Future.microtask(_bleNotifier.startScan);
+    _shakeCtl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    // Reconcile scanning with the location-service state up front, then keep
+    // watching it while this page is alive.
+    Future.microtask(() async {
+      await _checkLocationService();
+      if (mounted && !_locationOff) _bleNotifier.startScan();
+    });
+    _locationPoll = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _checkLocationService(),
+    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _locationPoll?.cancel();
+    _shakeCtl.dispose();
     _filterCtrl.dispose();
     _bleNotifier.stopScan();
     super.dispose();
@@ -54,34 +77,51 @@ class _ScanPageState extends ConsumerState<ScanPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Re-check when returning from the location settings screen; if the user
-    // just enabled location, kick off a fresh scan automatically.
+    // Re-check immediately when returning to the app (e.g. from the location
+    // settings screen). _checkLocationService() itself stops or resumes the
+    // scan on the on→off / off→on transitions.
     if (state == AppLifecycleState.resumed) {
-      final wasOff = _locationOff;
-      _checkLocationService().then((_) {
-        if (wasOff && !_locationOff) _bleNotifier.startScan();
-      });
+      _checkLocationService();
     }
   }
 
   /// Query the OS location-services (GPS) state. BLE scanning on Android needs
-  /// it on; when off we surface the top-of-list reminder banner.
+  /// it on, so this drives the top-of-list reminder banner *and* the scan:
+  /// turning location off stops scanning; turning it back on resumes it
+  /// immediately.
   Future<void> _checkLocationService() async {
     final status = await Permission.location.serviceStatus;
+    if (!mounted) return;
     final off = status == ServiceStatus.disabled;
-    if (mounted && off != _locationOff) {
-      setState(() => _locationOff = off);
+    if (off == _locationOff) return; // no change since last check
+    setState(() => _locationOff = off);
+    if (off) {
+      _bleNotifier.stopScan();
+    } else {
+      _bleNotifier.startScan();
     }
   }
 
   void _startScan() {
-    _checkLocationService();
+    // Location off → don't scan; nudge the user with a shake of the banner.
+    if (_locationOff) {
+      _shakeBanner();
+      return;
+    }
     _bleNotifier.startScan();
   }
 
+  void _shakeBanner() => _shakeCtl.forward(from: 0);
+
   Future<void> _restartScan() async {
     await _checkLocationService();
-    await _bleNotifier.startScan();
+    // Location off → skip the scan (and nudge the banner) but still resolve so
+    // the pull-to-refresh spinner retracts.
+    if (_locationOff) {
+      _shakeBanner();
+    } else {
+      await _bleNotifier.startScan();
+    }
     // Keep the pull-to-refresh spinner up briefly so the gesture feels alive;
     // scanning itself continues in the background afterwards.
     await Future<void>.delayed(const Duration(milliseconds: 700));
@@ -126,6 +166,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
     final scanning = bleState == BleState.scanning;
 
     return Scaffold(
+      drawer: const AppDrawer(),
+      // Let a rightward swipe from the left half of the screen open the drawer.
+      drawerEdgeDragWidth: MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
         title: Text('扫描设备', style: tt.titleLarge?.copyWith(color: cs.onPrimary)),
         backgroundColor: cs.primary,
@@ -151,8 +194,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
       ),
       body: Column(
         children: [
-          _buildFilterBar(cs, tt, all.length, devices.length, scanning),
+          _buildSearchBar(cs, tt, all.length, devices.length, scanning),
           if (_locationOff) _buildLocationBanner(cs, tt),
+          _buildFilterChips(cs),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _restartScan,
@@ -183,7 +227,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
     );
   }
 
-  Widget _buildFilterBar(
+  // Blue header: the filter input with the scanned-device count sitting to its
+  // right, all on a single row.
+  Widget _buildSearchBar(
     ColorScheme cs,
     TextTheme tt,
     int total,
@@ -194,81 +240,124 @@ class _ScanPageState extends ConsumerState<ScanPage>
       color: cs.primary,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: Column(
+        child: Row(
           children: [
-            TextField(
-              controller: _filterCtrl,
-              textInputAction: TextInputAction.search,
-              style: TextStyle(color: cs.onSurface),
-              decoration: InputDecoration(
-                isDense: true,
-                filled: true,
-                fillColor: Colors.white,
-                prefixIcon: Icon(Icons.filter_alt_outlined,
-                    size: 20, color: cs.onSurfaceVariant),
-                hintText: '按名称或地址过滤',
-                suffixIcon: _filter.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: _filterCtrl.clear,
-                      ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+            Expanded(
+              child: TextField(
+                controller: _filterCtrl,
+                textInputAction: TextInputAction.search,
+                style: TextStyle(color: cs.onSurface),
+                decoration: InputDecoration(
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.white,
+                  prefixIcon: Icon(Icons.filter_alt_outlined,
+                      size: 20, color: cs.onSurfaceVariant),
+                  hintText: '按名称或地址过滤',
+                  suffixIcon: _filter.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: _filterCtrl.clear,
+                        ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
               ),
             ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                FilterChip(
-                  label: const Text('eBadge'),
-                  selected: _filter.trim() == _kDefaultFilter,
-                  onSelected: (sel) =>
-                      _filterCtrl.text = sel ? _kDefaultFilter : '',
-                  backgroundColor: Colors.white,
-                  selectedColor: cs.primaryContainer,
-                  side: BorderSide.none,
+            const SizedBox(width: 12),
+            if (scanning) ...[
+              SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: cs.onPrimary,
                 ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: const Text('仅可连接'),
-                  selected: _onlyConnectable,
-                  onSelected: (sel) => setState(() => _onlyConnectable = sel),
-                  backgroundColor: Colors.white,
-                  selectedColor: cs.primaryContainer,
-                  side: BorderSide.none,
+              ),
+              const SizedBox(width: 8),
+            ],
+            // Fixed width + tabular figures so the count doesn't reflow (and
+            // jiggle the input's right edge) as the digit count changes.
+            SizedBox(
+              width: 60,
+              child: Text(
+                '$shown / $total',
+                textAlign: TextAlign.end,
+                style: tt.labelMedium?.copyWith(
+                  color: cs.onPrimary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
-                const Spacer(),
-                if (scanning) ...[
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: cs.onPrimary,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                Text('$shown / $total',
-                    style: tt.labelMedium?.copyWith(color: cs.onPrimary)),
-              ],
+              ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // Filter toggles moved out of the blue header to the top of the results
+  // list — compact, large-radius pills on the page background.
+  Widget _buildFilterChips(ColorScheme cs) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _filterChip(
+              cs,
+              label: 'eBadge',
+              selected: _filter.trim() == _kDefaultFilter,
+              onSelected: (sel) =>
+                  _filterCtrl.text = sel ? _kDefaultFilter : '',
+            ),
+            _filterChip(
+              cs,
+              label: '仅可连接',
+              selected: _onlyConnectable,
+              onSelected: (sel) => setState(() => _onlyConnectable = sel),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _filterChip(
+    ColorScheme cs, {
+    required String label,
+    required bool selected,
+    required ValueChanged<bool> onSelected,
+  }) {
+    return FilterChip(
+      label: Text(label),
+      labelStyle: const TextStyle(fontSize: 12),
+      selected: selected,
+      onSelected: onSelected,
+      showCheckmark: false,
+      backgroundColor: cs.surface,
+      selectedColor: cs.primaryContainer,
+      side: BorderSide(color: cs.outline),
+      shape: const StadiumBorder(),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
     );
   }
 
@@ -282,14 +371,35 @@ class _ScanPageState extends ConsumerState<ScanPage>
         padding: const EdgeInsets.fromLTRB(16, 4, 6, 4),
         child: Row(
           children: [
-            Icon(Icons.location_off, color: cs.onError, size: 20),
-            const SizedBox(width: 10),
+            // Shake the icon + text together, but not the bar itself — the red
+            // background stays put so no white shows at the edges. The 9px
+            // swing stays within the 16px left padding, so nothing spills out.
             Expanded(
-              child: Text(
-                '定位未开启',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tt.bodyMedium?.copyWith(color: cs.onError),
+              child: AnimatedBuilder(
+                animation: _shakeCtl,
+                builder: (context, child) {
+                  // Decaying left-right oscillation that settles back.
+                  final t = _shakeCtl.value;
+                  final dx = math.sin(t * math.pi * 8) * 9 * (1 - t);
+                  return Transform.translate(
+                    offset: Offset(dx, 0),
+                    child: child,
+                  );
+                },
+                child: Row(
+                  children: [
+                    Icon(Icons.location_off, color: cs.onError, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '定位未开启',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.bodyMedium?.copyWith(color: cs.onError),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             _bannerAction(cs, '打开', SystemSettings.openLocationSettings),

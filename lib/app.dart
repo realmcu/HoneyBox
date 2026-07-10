@@ -11,6 +11,9 @@ import 'pages/video/video_page.dart';
 import 'pages/slideshow/slideshow_page.dart';
 import 'pages/stream/stream_page.dart';
 import 'pages/wifi/wifi_page.dart';
+import 'pages/chip_config/chip_config_page.dart';
+import 'pages/settings/settings_page.dart';
+import 'pages/ota/ota_page.dart';
 
 class EbadgeApp extends StatelessWidget {
   const EbadgeApp({super.key});
@@ -64,6 +67,16 @@ class EbadgeApp extends StatelessWidget {
               deviceName: args?['deviceName'] ?? '',
               deviceId: args?['deviceId'] ?? '',
             );
+            break;
+          // Drawer / dashboard entries — device-independent, so args are ignored.
+          case '/chip-config':
+            page = const ChipConfigPage();
+            break;
+          case '/settings':
+            page = const SettingsPage();
+            break;
+          case '/ota':
+            page = const OtaPage();
             break;
           default:
             page = const AppRoot();
