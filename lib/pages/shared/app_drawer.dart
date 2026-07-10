@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../app_info.dart';
 import '../../theme/app_theme.dart';
+import 'update_flow.dart';
 
 /// App-wide navigation drawer (nRF-Connect style): a Realtek wordmark pinned to
 /// the top, a middle list of app-level entries (chip config, settings, …), and
@@ -54,12 +55,23 @@ class AppDrawer extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: cs.outline.withValues(alpha: 0.3)),
-          // ── Bottom: app version (kept clear of the nav-gesture inset) ──
+          // ── Bottom: check Gitee for a newer release, then the app version
+          // (kept clear of the nav-gesture inset) ──
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Text('v${AppInfo.version}', style: tt.bodySmall),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _DrawerItem(
+                  icon: Icons.system_update,
+                  label: '检查更新',
+                  onTap: () => runUpdateCheck(context),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 12),
+                  child: Text('v${AppInfo.version}', style: tt.bodySmall),
+                ),
+              ],
             ),
           ),
         ],
