@@ -1,7 +1,7 @@
 name: ebadge_app
 description: eBadge Flutter application for electronic badge debugging and content management.
 publish_to: 'none'
-version: 1.0.0+1
+version: 0.8.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
