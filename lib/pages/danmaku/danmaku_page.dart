@@ -81,6 +81,9 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
     with TickerProviderStateMixin {
   final _controller = TextEditingController();
 
+  // Captured while mounted so dispose() never touches `ref` (see initState).
+  late final TransferProgressNotifier _transfer;
+
   String _fontFamily = 'sans-serif';
   double _fontSize = 48;
   bool _bold = true;
@@ -102,6 +105,10 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
   @override
   void initState() {
     super.initState();
+    // Capture the notifier while mounted; using `ref` in dispose() throws once
+    // the element is defunct and would leak this page's provider subscription
+    // (a defunct listener that crashes the next state write).
+    _transfer = ref.read(transferProgressProvider.notifier);
     _scrollCtl = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3), // replaced per period in _syncScrollAnim
@@ -112,13 +119,11 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
 
   @override
   void dispose() {
-    // Reset send status on leave so re-entering never shows a stale result.
-    final notifier = ref.read(transferProgressProvider.notifier);
-    if (ref.read(transferProgressProvider).status == TransferStatus.sending) {
-      notifier.abort();
-    } else {
-      notifier.reset();
-    }
+    // Stop any in-flight send and clear stale status so re-entering starts
+    // clean, via the captured notifier (never `ref` here). resetForDispose
+    // defers the actual state write to a microtask so it lands after unmount
+    // has closed this element's own subscription.
+    _transfer.resetForDispose();
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _scrollCtl.dispose();

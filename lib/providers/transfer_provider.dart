@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -106,5 +107,16 @@ class TransferProgressNotifier extends StateNotifier<TransferState> {
 
   void reset() {
     state = const TransferState();
+  }
+
+  /// Stop any in-flight transfer and clear its status when a sender page is
+  /// disposed. Safe to call from `State.dispose()`: writing provider state
+  /// synchronously there rebuilds the disposing (now-defunct) element and trips
+  /// a `markNeedsBuild()` assertion, so the write is deferred to a microtask
+  /// (which never runs during a build/dispose) and thus reaches only live
+  /// listeners.
+  void resetForDispose() {
+    final wasSending = state.status == TransferStatus.sending;
+    Future.microtask(() => wasSending ? abort() : reset());
   }
 }

@@ -51,6 +51,9 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   final _picker = ImagePicker();
   final TransformationController _tc = TransformationController();
 
+  // Captured while mounted so dispose() never touches `ref` (see initState).
+  late final TransferProgressNotifier _transfer;
+
   XFile? _selectedImage;
   ui.Image? _srcImage;
   int _srcW = 0;
@@ -81,14 +84,23 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   int _rebuildSeq = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // Capture the notifier while the element is still mounted. Using `ref`
+    // inside dispose() throws (the element is already defunct there), which
+    // would abort ConsumerStatefulElement.unmount() before it closes this
+    // page's provider subscription — leaking a defunct listener that then
+    // crashes on the next state write (markNeedsBuild on a defunct element).
+    _transfer = ref.read(transferProgressProvider.notifier);
+  }
+
+  @override
   void dispose() {
-    // Reset send status on leave so re-entering never shows a stale result.
-    final notifier = ref.read(transferProgressProvider.notifier);
-    if (ref.read(transferProgressProvider).status == TransferStatus.sending) {
-      notifier.abort();
-    } else {
-      notifier.reset();
-    }
+    // Stop any in-flight send and clear stale status so re-entering starts
+    // clean, via the captured notifier (never `ref` here). resetForDispose
+    // defers the actual state write to a microtask so it lands after unmount
+    // has closed this element's own subscription.
+    _transfer.resetForDispose();
     _tc.dispose();
     _srcImage?.dispose();
     super.dispose();

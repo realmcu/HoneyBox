@@ -42,7 +42,7 @@ const int _maxSlides = 5;
 const List<int> _sizePresets = [240, 360, 480];
 
 const int _maxFrames = 300; // hard safety cap on total frames
-const double _minDurationSec = 2.0;
+const double _minDurationSec = 1.0;
 const double _maxDurationSec = 5.0;
 
 // Cinepak quality presets for the still key frames — same LOW/MED/HIGH model as
@@ -101,6 +101,9 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   final _picker = ImagePicker();
   final _converter = ConverterService();
 
+  // Captured while mounted so dispose() never touches `ref` (see initState).
+  late final TransferProgressNotifier _transfer;
+
   final List<_Slide> _slides = [];
   int _nextId = 0;
   int _editingIndex = 0;
@@ -131,13 +134,23 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   Timer? _previewTimer;
 
   @override
+  void initState() {
+    super.initState();
+    // Capture the notifier while the element is still mounted. Using `ref`
+    // inside dispose() throws (the element is already defunct there), which
+    // would abort ConsumerStatefulElement.unmount() before it closes this
+    // page's provider subscription — leaking a defunct listener that then
+    // crashes on the next state write (markNeedsBuild on a defunct element).
+    _transfer = ref.read(transferProgressProvider.notifier);
+  }
+
+  @override
   void dispose() {
-    final notifier = ref.read(transferProgressProvider.notifier);
-    if (ref.read(transferProgressProvider).status == TransferStatus.sending) {
-      notifier.abort();
-    } else {
-      notifier.reset();
-    }
+    // Stop any in-flight send and clear stale status so re-entering starts
+    // clean, via the captured notifier (never `ref` here). resetForDispose
+    // defers the actual state write to a microtask so it lands after unmount
+    // has closed this element's own subscription.
+    _transfer.resetForDispose();
     _rebuildSeq++;
     _converter.cancel();
     _previewTimer?.cancel();

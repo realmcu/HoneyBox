@@ -67,6 +67,9 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   final _picker = ImagePicker();
   final _converter = ConverterService();
 
+  // Captured while mounted so dispose() never touches `ref` (see initState).
+  late final TransferProgressNotifier _transfer;
+
   String? _selectedName;
   String? _srcPath;
   String _fileName = 'video.avi';
@@ -113,14 +116,23 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   Timer? _playTimer;
 
   @override
+  void initState() {
+    super.initState();
+    // Capture the notifier while the element is still mounted. Using `ref`
+    // inside dispose() throws (the element is already defunct there), which
+    // would abort ConsumerStatefulElement.unmount() before it closes this
+    // page's provider subscription — leaking a defunct listener that then
+    // crashes on the next state write (markNeedsBuild on a defunct element).
+    _transfer = ref.read(transferProgressProvider.notifier);
+  }
+
+  @override
   void dispose() {
-    // Reset send status on leave so re-entering never shows a stale result.
-    final notifier = ref.read(transferProgressProvider.notifier);
-    if (ref.read(transferProgressProvider).status == TransferStatus.sending) {
-      notifier.abort();
-    } else {
-      notifier.reset();
-    }
+    // Stop any in-flight send and clear stale status so re-entering starts
+    // clean, via the captured notifier (never `ref` here). resetForDispose
+    // defers the actual state write to a microtask so it lands after unmount
+    // has closed this element's own subscription.
+    _transfer.resetForDispose();
     _rebuildSeq++;
     _converter.cancel();
     _playTimer?.cancel();
