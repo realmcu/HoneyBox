@@ -31,3 +31,4 @@ assert/amap.key
 assert/_demo_tmp/
 assert/send_jpg_sequence.py
 local.properties
+/JAVA_HOME

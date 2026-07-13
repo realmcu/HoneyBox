@@ -1,6 +1,14 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+// 从 local.properties 读取 release 签名信息（该文件不进 git，避免密码泄露）
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -43,8 +51,24 @@ android {
         manifestPlaceholders["AMAP_KEY"] = "c0b2e36cff7e98498992046a9a200f39"
     }
 
+    signingConfigs {
+        create("release") {
+            val storePath = keystoreProps.getProperty("RELEASE_STORE_FILE")
+            if (storePath != null) {
+                storeFile = file(storePath)
+                storePassword = keystoreProps.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = keystoreProps.getProperty("RELEASE_KEY_ALIAS")
+                keyPassword = keystoreProps.getProperty("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // 仅当 local.properties 配置了签名信息时才启用正式签名
+            if (keystoreProps.getProperty("RELEASE_STORE_FILE") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                 enable = false
             }
