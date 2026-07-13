@@ -82,6 +82,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** 常用投屏分辨率预设（宽 to 高，像素）。 */
+private val RESOLUTION_PRESETS = listOf(
+    400 to 480,
+    480 to 800,
+    600 to 1024,
+    720 to 1280,
+    800 to 480,
+    1024 to 600,
+    1280 to 720,
+)
+
 @Composable
 fun NaviHomeScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -106,6 +117,14 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
     var virtualDpi by remember {
         mutableStateOf(com.example.map1.navi.NaviCaptureService.DEFAULT_VIRTUAL_DISPLAY_DPI.toFloat())
     }
+    // 投屏分辨率（宽×高），可从预设下拉选择或手动输入
+    var castWidth by remember {
+        mutableStateOf(com.example.map1.navi.NaviCaptureService.DEFAULT_JPG_WIDTH.toString())
+    }
+    var castHeight by remember {
+        mutableStateOf(com.example.map1.navi.NaviCaptureService.DEFAULT_JPG_HEIGHT.toString())
+    }
+    var resolutionMenuExpanded by remember { mutableStateOf(false) }
     // 本机局域网 IP（提示用，帮助确认网段）
     var localIp by remember { mutableStateOf<String?>(null) }
     // 局域网扫描相关
@@ -160,6 +179,14 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
                 com.example.map1.navi.NaviCaptureService.EXTRA_DPI,
                 virtualDpi.toInt(),
             )
+            putExtra(
+                com.example.map1.navi.NaviCaptureService.EXTRA_WIDTH,
+                castWidth.toIntOrNull() ?: com.example.map1.navi.NaviCaptureService.DEFAULT_JPG_WIDTH,
+            )
+            putExtra(
+                com.example.map1.navi.NaviCaptureService.EXTRA_HEIGHT,
+                castHeight.toIntOrNull() ?: com.example.map1.navi.NaviCaptureService.DEFAULT_JPG_HEIGHT,
+            )
         }
         context.startActivity(intent)
     }
@@ -203,6 +230,11 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             NaviJpgPreviewWindow(
+                aspectRatio = run {
+                    val w = castWidth.toIntOrNull()?.takeIf { it > 0 } ?: 400
+                    val h = castHeight.toIntOrNull()?.takeIf { it > 0 } ?: 480
+                    w.toFloat() / h.toFloat()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -335,8 +367,53 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             )
         }
 
+        // 投屏分辨率：宽×高。可从常用预设下拉选择，或手动输入自定义值。
+        Text(
+            text = "投屏分辨率（宽×高，像素）",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = castWidth,
+                onValueChange = { castWidth = it.filter { c -> c.isDigit() } },
+                label = { Text("宽") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedTextField(
+                value = castHeight,
+                onValueChange = { castHeight = it.filter { c -> c.isDigit() } },
+                label = { Text("高") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Box {
+                TextButton(onClick = { resolutionMenuExpanded = true }) {
+                    Text("预设")
+                }
+                DropdownMenu(
+                    expanded = resolutionMenuExpanded,
+                    onDismissRequest = { resolutionMenuExpanded = false },
+                ) {
+                    RESOLUTION_PRESETS.forEach { (w, h) ->
+                        DropdownMenuItem(
+                            text = { Text("${w}×$h") },
+                            onClick = {
+                                castWidth = w.toString()
+                                castHeight = h.toString()
+                                resolutionMenuExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
         // UI 缩放滑块：通过改变虚拟屏渲染分辨率来真正改变导航 UI 控件尺寸。
-        // 值越大 → 渲染画布越大 → 缩放回 400×480 后 UI/字越小。160=原始大小。
+        // 值越大 → 渲染画布越大 → 缩放回目标分辨率后 UI/字越小。160=原始大小。
         Text(
             text = "导航 UI 缩放：${virtualDpi.toInt()}（越大 UI 越小，160=原始）",
             style = MaterialTheme.typography.bodySmall,
@@ -377,7 +454,10 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
 
 /** 主界面上的小窗口：同步显示虚拟屏服务最新生成的投屏 JPG，并在左上角叠加流程耗时/帧率日志。 */
 @Composable
-private fun NaviJpgPreviewWindow(modifier: Modifier = Modifier) {
+private fun NaviJpgPreviewWindow(
+    aspectRatio: Float = 400f / 480f,
+    modifier: Modifier = Modifier,
+) {
     val frame by NaviFramePreview.latestFrame.collectAsState()
     val perf by NaviPerfStats.snapshot.collectAsState()
     val imageBitmap = remember(frame) {
@@ -399,7 +479,7 @@ private fun NaviJpgPreviewWindow(modifier: Modifier = Modifier) {
                     contentDescription = "投屏 JPG 预览",
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(400f / 480f),
+                        .aspectRatio(aspectRatio),
                 )
             } else {
                 Text(

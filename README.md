@@ -1,5 +1,9 @@
 # map
 
+ Debug APK 需要自己申请高德key并绑定自己电脑上的SHA1
+ 
+ Release APK 可以使用开发团队共享的高德key和SHA1
+
 ## 临时发布测试 APK
 
 用于把 App 发给其他测试机安装时，可直接打 Debug APK。

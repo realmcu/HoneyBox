@@ -78,8 +78,11 @@ class NaviCaptureService : Service() {
     private var endLatLng = NaviLatLng(31.325, 120.629)
     private var emulatorSpeed = 60
     private var virtualDisplayDpi = DEFAULT_VIRTUAL_DISPLAY_DPI
-    private var renderWidth = JPG_WIDTH
-    private var renderHeight = JPG_HEIGHT
+    // 投屏分辨率（可由启动方通过 EXTRA_WIDTH / EXTRA_HEIGHT 指定），默认 400×480。
+    private var jpgWidth = DEFAULT_JPG_WIDTH
+    private var jpgHeight = DEFAULT_JPG_HEIGHT
+    private var renderWidth = DEFAULT_JPG_WIDTH
+    private var renderHeight = DEFAULT_JPG_HEIGHT
     private var uiRenderScale = 1f
 
     private val captureRunnable = object : Runnable {
@@ -120,6 +123,11 @@ class NaviCaptureService : Service() {
         )
         virtualDisplayDpi = intent.getIntExtra(EXTRA_DPI, DEFAULT_VIRTUAL_DISPLAY_DPI)
             .coerceIn(160, 480)
+        // 投屏分辨率：限制在合理范围并对齐到 2 的倍数，避免部分编码/传输环节对奇数宽高的兼容问题。
+        jpgWidth = intent.getIntExtra(EXTRA_WIDTH, DEFAULT_JPG_WIDTH)
+            .coerceIn(MIN_DIMENSION, MAX_DIMENSION) and 1.inv()
+        jpgHeight = intent.getIntExtra(EXTRA_HEIGHT, DEFAULT_JPG_HEIGHT)
+            .coerceIn(MIN_DIMENSION, MAX_DIMENSION) and 1.inv()
         val host = intent.getStringExtra(EXTRA_TCP_HOST).orEmpty().trim()
         val port = intent.getIntExtra(EXTRA_TCP_PORT, DEFAULT_TCP_PORT)
 
@@ -149,14 +157,14 @@ class NaviCaptureService : Service() {
             ).also { it.start() }
         }
 
-        // 始终让 ImageReader/VirtualDisplay 直接输出 400×480，这样可以一直走 ByteBuffer→TurboJPEG
+        // 始终让 ImageReader/VirtualDisplay 直接输出目标分辨率，这样可以一直走 ByteBuffer→TurboJPEG
         // 的直通编码路径。UI 缩放改由 Presentation 内部把 AMapNaviView 按更大/更小尺寸布局后再缩放显示。
         uiRenderScale = (virtualDisplayDpi.toFloat() / 160f).coerceIn(0.5f, 3f)
-        renderWidth = JPG_WIDTH
-        renderHeight = JPG_HEIGHT
-        Log.i(TAG, "uiRenderScale=$uiRenderScale, directOut=${JPG_WIDTH}x$JPG_HEIGHT")
+        renderWidth = jpgWidth
+        renderHeight = jpgHeight
+        Log.i(TAG, "uiRenderScale=$uiRenderScale, directOut=${jpgWidth}x$jpgHeight")
 
-        // ImageReader 固定接收 400×480 输出，无需 Java Bitmap 缩放。
+        // ImageReader 固定接收目标分辨率输出，无需 Java Bitmap 缩放。
         imageReader = ImageReader.newInstance(renderWidth, renderHeight, PixelFormat.RGBA_8888, 3)
 
         val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -204,6 +212,8 @@ class NaviCaptureService : Service() {
                 outerContext = this,
                 display = display,
                 uiRenderScale = uiRenderScale,
+                jpgWidth = jpgWidth,
+                jpgHeight = jpgHeight,
                 onSetupNavi = ::setupNavi,
             ).also { it.show() }
         } catch (e: Exception) {
@@ -281,7 +291,7 @@ class NaviCaptureService : Service() {
      * 交给 native TurboJPEG。这样跳过 copyPixelsFromBuffer()、Bitmap.copy() 和一次 Java Bitmap 分配。
      */
     private fun encodeImageDirectIfPossible(image: Image): ByteArray? {
-        if (image.width != JPG_WIDTH || image.height != JPG_HEIGHT) return null
+        if (image.width != jpgWidth || image.height != jpgHeight) return null
         val plane = image.planes.firstOrNull() ?: return null
         if (plane.pixelStride != 4) return null
         val encodeStartNs = System.nanoTime()
@@ -342,17 +352,17 @@ class NaviCaptureService : Service() {
 
         // 下游会 recycle 返回的位图，而 padded 是复用缓冲，不能直接交出去。
         // 无行填充且尺寸已等于输出（renderScale=1.0）：直接拷贝一份同尺寸位图（无缩放）。
-        if (rowWidth == width && width == JPG_WIDTH && height == JPG_HEIGHT) {
+        if (rowWidth == width && width == jpgWidth && height == jpgHeight) {
             return padded.copy(Bitmap.Config.ARGB_8888, false)
         }
 
-        // 去掉行填充 + 缩放到固定输出尺寸 400×480（产生新位图，不影响复用缓冲）。
+        // 去掉行填充 + 缩放到目标输出尺寸（产生新位图，不影响复用缓冲）。
         val cropped = if (rowWidth == width) padded else Bitmap.createBitmap(padded, 0, 0, width, height)
-        if (cropped.width == JPG_WIDTH && cropped.height == JPG_HEIGHT) {
+        if (cropped.width == jpgWidth && cropped.height == jpgHeight) {
             // cropped 可能就是 padded（复用缓冲），需拷贝后再交出。
             return if (cropped === padded) cropped.copy(Bitmap.Config.ARGB_8888, false) else cropped
         }
-        return Bitmap.createScaledBitmap(cropped, JPG_WIDTH, JPG_HEIGHT, true)
+        return Bitmap.createScaledBitmap(cropped, jpgWidth, jpgHeight, true)
             .also { if (it !== cropped && cropped !== padded) cropped.recycle() }
     }
 
@@ -377,7 +387,7 @@ class NaviCaptureService : Service() {
         }
         val notification: Notification = builder
             .setContentTitle("导航投屏运行中")
-            .setContentText("正在将 400×480 导航画面发送到设备")
+            .setContentText("正在将 ${jpgWidth}×$jpgHeight 导航画面发送到设备")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .build()
@@ -498,6 +508,8 @@ class NaviCaptureService : Service() {
         outerContext: Context,
         display: Display,
         private val uiRenderScale: Float,
+        private val jpgWidth: Int,
+        private val jpgHeight: Int,
         private val onSetupNavi: (AMapNaviView) -> Unit,
     ) : Presentation(outerContext, display) {
 
@@ -541,8 +553,8 @@ class NaviCaptureService : Service() {
                 isAutoLockCar = true
                 isTrafficLine = true
             }
-            val layoutWidth = (JPG_WIDTH * uiRenderScale).toInt().coerceAtLeast(1)
-            val layoutHeight = (JPG_HEIGHT * uiRenderScale).toInt().coerceAtLeast(1)
+            val layoutWidth = (jpgWidth * uiRenderScale).toInt().coerceAtLeast(1)
+            val layoutHeight = (jpgHeight * uiRenderScale).toInt().coerceAtLeast(1)
             view.pivotX = 0f
             view.pivotY = 0f
             view.scaleX = 1f / uiRenderScale
@@ -578,8 +590,11 @@ class NaviCaptureService : Service() {
         private const val NOTIFICATION_ID = 0x4001
         private const val VIRTUAL_DISPLAY_NAME = "NaviVirtualDisplay"
 
-        private const val JPG_WIDTH = 400
-        private const val JPG_HEIGHT = 480
+        // 投屏分辨率默认值与允许范围。宽/高可由 UI 通过 EXTRA_WIDTH / EXTRA_HEIGHT 指定。
+        const val DEFAULT_JPG_WIDTH = 400
+        const val DEFAULT_JPG_HEIGHT = 480
+        private const val MIN_DIMENSION = 160
+        private const val MAX_DIMENSION = 1920
         private const val JPG_QUALITY = 60
         // UI 缩放默认值（语义：渲染倍率 = 值/160）。160 = 1.0 倍，直接渲染 400×480，
         // 无需缩放，帧率最高（优化 1）。值越大渲染画布越大、UI 越小但帧率越低。
@@ -596,6 +611,8 @@ class NaviCaptureService : Service() {
         const val EXTRA_TCP_PORT = "extra_tcp_port"
         const val EXTRA_TCP_FPS = "extra_tcp_fps"
         const val EXTRA_DPI = "extra_dpi"
+        const val EXTRA_WIDTH = "extra_width"
+        const val EXTRA_HEIGHT = "extra_height"
         const val ACTION_STOP = "com.example.map1.navi.action.STOP"
 
         /** 结束虚拟屏导航的 Intent。 */
@@ -609,6 +626,8 @@ class NaviCaptureService : Service() {
             fps: Int,
             speed: Int,
             dpi: Int,
+            width: Int,
+            height: Int,
             startLat: Double,
             startLng: Double,
             endLat: Double,
@@ -619,6 +638,8 @@ class NaviCaptureService : Service() {
             putExtra(EXTRA_TCP_FPS, fps)
             putExtra(EXTRA_SPEED, speed)
             putExtra(EXTRA_DPI, dpi)
+            putExtra(EXTRA_WIDTH, width)
+            putExtra(EXTRA_HEIGHT, height)
             putExtra(EXTRA_START_LAT, startLat)
             putExtra(EXTRA_START_LNG, startLng)
             putExtra(EXTRA_END_LAT, endLat)
