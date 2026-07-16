@@ -167,6 +167,7 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
   }
 
   Widget _filterRow() {
+    final cs = Theme.of(context).colorScheme;
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -177,8 +178,18 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
                 label: Text(_filters[i].label),
+                labelStyle: const TextStyle(fontSize: 12),
                 selected: _filterIdx == i,
                 onSelected: (_) => setState(() => _filterIdx = i),
+                showCheckmark: false,
+                backgroundColor: cs.surface,
+                selectedColor: cs.primaryContainer,
+                side: BorderSide(color: cs.outline),
+                shape: const StadiumBorder(),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               ),
             ),
         ],

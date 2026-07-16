@@ -107,41 +107,99 @@ Future<void> runUpdateCheck(BuildContext context) async {
   );
   if (confirmed != true) return;
 
-  // 3. Download the APK, streaming progress into a dialog.
-  final progress = ValueNotifier<double?>(0);
-  if (!context.mounted) {
-    progress.dispose();
-    return;
-  }
-  showDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => _DownloadDialog(progress: progress),
-  );
+  // 3. Reuse a previously downloaded & verified APK when one exists, so the
+  // user isn't forced to re-download after returning from the system's
+  // "install unknown apps" permission screen. Otherwise download afresh.
+  File? apk = await UpdateService.cachedApk(result.latestVersion,
+      expectedSha256: result.apkSha256);
+  if (!context.mounted) return;
 
-  File? apk;
-  Object? downloadError;
-  try {
-    apk = await UpdateService.downloadApk(
-      result.apkUrl,
-      onProgress: (p) => progress.value = p,
+  if (apk != null) {
+    final reuse = await showDialog<bool>(
+      context: context,
+      builder: (dctx) {
+        final cs = Theme.of(dctx).colorScheme;
+        return AlertDialog(
+          title: Text('已下载 v${result.latestVersion}'),
+          content: const Text('检测到本地已有校验通过的安装包，可直接安装，无需重新下载。'),
+          actionsOverflowDirection: VerticalDirection.down,
+          actions: [
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(dctx, true),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    child: const Text('继续安装'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(dctx, false),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      backgroundColor: cs.surfaceContainerHighest,
+                      foregroundColor: cs.onSurface,
+                    ),
+                    child: const Text('重新下载'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
-  } catch (e) {
-    downloadError = e;
+    if (!context.mounted) return;
+    if (reuse == null) return; // dismissed → cancel the whole flow
+    if (reuse == false) apk = null; // fall through to a fresh download
   }
-  if (!context.mounted) {
+
+  // 4. Download when there's no reusable package (or the user chose to
+  // redownload), streaming progress into a dialog.
+  if (apk == null) {
+    final progress = ValueNotifier<double?>(0);
+    if (!context.mounted) {
+      progress.dispose();
+      return;
+    }
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _DownloadDialog(progress: progress),
+    );
+
+    Object? downloadError;
+    try {
+      apk = await UpdateService.downloadApk(
+        result.apkUrl,
+        result.latestVersion,
+        expectedSha256: result.apkSha256,
+        onProgress: (p) => progress.value = p,
+      );
+    } catch (e) {
+      downloadError = e;
+    }
+    if (!context.mounted) {
+      progress.dispose();
+      return;
+    }
+    navigator.pop(); // dismiss the progress dialog
     progress.dispose();
-    return;
-  }
-  navigator.pop(); // dismiss the progress dialog
-  progress.dispose();
 
-  if (downloadError != null || apk == null) {
-    snack('下载失败：${downloadError ?? '未知错误'}');
-    return;
+    if (downloadError != null || apk == null) {
+      snack('下载失败：${downloadError ?? '未知错误'}');
+      return;
+    }
   }
 
-  // 4. Ensure the "install unknown apps" grant, then launch the installer.
+  // 5. Ensure the "install unknown apps" grant, then launch the installer.
   if (Platform.isAndroid) {
     final status = await Permission.requestInstallPackages.request();
     if (!context.mounted) return;
