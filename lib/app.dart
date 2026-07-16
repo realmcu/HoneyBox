@@ -13,6 +13,7 @@ import 'pages/stream/stream_page.dart';
 import 'pages/wifi/wifi_page.dart';
 import 'pages/chip_config/chip_config_page.dart';
 import 'pages/settings/settings_page.dart';
+import 'pages/settings/cache_management_page.dart';
 import 'pages/ota/ota_page.dart';
 
 class EbadgeApp extends StatelessWidget {
@@ -74,6 +75,9 @@ class EbadgeApp extends StatelessWidget {
             break;
           case '/settings':
             page = const SettingsPage();
+            break;
+          case '/cache':
+            page = const CacheManagementPage();
             break;
           case '/ota':
             page = const OtaPage();

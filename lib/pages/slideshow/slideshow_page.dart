@@ -12,6 +12,8 @@ import '../../providers/transfer_provider.dart';
 import '../../services/converter.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
+import '../../services/file_cache.dart';
+import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 
@@ -127,6 +129,15 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   _ConvStatus _conv = _ConvStatus.idle;
   String? _convError;
   int _rebuildSeq = 0;
+
+  // Cache mode: when a cached carousel is loaded, the composer UI is replaced by
+  // a read-only panel and the send button re-sends the cached bytes as-is.
+  // Carousels are written into the shared 视频 pool tagged src=slideshow; the
+  // picker filters to those, so regular videos/GIFs (from the video page) don't
+  // show here and carousels don't show there.
+  CacheEntry? _cacheEntry;
+  Uint8List? _cacheBytes;
+  bool get _cacheMode => _cacheEntry != null;
 
   // Motion preview: cycles the framed snapshots at their real hold durations.
   _PlayState _play = _PlayState.stopped;
@@ -350,32 +361,37 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     _invalidate();
   }
 
-  // Playback rate derived from the picture count and total duration. A still
-  // slideshow has no motion, so fps only decides how many (largely redundant)
-  // hold frames get muxed — i.e. the file size — and how precisely each hard
-  // cut lands. So use the *lowest* rate that still gives every picture at least
-  // one frame (fps ≥ n/duration), with a floor of 2 that keeps each cut and the
-  // ≤1-frame spread within ~0.5 s. The frame count is then a small multiple of
-  // the picture count instead of duration·10, so a longer clip barely grows.
-  int get _slideFps {
-    final n = _slides.length;
-    if (n <= 1) return 1; // single still: no transitions to time
-    final need = (n / _durationSec).ceil(); // ≥ 1 frame per picture
-    if (need < 2) return 2;
-    if (need > 6) return 6; // bound the frame count if the limits ever grow
-    return need;
-  }
+  // Slideshow frame rate. The pictures are stills, and every hold repeat is an
+  // idempotent no-op inter frame in Cinepak (see native encodeFrames), so the
+  // repeats are near-free in the file. A higher, fixed rate therefore costs
+  // almost nothing yet lets an equal per-picture frame count land the chosen
+  // duration precisely — 10 fps gives 0.1 s timing granularity.
+  int get _slideFps => 10;
 
-  // Per-image displayed-frame counts: total = duration·fps split as evenly as
-  // possible across the slides (each ≥ 1), so the clip runs for the chosen
-  // duration and every picture gets a fair share.
+  // Per-image displayed-frame count. Every picture is held for the SAME number
+  // of frames k, so the key frames are evenly spaced and the loop's wrap-around
+  // (last picture → first) is just another evenly-timed cut — no short or long
+  // picture at the seam. k is derived from the chosen duration (rounded, ≥ 1)
+  // and the real total is k·n frames, capped at [_maxFrames]. Rounding to whole
+  // frames means the clip's true length can differ slightly from the slider;
+  // see [_actualDurationSec].
   List<int> _currentHolds() {
     final n = _slides.length;
     if (n == 0) return const [];
-    final total = (_durationSec * _slideFps).round().clamp(n, _maxFrames);
-    final base = total ~/ n;
-    final rem = total % n;
-    return [for (int i = 0; i < n; i++) base + (i < rem ? 1 : 0)];
+    int k = (_durationSec * _slideFps / n).round();
+    if (k < 1) k = 1;
+    if (k * n > _maxFrames) k = _maxFrames ~/ n;
+    if (k < 1) k = 1;
+    return List<int>.filled(n, k);
+  }
+
+  // The clip's real duration once every picture is rounded to k equal frames
+  // (k·n / fps seconds). Shown to the user instead of the raw slider value.
+  double get _actualDurationSec {
+    final holds = _currentHolds();
+    if (holds.isEmpty) return 0;
+    final total = holds.fold<int>(0, (s, h) => s + h);
+    return total / _slideFps;
   }
 
   // ── Convert ─────────────────────────────────────────────────────────────────
@@ -482,9 +498,62 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   void _send() {
     final avi = _avi;
     if (avi == null || _conv != _ConvStatus.ready || _sending) return;
-    ref
-        .read(transferProgressProvider.notifier)
-        .send(TYPE.video, avi, 'carousel.avi');
+    ref.read(transferProgressProvider.notifier).send(
+          TYPE.video,
+          avi,
+          'carousel.avi',
+          cache: CacheSpec(CacheKind.video, {
+            'src': 'slideshow', // tag so the picker can show only carousels
+            'size': '$_size',
+            'frames': '$_frameCount',
+            'slides': '${_slides.length}',
+          }),
+        );
+  }
+
+  // ── Cache load / send ────────────────────────────────────────────────────
+  Future<void> _loadCache() async {
+    if (_isBusy) return;
+    // Only carousels made on this page (src=slideshow); labeled 轮播 in the sheet.
+    final entry = await showCachePicker(
+      context,
+      CacheKind.video,
+      where: (e) => e.params['src'] == 'slideshow',
+      label: '轮播',
+    );
+    if (entry == null || !mounted) return;
+    try {
+      final bytes = await entry.file.readAsBytes();
+      if (!mounted) return;
+      _stopPlayback(); // halt the motion preview before swapping to the panel
+      setState(() {
+        _cacheEntry = entry;
+        _cacheBytes = bytes;
+      });
+      ref.read(transferProgressProvider.notifier).reset();
+    } catch (e) {
+      _snack('读取缓存失败: $e');
+    }
+  }
+
+  void _clearCache() {
+    setState(() {
+      _cacheEntry = null;
+      _cacheBytes = null;
+    });
+  }
+
+  // Re-send the loaded cache bytes unchanged; no cache: arg so it isn't re-cached.
+  void _sendCache() {
+    final bytes = _cacheBytes;
+    final entry = _cacheEntry;
+    if (bytes == null || entry == null || _sending) return;
+    ref.read(transferProgressProvider.notifier).send(
+          entry.kind.fileType,
+          bytes,
+          entry.kind.deviceName,
+          trailingByte: entry.kind.trailingByte,
+        );
   }
 
   // ── Motion preview ──────────────────────────────────────────────────────────
@@ -542,7 +611,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
       appBar: AppBar(
         title: const Text('多图轮播'),
         actions: [
-          if (_slides.isNotEmpty)
+          if (_slides.isNotEmpty && !_cacheMode)
             IconButton(
               onPressed: (_isBusy || _slides.length >= _maxSlides)
                   ? null
@@ -562,27 +631,35 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_slides.isEmpty)
-                    _buildPickHint(theme, cs)
-                  else ...[
-                    _buildPreview(theme, cs),
-                    const SizedBox(height: 8),
-                    _buildViewControls(theme, cs),
-                    const SizedBox(height: 12),
-                    _buildStrip(theme, cs),
-                    const SizedBox(height: 16),
-                    _buildSizeSelector(theme, cs),
-                    const SizedBox(height: 8),
-                    _buildQualitySelector(theme, cs),
-                    const SizedBox(height: 8),
-                    _buildBgColorRow(theme, cs),
-                    const SizedBox(height: 8),
-                    _buildDurationRow(theme, cs),
-                    const SizedBox(height: 12),
-                    _buildConvInfo(theme, cs),
-                  ],
-                ],
+                children: _cacheMode
+                    ? [
+                        CacheLoadedPanel(
+                          entry: _cacheEntry!,
+                          onChange: _loadCache,
+                          onClear: _clearCache,
+                        ),
+                      ]
+                    : [
+                        if (_slides.isEmpty)
+                          _buildPickHint(theme, cs)
+                        else ...[
+                          _buildPreview(theme, cs),
+                          const SizedBox(height: 8),
+                          _buildViewControls(theme, cs),
+                          const SizedBox(height: 12),
+                          _buildStrip(theme, cs),
+                          const SizedBox(height: 16),
+                          _buildSizeSelector(theme, cs),
+                          const SizedBox(height: 8),
+                          _buildQualitySelector(theme, cs),
+                          const SizedBox(height: 8),
+                          _buildBgColorRow(theme, cs),
+                          const SizedBox(height: 8),
+                          _buildDurationRow(theme, cs),
+                          const SizedBox(height: 12),
+                          _buildConvInfo(theme, cs),
+                        ],
+                      ],
               ),
             ),
           ),
@@ -970,7 +1047,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text('${_slides.length} 张 · 约 ${_durationSec.toStringAsFixed(1)}s',
+        Text('${_slides.length} 张 · 约 ${_actualDurationSec.toStringAsFixed(1)}s',
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: cs.onSurfaceVariant)),
         Flexible(
@@ -1105,20 +1182,40 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
         ],
       );
     }
+    // Cache mode: re-send the loaded cache bytes as-is.
+    if (_cacheMode) {
+      return _withLoadButton(FilledButton.icon(
+        onPressed: _cacheBytes != null ? _sendCache : null,
+        icon: const Icon(Icons.send),
+        label: const Text('发送缓存'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      ));
+    }
     if (_conv == _ConvStatus.ready) {
-      return FilledButton.icon(
+      return _withLoadButton(FilledButton.icon(
         onPressed: _send,
         icon: const Icon(Icons.send),
         label: const Text('发送到设备'),
         style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-      );
+      ));
     }
     // idle or error → convert.
-    return FilledButton.icon(
+    return _withLoadButton(FilledButton.icon(
       onPressed: _slides.isNotEmpty ? _convert : null,
       icon: const Icon(Icons.movie_filter_outlined),
       label: const Text('合成转换'),
       style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+    ));
+  }
+
+  // Circular "load cache" button sits to the left of the primary action.
+  Widget _withLoadButton(Widget primary) {
+    return Row(
+      children: [
+        CacheLoadButton(onPressed: _loadCache),
+        const SizedBox(width: 12),
+        Expanded(child: primary),
+      ],
     );
   }
 }

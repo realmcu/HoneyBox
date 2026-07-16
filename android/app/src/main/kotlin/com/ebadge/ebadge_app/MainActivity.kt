@@ -154,6 +154,7 @@ class MainActivity : FlutterActivity() {
                 "convertVideo" -> handleConvertVideo(call, result)
                 "encodeScroll" -> handleEncodeScroll(call, result)
                 "encodeFrames" -> handleEncodeFrames(call, result)
+                "decodeCvid" -> handleDecodeCvid(call, result)
                 "cancelConvert" -> {
                     convertCancel?.set(true)
                     result.success(null)
@@ -247,6 +248,34 @@ class MainActivity : FlutterActivity() {
                 }
             } catch (e: Exception) {
                 mainHandler.post { result.error("preview_failed", e.message ?: "读取预览帧失败", null) }
+            }
+        }
+    }
+
+    // Decode a cached CVID/AVI back into downscaled preview frames (Cinepak is
+    // not decodable by any platform player — see [CinepakDecoder]).
+    private fun handleDecodeCvid(call: MethodCall, result: MethodChannel.Result) {
+        val path = call.argument<String>("path")
+        if (path == null) {
+            result.error("bad_args", "path required", null)
+            return
+        }
+        val maxCount = call.argument<Int>("maxCount") ?: 60
+        val maxEdge = call.argument<Int>("maxEdge") ?: 200
+        converterExecutor.execute {
+            try {
+                val bytes = java.io.File(path).readBytes()
+                val clip = converter.decodeCvidPreview(bytes, maxCount, maxEdge)
+                mainHandler.post {
+                    result.success(
+                        mapOf(
+                            "frames" to clip.frames,
+                            "intervalMs" to clip.intervalMs,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                mainHandler.post { result.error("decode_failed", e.message ?: "解码预览失败", null) }
             }
         }
     }

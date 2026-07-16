@@ -14,6 +14,8 @@ import '../../services/converter.dart';
 import '../../services/video_preview_player.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
+import '../../services/file_cache.dart';
+import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 
@@ -102,6 +104,12 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   _ConvStatus _conv = _ConvStatus.idle;
   String? _convError;
   int _rebuildSeq = 0;
+
+  // Cache mode: when a cached AVI is loaded, the picker/convert UI is replaced
+  // by a read-only panel and the send button re-sends the cached bytes as-is.
+  CacheEntry? _cacheEntry;
+  Uint8List? _cacheBytes;
+  bool get _cacheMode => _cacheEntry != null;
 
   // Motion preview. Real videos play the original through [_player] (native
   // MediaPlayer → Flutter texture). GIFs (which MediaPlayer can't play) fall
@@ -428,7 +436,62 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   void _send() {
     final avi = _avi;
     if (avi == null || _conv != _ConvStatus.ready || _sending) return;
-    ref.read(transferProgressProvider.notifier).send(TYPE.video, avi, _fileName);
+    ref.read(transferProgressProvider.notifier).send(
+          TYPE.video,
+          avi,
+          _fileName,
+          cache: CacheSpec(CacheKind.video, {
+            'src': _isGif ? 'gif' : 'video', // distinguishes GIF/视频/轮播 in cache
+            'size': '$_size',
+            'fps': '$_fps',
+            'q': '$_quality',
+            'frames': '$_frameCount',
+          }),
+        );
+  }
+
+  // ── Cache load / send ────────────────────────────────────────────────────
+  Future<void> _loadCache() async {
+    if (_isBusy) return;
+    // Show 视频/GIF caches only; carousels (src=slideshow) live on their own page.
+    final entry = await showCachePicker(
+      context,
+      CacheKind.video,
+      where: (e) => e.params['src'] != 'slideshow',
+    );
+    if (entry == null || !mounted) return;
+    try {
+      final bytes = await entry.file.readAsBytes();
+      if (!mounted) return;
+      _stopPlayback(); // halt any motion preview before swapping to the panel
+      setState(() {
+        _cacheEntry = entry;
+        _cacheBytes = bytes;
+      });
+      ref.read(transferProgressProvider.notifier).reset();
+    } catch (e) {
+      _snack('读取缓存失败: $e');
+    }
+  }
+
+  void _clearCache() {
+    setState(() {
+      _cacheEntry = null;
+      _cacheBytes = null;
+    });
+  }
+
+  // Re-send the loaded cache bytes unchanged; no cache: arg so it isn't re-cached.
+  void _sendCache() {
+    final bytes = _cacheBytes;
+    final entry = _cacheEntry;
+    if (bytes == null || entry == null || _sending) return;
+    ref.read(transferProgressProvider.notifier).send(
+          entry.kind.fileType,
+          bytes,
+          entry.kind.deviceName,
+          trailingByte: entry.kind.trailingByte,
+        );
   }
 
   // ── Motion preview (play / pause / stop) ────────────────────────────────────
@@ -579,7 +642,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       appBar: AppBar(
         title: const Text('发送视频'),
         actions: [
-          if (_srcPath != null)
+          if (_srcPath != null && !_cacheMode)
             IconButton(
               onPressed: _isBusy ? null : _showPickSheet,
               icon: const Icon(Icons.folder_open),
@@ -599,30 +662,40 @@ class _VideoPageState extends ConsumerState<VideoPage> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_srcPath == null)
-                    _buildPickHint(theme, cs)
-                  else ...[
-                    if (_thumb != null) ...[
-                      _buildPreview(theme, cs),
-                      const SizedBox(height: 8),
-                      _buildViewControls(theme, cs),
-                    ] else
-                      _buildNoPreview(theme, cs),
-                    const SizedBox(height: 16),
-                    _buildChipRow(theme, '尺寸', _sizePresets,
-                        (s) => s == _size, (s) => _onSizeTap(s), (s) => '$s'),
-                    const SizedBox(height: 8),
-                    _buildChipRow(theme, '帧率', _fpsPresets, (f) => f == _fps,
-                        (f) => _onFpsTap(f), (f) => '$f'),
-                    const SizedBox(height: 8),
-                    _buildQualityRow(theme),
-                    const SizedBox(height: 8),
-                    _buildBgColorRow(theme, cs),
-                    const SizedBox(height: 12),
-                    _buildConvInfo(theme, cs),
-                  ],
-                ],
+                children: _cacheMode
+                    ? [
+                        CacheLoadedPanel(
+                          entry: _cacheEntry!,
+                          onChange: _loadCache,
+                          onClear: _clearCache,
+                        ),
+                      ]
+                    : [
+                        if (_srcPath == null)
+                          _buildPickHint(theme, cs)
+                        else ...[
+                          if (_thumb != null) ...[
+                            _buildPreview(theme, cs),
+                            const SizedBox(height: 8),
+                            _buildViewControls(theme, cs),
+                          ] else
+                            _buildNoPreview(theme, cs),
+                          const SizedBox(height: 16),
+                          _buildChipRow(theme, '尺寸', _sizePresets,
+                              (s) => s == _size, (s) => _onSizeTap(s),
+                              (s) => '$s'),
+                          const SizedBox(height: 8),
+                          _buildChipRow(theme, '帧率', _fpsPresets,
+                              (f) => f == _fps, (f) => _onFpsTap(f),
+                              (f) => '$f'),
+                          const SizedBox(height: 8),
+                          _buildQualityRow(theme),
+                          const SizedBox(height: 8),
+                          _buildBgColorRow(theme, cs),
+                          const SizedBox(height: 12),
+                          _buildConvInfo(theme, cs),
+                        ],
+                      ],
               ),
             ),
           ),
@@ -1066,20 +1139,40 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         ],
       );
     }
+    // Cache mode: re-send the loaded cache bytes as-is.
+    if (_cacheMode) {
+      return _withLoadButton(FilledButton.icon(
+        onPressed: _cacheBytes != null ? _sendCache : null,
+        icon: const Icon(Icons.send),
+        label: const Text('发送缓存'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      ));
+    }
     if (_conv == _ConvStatus.ready) {
-      return FilledButton.icon(
+      return _withLoadButton(FilledButton.icon(
         onPressed: _send,
         icon: const Icon(Icons.send),
         label: const Text('发送到设备'),
         style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-      );
+      ));
     }
     // idle or error → convert.
-    return FilledButton.icon(
+    return _withLoadButton(FilledButton.icon(
       onPressed: _srcPath != null ? _convert : null,
       icon: const Icon(Icons.transform),
       label: const Text('转换为视频'),
       style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+    ));
+  }
+
+  // Circular "load cache" button sits to the left of the primary action.
+  Widget _withLoadButton(Widget primary) {
+    return Row(
+      children: [
+        CacheLoadButton(onPressed: _loadCache),
+        const SizedBox(width: 12),
+        Expanded(child: primary),
+      ],
     );
   }
 }

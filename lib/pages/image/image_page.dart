@@ -11,6 +11,8 @@ import '../../providers/transfer_provider.dart';
 import '../../services/image_bin.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
+import '../../services/file_cache.dart';
+import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 
@@ -82,6 +84,12 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   bool _usedCompress = false; // whether RLE (the smaller one) was chosen
   bool _converting = false;
   int _rebuildSeq = 0;
+
+  // Cache mode: when a cached file is loaded, the editing UI is replaced by a
+  // read-only panel and the send button re-sends the cached bytes as-is.
+  CacheEntry? _cacheEntry;
+  Uint8List? _cacheBytes;
+  bool get _cacheMode => _cacheEntry != null;
 
   @override
   void initState() {
@@ -256,9 +264,56 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   void _send() {
     final bin = _bin;
     if (bin == null || _converting || _isSending) return;
-    ref
-        .read(transferProgressProvider.notifier)
-        .send(TYPE.image, bin, _fileName, trailingByte: 0); // 0 = 图片
+    ref.read(transferProgressProvider.notifier).send(
+          TYPE.image,
+          bin,
+          _fileName,
+          trailingByte: 0, // 0 = 图片
+          cache: CacheSpec(CacheKind.image, {
+            'size': '$_size',
+            'cmp': _usedCompress ? 'rle' : 'raw',
+          }),
+        );
+  }
+
+  // ── Cache load / send ────────────────────────────────────────────────────
+  Future<void> _loadCache() async {
+    if (_isSending) return;
+    final entry = await showCachePicker(context, CacheKind.image);
+    if (entry == null || !mounted) return;
+    try {
+      final bytes = await entry.file.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _cacheEntry = entry;
+        _cacheBytes = bytes;
+      });
+      ref.read(transferProgressProvider.notifier).reset();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('读取缓存失败: $e')));
+    }
+  }
+
+  void _clearCache() {
+    setState(() {
+      _cacheEntry = null;
+      _cacheBytes = null;
+    });
+  }
+
+  // Re-send the loaded cache bytes unchanged; no cache: arg so it isn't re-cached.
+  void _sendCache() {
+    final bytes = _cacheBytes;
+    final entry = _cacheEntry;
+    if (bytes == null || entry == null || _isSending) return;
+    ref.read(transferProgressProvider.notifier).send(
+          entry.kind.fileType,
+          bytes,
+          entry.kind.deviceName,
+          trailingByte: entry.kind.trailingByte,
+        );
   }
 
   @override
@@ -272,7 +327,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
       appBar: AppBar(
         title: const Text('发送图片'),
         actions: [
-          if (_selectedImage != null)
+          if (_selectedImage != null && !_cacheMode)
             IconButton(
               onPressed: _isSending ? null : _pickImage,
               icon: const Icon(Icons.folder_open),
@@ -292,23 +347,31 @@ class _ImagePageState extends ConsumerState<ImagePage> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_selectedImage == null)
-                    _buildPickHint(theme, cs)
-                  else ...[
-                    _buildPreview(theme, cs),
-                    const SizedBox(height: 8),
-                    _buildViewControls(theme, cs),
-                    const SizedBox(height: 16),
-                    _buildSizeSelector(theme, cs),
-                    const SizedBox(height: 8),
-                    _buildBgColorRow(theme, cs),
-                    const SizedBox(height: 8),
-                    _buildToggles(theme, cs),
-                    const SizedBox(height: 12),
-                    _buildBinInfo(theme, cs),
-                  ],
-                ],
+                children: _cacheMode
+                    ? [
+                        CacheLoadedPanel(
+                          entry: _cacheEntry!,
+                          onChange: _loadCache,
+                          onClear: _clearCache,
+                        ),
+                      ]
+                    : [
+                        if (_selectedImage == null)
+                          _buildPickHint(theme, cs)
+                        else ...[
+                          _buildPreview(theme, cs),
+                          const SizedBox(height: 8),
+                          _buildViewControls(theme, cs),
+                          const SizedBox(height: 16),
+                          _buildSizeSelector(theme, cs),
+                          const SizedBox(height: 8),
+                          _buildBgColorRow(theme, cs),
+                          const SizedBox(height: 8),
+                          _buildToggles(theme, cs),
+                          const SizedBox(height: 12),
+                          _buildBinInfo(theme, cs),
+                        ],
+                      ],
               ),
             ),
           ),
@@ -643,14 +706,32 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         ),
       );
     }
-    // Stay enabled during a re-convert (the retained bin is still valid) to
-    // avoid a color flash on each zoom/pan; _send() no-ops while _converting.
-    final bool canSend = _bin != null && _selectedImage != null;
-    return FilledButton.icon(
-      onPressed: canSend ? _send : null,
-      icon: const Icon(Icons.send),
-      label: const Text('发送到设备'),
-      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+    final Widget primary;
+    if (_cacheMode) {
+      primary = FilledButton.icon(
+        onPressed: _cacheBytes != null ? _sendCache : null,
+        icon: const Icon(Icons.send),
+        label: const Text('发送缓存'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      );
+    } else {
+      // Stay enabled during a re-convert (the retained bin is still valid) to
+      // avoid a color flash on each zoom/pan; _send() no-ops while _converting.
+      final bool canSend = _bin != null && _selectedImage != null;
+      primary = FilledButton.icon(
+        onPressed: canSend ? _send : null,
+        icon: const Icon(Icons.send),
+        label: const Text('发送到设备'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      );
+    }
+    // Circular "load cache" button sits to the left of the send button.
+    return Row(
+      children: [
+        CacheLoadButton(onPressed: _loadCache),
+        const SizedBox(width: 12),
+        Expanded(child: primary),
+      ],
     );
   }
 }

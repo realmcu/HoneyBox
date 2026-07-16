@@ -350,3 +350,82 @@ ImageBinResult buildImageBinAdaptive(
     rleSize: rle.length,
   );
 }
+
+// ── Decode (bin → RGBA, for previewing cached files) ─────────────────────────
+
+/// RGBA8888 pixels decoded from a HoneyGUI `.bin` (see [buildImageBin]).
+class ImageBinPixels {
+  final Uint8List rgba; // w*h*4
+  final int width;
+  final int height;
+  const ImageBinPixels({
+    required this.rgba,
+    required this.width,
+    required this.height,
+  });
+}
+
+/// Expand a little-endian RGB565 value into RGBA at [rgba]\[o..o+3] (opaque).
+/// Low bits are replicated into the freed low bits so full white/black map back
+/// exactly (5→8 and 6→8 bit expansion).
+void _writeRgb565(Uint8List rgba, int o, int v) {
+  final int r5 = (v >> 11) & 0x1F;
+  final int g6 = (v >> 5) & 0x3F;
+  final int b5 = v & 0x1F;
+  rgba[o] = (r5 << 3) | (r5 >> 2);
+  rgba[o + 1] = (g6 << 2) | (g6 >> 4);
+  rgba[o + 2] = (b5 << 3) | (b5 >> 2);
+  rgba[o + 3] = 0xFF;
+}
+
+/// Decode a HoneyGUI RGB565 `.bin` (uncompressed **or** RLE, as produced by
+/// [buildImageBin]) back into RGBA8888 for on-screen preview. Returns null when
+/// the bytes are too short or the header is malformed. Inverse of the encoder:
+/// reads the 8-byte gui_rgb_data_head_t, and for RLE walks the per-line offset
+/// table + `[len:1][pixel:2]` nodes.
+ImageBinPixels? decodeImageBin(Uint8List bin) {
+  if (bin.length < _rgbDataHeaderBytes) return null;
+  final bd = ByteData.sublistView(bin);
+  final int flags = bd.getUint8(0);
+  final bool compressed = (flags & (1 << 4)) != 0;
+  final int width = bd.getInt16(2, Endian.little);
+  final int height = bd.getInt16(4, Endian.little);
+  if (width <= 0 || height <= 0) return null;
+  final int n = width * height;
+  final rgba = Uint8List(n * 4);
+
+  if (!compressed) {
+    if (bin.length < _rgbDataHeaderBytes + n * 2) return null;
+    int p = _rgbDataHeaderBytes;
+    for (int i = 0; i < n; i++) {
+      _writeRgb565(rgba, i * 4, bd.getUint16(p, Endian.little));
+      p += 2;
+    }
+    return ImageBinPixels(rgba: rgba, width: width, height: height);
+  }
+
+  // RLE: header(8) + imdc(12) + offset table (h+1)*4 + per-line nodes. Table
+  // entries are offsets from the imdc start, so absolute file offset = 8 + entry.
+  const int tableStart = _rgbDataHeaderBytes + 12;
+  if (bin.length < tableStart + (height + 1) * 4) return null;
+  for (int line = 0; line < height; line++) {
+    final int start =
+        _rgbDataHeaderBytes + bd.getUint32(tableStart + line * 4, Endian.little);
+    final int end = _rgbDataHeaderBytes +
+        bd.getUint32(tableStart + (line + 1) * 4, Endian.little);
+    int p = start;
+    int col = 0;
+    final int rowBase = line * width * 4;
+    // Each node is 3 bytes: p+2 < end ⇔ 3 bytes ([len][px_lo][px_hi]) remain.
+    while (p + 2 < end && col < width) {
+      final int run = bd.getUint8(p);
+      final int v = bd.getUint16(p + 1, Endian.little);
+      p += 3;
+      for (int k = 0; k < run && col < width; k++) {
+        _writeRgb565(rgba, rowBase + col * 4, v);
+        col++;
+      }
+    }
+  }
+  return ImageBinPixels(rgba: rgba, width: width, height: height);
+}

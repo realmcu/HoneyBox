@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'ble_provider.dart';
+import '../services/file_cache.dart';
 
 enum TransferStatus { idle, sending, done, error }
 
@@ -52,8 +53,13 @@ class TransferProgressNotifier extends StateNotifier<TransferState> {
   /// very end of [buffer], becoming the last byte of the transferred payload.
   /// Used to tag the kind of a TYPE.image file for the device: 0 = picture,
   /// 1 = danmaku.
+  ///
+  /// When [cache] is non-null, the (pre-trailing-byte) [buffer] is written to
+  /// the local send-cache on successful completion, so it can later be reloaded
+  /// and re-sent without re-conversion. Pass null (the default) to skip caching
+  /// — e.g. when re-sending a file that was itself loaded from the cache.
   void send(int fileType, Uint8List buffer, String filename,
-      {int? trailingByte}) {
+      {int? trailingByte, CacheSpec? cache}) {
     final bleManager = _ref.read(bleManagerProvider);
     final session = bleManager.session;
     if (session == null) {
@@ -80,6 +86,12 @@ class TransferProgressNotifier extends StateNotifier<TransferState> {
 
     session.onComplete = () {
       state = const TransferState(status: TransferStatus.done, progress: 1.0);
+      // Cache the converted artifact on success only (fire-and-forget). The
+      // cached buffer excludes the trailing content-kind byte so re-sending it
+      // through send() reproduces the identical payload.
+      if (cache != null) {
+        _ref.read(fileCacheProvider).add(cache.kind, buffer, cache.params);
+      }
     };
 
     session.onError = (reason) {

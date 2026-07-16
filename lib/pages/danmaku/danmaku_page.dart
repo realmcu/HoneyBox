@@ -10,6 +10,8 @@ import '../../providers/transfer_provider.dart';
 import '../../services/image_bin.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
+import '../../services/file_cache.dart';
+import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 
@@ -96,6 +98,12 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
   Uint8List? _bin;
   int _binSize = 0;
   int _rebuildSeq = 0;
+
+  // Cache mode: a loaded cached danmaku replaces the editor with a read-only
+  // panel; the send button then re-sends those bytes unchanged.
+  CacheEntry? _cacheEntry;
+  Uint8List? _cacheBytes;
+  bool get _cacheMode => _cacheEntry != null;
 
   // Scroll mode drives the circular preview animation only; the send payload is
   // the full-text image from _rebuild (identical in both preview modes).
@@ -289,9 +297,50 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
     }
     final bin = _bin;
     if (bin == null) return;
-    ref
-        .read(transferProgressProvider.notifier)
-        .send(TYPE.image, bin, 'danmaku.bin', trailingByte: 1); // 1 = 弹幕
+    ref.read(transferProgressProvider.notifier).send(
+          TYPE.image,
+          bin,
+          'danmaku.bin',
+          trailingByte: 1, // 1 = 弹幕
+          cache: CacheSpec(CacheKind.danmaku, {'w': '$_imgW', 'h': '$_imgH'}),
+        );
+  }
+
+  // ── Cache load / send ────────────────────────────────────────────────────
+  Future<void> _loadCache() async {
+    if (_isSending) return;
+    final entry = await showCachePicker(context, CacheKind.danmaku);
+    if (entry == null || !mounted) return;
+    try {
+      final bytes = await entry.file.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _cacheEntry = entry;
+        _cacheBytes = bytes;
+      });
+      ref.read(transferProgressProvider.notifier).reset();
+    } catch (e) {
+      _snack('读取缓存失败: $e');
+    }
+  }
+
+  void _clearCache() {
+    setState(() {
+      _cacheEntry = null;
+      _cacheBytes = null;
+    });
+  }
+
+  void _sendCache() {
+    final bytes = _cacheBytes;
+    final entry = _cacheEntry;
+    if (bytes == null || entry == null || _isSending) return;
+    ref.read(transferProgressProvider.notifier).send(
+          entry.kind.fileType,
+          bytes,
+          entry.kind.deviceName,
+          trailingByte: entry.kind.trailingByte,
+        );
   }
 
   @override
@@ -310,24 +359,32 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildPreview(theme, cs),
-                  const SizedBox(height: 16),
-                  _buildModeRow(theme, cs),
-                  const SizedBox(height: 12),
-                  _buildTextField(theme, cs),
-                  const SizedBox(height: 12),
-                  _buildFontRow(theme, cs),
-                  const SizedBox(height: 4),
-                  _buildSizeSlider(theme, cs),
-                  _buildBoldSwitch(theme, cs),
-                  const SizedBox(height: 8),
-                  _buildColorRow(theme, cs, '文字颜色', _textColors, _textColor,
-                      _onTextColorTap),
-                  const SizedBox(height: 8),
-                  _buildColorRow(
-                      theme, cs, '背景颜色', _bgColors, _bgColor, _onBgColorTap),
-                ],
+                children: _cacheMode
+                    ? [
+                        CacheLoadedPanel(
+                          entry: _cacheEntry!,
+                          onChange: _loadCache,
+                          onClear: _clearCache,
+                        ),
+                      ]
+                    : [
+                        _buildPreview(theme, cs),
+                        const SizedBox(height: 16),
+                        _buildModeRow(theme, cs),
+                        const SizedBox(height: 12),
+                        _buildTextField(theme, cs),
+                        const SizedBox(height: 12),
+                        _buildFontRow(theme, cs),
+                        const SizedBox(height: 4),
+                        _buildSizeSlider(theme, cs),
+                        _buildBoldSwitch(theme, cs),
+                        const SizedBox(height: 8),
+                        _buildColorRow(theme, cs, '文字颜色', _textColors,
+                            _textColor, _onTextColorTap),
+                        const SizedBox(height: 8),
+                        _buildColorRow(theme, cs, '背景颜色', _bgColors, _bgColor,
+                            _onBgColorTap),
+                      ],
               ),
             ),
           ),
@@ -628,12 +685,30 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
         ),
       );
     }
-    final bool canSend = _bin != null && _controller.text.trim().isNotEmpty;
-    return FilledButton.icon(
-      onPressed: canSend ? _send : null,
-      icon: const Icon(Icons.send),
-      label: const Text('发送到设备'),
-      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+    final Widget primary;
+    if (_cacheMode) {
+      primary = FilledButton.icon(
+        onPressed: _cacheBytes != null ? _sendCache : null,
+        icon: const Icon(Icons.send),
+        label: const Text('发送缓存'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      );
+    } else {
+      final bool canSend = _bin != null && _controller.text.trim().isNotEmpty;
+      primary = FilledButton.icon(
+        onPressed: canSend ? _send : null,
+        icon: const Icon(Icons.send),
+        label: const Text('发送到设备'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+      );
+    }
+    // Circular "load cache" button sits to the left of the send button.
+    return Row(
+      children: [
+        CacheLoadButton(onPressed: _loadCache),
+        const SizedBox(width: 12),
+        Expanded(child: primary),
+      ],
     );
   }
 }

@@ -114,6 +114,33 @@ class ConverterService {
     );
   }
 
+  /// Decode a cached CVID/AVI (our own Cinepak format — no platform player can
+  /// play it) into a short set of downscaled PNG frames for in-app preview,
+  /// which the caller cycles like [getVideoFrames]. Every frame is decoded in
+  /// order natively (inter frames depend on the running reconstruction); at most
+  /// [maxCount] evenly-sampled frames come back, each downscaled to ≤ [maxEdge]px.
+  Future<VideoPreview> decodeCachedVideo(
+    String path, {
+    int maxCount = 60,
+    int maxEdge = 200,
+  }) async {
+    _ensureHandler();
+    final res = await _method.invokeMethod('decodeCvid', {
+      'path': path,
+      'maxCount': maxCount,
+      'maxEdge': maxEdge,
+    });
+    final map = (res as Map).cast<dynamic, dynamic>();
+    final raw = (map['frames'] as List).cast<Object?>();
+    final frames = <Uint8List>[
+      for (final f in raw) f as Uint8List,
+    ];
+    return VideoPreview(
+      frames: frames,
+      intervalMs: (map['intervalMs'] as num?)?.toInt() ?? 100,
+    );
+  }
+
   /// Render a pre-drawn danmaku [strip] (raw RGBA, [stripW]×[stripH]) as a
   /// seamless looping AVI(CVID) that scrolls the strip right→left across a
   /// [size]×[size] canvas — used for the danmaku "scroll" mode, since the

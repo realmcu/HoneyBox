@@ -203,6 +203,42 @@ class VideoConverter {
         return PreviewClip(frames, interval)
     }
 
+    // ── cached-clip preview (decode our own CVID/AVI back to frames) ─────────
+    // The cached .avi is Cinepak — no Android platform decoder (MediaCodec /
+    // MediaMetadataRetriever / ExoPlayer) can read it — so we decode it ourselves
+    // ([CinepakDecoder]) into a short set of downscaled PNG frames the Flutter
+    // side cycles, exactly like previewFrames does for a source video/GIF.
+    // Inter frames depend on the running reconstruction, so every frame is
+    // decoded in order; only the evenly-sampled subset (≤ maxCount) is PNG-encoded.
+    fun decodeCvidPreview(avi: ByteArray, maxCount: Int, maxEdge: Int): PreviewClip {
+        val parsed = CinepakDecoder.parseAvi(avi)
+        val n = parsed.frames.size
+        val w = parsed.width
+        val h = parsed.height
+        val outCount = maxOf(1, minOf(maxCount, n))
+        val pick = BooleanArray(n)
+        if (outCount >= n) {
+            for (i in 0 until n) pick[i] = true
+        } else {
+            for (k in 0 until outCount) {
+                pick[(k.toLong() * n / outCount).toInt().coerceIn(0, n - 1)] = true
+            }
+        }
+        val dec = CinepakDecoder.Decoder(w, h)
+        val frames = ArrayList<ByteArray>(outCount)
+        for (i in 0 until n) {
+            val argb = dec.decodeFrame(parsed.frames[i]) // sequential — recon continuity
+            if (pick[i]) {
+                val bmp = Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888)
+                frames.add(scaledPng(bmp, maxEdge))
+                bmp.recycle()
+            }
+        }
+        if (frames.isEmpty()) throw RuntimeException("解码结果为空")
+        val interval = (parsed.usecPerFrame / 1000).coerceIn(50, 200)
+        return PreviewClip(frames, interval)
+    }
+
     // Proportionally downscale [src] so its longest edge ≤ [maxEdge], then
     // PNG-encode (alpha preserved when the source bitmap has it).
     private fun scaledPng(src: Bitmap, maxEdge: Int): ByteArray {
