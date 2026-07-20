@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -14,6 +15,7 @@ import '../../services/l2_file_transfer.dart';
 import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
+import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
 
 /// Page for converting a picked image to a device RGB565 `.bin` and sending it
@@ -35,7 +37,7 @@ class ImagePage extends ConsumerStatefulWidget {
   ConsumerState<ImagePage> createState() => _ImagePageState();
 }
 
-const List<int> _sizePresets = [240, 360, 480];
+const List<int> _sizePresets = [240, 360, 466, 480];
 const double _previewMaxHRatio = 0.5; // viewport max height = 50% of screen
 
 // Common background (letterbox / out-of-frame) colors; the palette button lets
@@ -144,32 +146,62 @@ class _ImagePageState extends ConsumerState<ImagePage> {
       }
 
       final decoded = await decodeUiImage(bytes);
-      _srcImage?.dispose();
-
-      final base = image.name.contains('.')
-          ? image.name.substring(0, image.name.lastIndexOf('.'))
-          : image.name;
-
-      setState(() {
-        _selectedImage = image;
-        _srcImage = decoded;
-        _srcW = decoded.width;
-        _srcH = decoded.height;
-        _sourceSize = bytes.length;
-        _fileName = '$base.bin';
-        _bin = null;
-        _binSize = 0;
-        _rawSize = 0;
-        _rleSize = 0;
-        _tc.value = Matrix4.identity(); // reset zoom/pan to fit
-      });
-      ref.read(transferProgressProvider.notifier).reset();
-      _rebuild();
+      if (!mounted) {
+        decoded.dispose();
+        return;
+      }
+      _applyDecoded(decoded, bytes.length, image.name, image);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('选择图片失败: $e')),
       );
+    }
+  }
+
+  // Apply an already-decoded image as the current selection (shared by the
+  // gallery picker and the built-in examples). [marker] is only a non-null
+  // "something is loaded" flag — conversion works off [decoded], not its path.
+  void _applyDecoded(
+      ui.Image decoded, int byteLen, String name, XFile marker) {
+    _srcImage?.dispose();
+    final base =
+        name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : name;
+    setState(() {
+      _selectedImage = marker;
+      _srcImage = decoded;
+      _srcW = decoded.width;
+      _srcH = decoded.height;
+      _sourceSize = byteLen;
+      _fileName = '$base.bin';
+      _bin = null;
+      _binSize = 0;
+      _rawSize = 0;
+      _rleSize = 0;
+      _tc.value = Matrix4.identity(); // reset zoom/pan to fit
+    });
+    ref.read(transferProgressProvider.notifier).reset();
+    _rebuild();
+  }
+
+  // Load one of the bundled example images (assets/example/img/*.png).
+  Future<void> _loadExampleImage(String assetPath) async {
+    if (_isSending) return;
+    try {
+      final data = await rootBundle.load(assetPath);
+      final bytes =
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      final decoded = await decodeUiImage(bytes);
+      if (!mounted) {
+        decoded.dispose();
+        return;
+      }
+      _applyDecoded(
+          decoded, bytes.length, assetPath.split('/').last, XFile(assetPath));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('加载示例失败: $e')));
     }
   }
 
@@ -356,21 +388,23 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                         ),
                       ]
                     : [
-                        if (_selectedImage == null)
-                          _buildPickHint(theme, cs)
-                        else ...[
-                          _buildPreview(theme, cs),
+                        // Always show the "loaded" layout; the preview viewport
+                        // just stays empty (tap to pick) until an image is set.
+                        _buildPreview(theme, cs),
+                        const SizedBox(height: 10),
+                        _buildExamples(theme, cs, enabled: !sending),
+                        if (_srcImage != null) ...[
                           const SizedBox(height: 8),
                           _buildViewControls(theme, cs),
-                          const SizedBox(height: 16),
-                          _buildSizeSelector(theme, cs),
-                          const SizedBox(height: 8),
-                          _buildBgColorRow(theme, cs),
-                          const SizedBox(height: 8),
-                          _buildToggles(theme, cs),
-                          const SizedBox(height: 12),
-                          _buildBinInfo(theme, cs),
                         ],
+                        const SizedBox(height: 16),
+                        _buildSizeSelector(theme, cs),
+                        const SizedBox(height: 8),
+                        _buildBgColorRow(theme, cs),
+                        const SizedBox(height: 8),
+                        _buildToggles(theme, cs),
+                        const SizedBox(height: 12),
+                        _buildBinInfo(theme, cs),
                       ],
               ),
             ),
@@ -418,26 +452,49 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     );
   }
 
-  Widget _buildPickHint(ThemeData theme, ColorScheme cs) {
+  // Empty circular viewport shown before an image is picked — tap to pick.
+  Widget _buildEmptyViewport(ThemeData theme, ColorScheme cs, double v) {
     return GestureDetector(
-      onTap: _pickImage,
+      onTap: _isSending ? null : _pickImage,
       child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
-        decoration: BoxDecoration(
-          border: Border.all(color: cs.outline),
-          borderRadius: BorderRadius.circular(12),
-        ),
+        width: v,
+        height: v,
+        color: cs.surfaceContainerHighest,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.image_outlined, size: 48, color: cs.outline),
-            const SizedBox(height: 12),
+            Icon(Icons.add_photo_alternate_outlined,
+                size: 44, color: cs.outline),
+            const SizedBox(height: 8),
             Text('点击选择图片',
-                style: theme.textTheme.bodyLarge?.copyWith(color: cs.outline)),
+                style: theme.textTheme.bodyMedium?.copyWith(color: cs.outline)),
           ],
         ),
       ),
+    );
+  }
+
+  // A horizontal strip of round example thumbnails under the preview; tapping
+  // one loads that bundled image directly.
+  Widget _buildExamples(ThemeData theme, ColorScheme cs,
+      {required bool enabled}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('示例', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 8),
+        ExampleStrip(
+          count: ExampleAssets.images.length,
+          enabled: enabled,
+          thumbBuilder: (i) => Image.asset(
+            ExampleAssets.images[i],
+            fit: BoxFit.cover,
+            cacheWidth: 120,
+          ),
+          onTap: (i) => _loadExampleImage(ExampleAssets.images[i]),
+        ),
+      ],
     );
   }
 
@@ -470,29 +527,31 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                     color: cs.outlineVariant.withValues(alpha: 0.6)),
               ),
               child: ClipOval(
-                child: SizedBox(
-                  width: v,
-                  height: v,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                          child: ColoredBox(color: Color(_bgColor))),
-                      InteractiveViewer(
-                        transformationController: _tc,
-                        minScale: 1.0,
-                        maxScale: 8.0,
-                        clipBehavior: Clip.hardEdge,
-                        onInteractionEnd: (_) => _rebuild(),
-                        child: SizedBox(
-                          width: v,
-                          height: v,
-                          child:
-                              RawImage(image: _srcImage, fit: BoxFit.contain),
+                child: _srcImage == null
+                    ? _buildEmptyViewport(theme, cs, v)
+                    : SizedBox(
+                        width: v,
+                        height: v,
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                                child: ColoredBox(color: Color(_bgColor))),
+                            InteractiveViewer(
+                              transformationController: _tc,
+                              minScale: 1.0,
+                              maxScale: 8.0,
+                              clipBehavior: Clip.hardEdge,
+                              onInteractionEnd: (_) => _rebuild(),
+                              child: SizedBox(
+                                width: v,
+                                height: v,
+                                child: RawImage(
+                                    image: _srcImage, fit: BoxFit.contain),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
               ),
             ),
           ),
@@ -574,6 +633,11 @@ class _ImagePageState extends ConsumerState<ImagePage> {
 
   Widget _buildBinInfo(ThemeData theme, ColorScheme cs) {
     final tt = theme.textTheme;
+
+    if (_selectedImage == null) {
+      return Text('点击上方预览区选择图片，或选择下方示例',
+          style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant));
+    }
 
     // Only before the very first result show the simple single line. During a
     // re-convert we keep the previous comparison rendered (below) so the row

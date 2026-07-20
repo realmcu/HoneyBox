@@ -17,6 +17,7 @@ import '../../services/l2_file_transfer.dart';
 import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
+import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
 
 /// Page for converting a picked video **or GIF** to a device-playable
@@ -43,7 +44,7 @@ class VideoPage extends ConsumerStatefulWidget {
   ConsumerState<VideoPage> createState() => _VideoPageState();
 }
 
-const List<int> _sizePresets = [240, 360, 480];
+const List<int> _sizePresets = [240, 360, 466, 480];
 const List<int> _fpsPresets = [10, 15, 20, 24];
 const List<(String, int)> _qualityPresets = [('LOW', 15), ('MED', 60), ('HIGH', 95)];
 
@@ -671,30 +672,32 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                         ),
                       ]
                     : [
+                        // Always show the "loaded" layout; the preview viewport
+                        // just stays empty (tap to pick) until a source is set.
                         if (_srcPath == null)
-                          _buildPickHint(theme, cs)
-                        else ...[
-                          if (_thumb != null) ...[
-                            _buildPreview(theme, cs),
-                            const SizedBox(height: 8),
-                            _buildViewControls(theme, cs),
-                          ] else
-                            _buildNoPreview(theme, cs),
-                          const SizedBox(height: 16),
-                          _buildChipRow(theme, '尺寸', _sizePresets,
-                              (s) => s == _size, (s) => _onSizeTap(s),
-                              (s) => '$s'),
+                          _buildEmptyPreview(theme, cs)
+                        else if (_thumb != null) ...[
+                          _buildPreview(theme, cs),
                           const SizedBox(height: 8),
-                          _buildChipRow(theme, '帧率', _fpsPresets,
-                              (f) => f == _fps, (f) => _onFpsTap(f),
-                              (f) => '$f'),
-                          const SizedBox(height: 8),
-                          _buildQualityRow(theme),
-                          const SizedBox(height: 8),
-                          _buildBgColorRow(theme, cs),
-                          const SizedBox(height: 12),
-                          _buildConvInfo(theme, cs),
-                        ],
+                          _buildViewControls(theme, cs),
+                        ] else
+                          _buildNoPreview(theme, cs),
+                        const SizedBox(height: 10),
+                        _buildExamples(theme, cs, enabled: !_isBusy),
+                        const SizedBox(height: 16),
+                        _buildChipRow(theme, '尺寸', _sizePresets,
+                            (s) => s == _size, (s) => _onSizeTap(s),
+                            (s) => '$s'),
+                        const SizedBox(height: 8),
+                        _buildChipRow(theme, '帧率', _fpsPresets,
+                            (f) => f == _fps, (f) => _onFpsTap(f),
+                            (f) => '$f'),
+                        const SizedBox(height: 8),
+                        _buildQualityRow(theme),
+                        const SizedBox(height: 8),
+                        _buildBgColorRow(theme, cs),
+                        const SizedBox(height: 12),
+                        _buildConvInfo(theme, cs),
                       ],
               ),
             ),
@@ -742,27 +745,84 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     );
   }
 
-  Widget _buildPickHint(ThemeData theme, ColorScheme cs) {
-    return GestureDetector(
-      onTap: _showPickSheet,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
-        decoration: BoxDecoration(
-          border: Border.all(color: cs.outline),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.movie_creation_outlined, size: 48, color: cs.outline),
-            const SizedBox(height: 12),
-            Text('点击选择视频或 GIF',
-                style: theme.textTheme.bodyLarge?.copyWith(color: cs.outline)),
-          ],
-        ),
-      ),
+  // Empty circular viewport shown before a source is picked — tap to pick.
+  Widget _buildEmptyPreview(ThemeData theme, ColorScheme cs) {
+    final double maxH = MediaQuery.of(context).size.height * _previewMaxHRatio;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double v = min(constraints.maxWidth, maxH);
+        _vp = v;
+        return Center(
+          child: GestureDetector(
+            onTap: _isBusy ? null : _showPickSheet,
+            child: Container(
+              width: v,
+              height: v,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: cs.surfaceContainerHighest,
+                border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.6)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.movie_creation_outlined,
+                      size: 44, color: cs.outline),
+                  const SizedBox(height: 8),
+                  Text('点击选择视频或 GIF',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: cs.outline)),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
+  }
+
+  // A horizontal strip of round example thumbnails under the preview; tapping
+  // one loads that bundled video / GIF directly.
+  Widget _buildExamples(ThemeData theme, ColorScheme cs,
+      {required bool enabled}) {
+    final items = [...ExampleAssets.videos, ...ExampleAssets.gifs];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('示例', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 8),
+        ExampleStrip(
+          count: items.length,
+          enabled: enabled,
+          thumbBuilder: (i) {
+            final path = items[i];
+            if (path.toLowerCase().endsWith('.gif')) {
+              return Image.asset(path, fit: BoxFit.cover, cacheWidth: 120);
+            }
+            return _ExampleVideoThumb(
+                key: ValueKey(path), assetPath: path, converter: _converter);
+          },
+          onTap: (i) => _loadExampleVideo(items[i]),
+        ),
+      ],
+    );
+  }
+
+  // Load one of the bundled example clips (video/*.mov or gif/*.gif). It's
+  // copied to a temp file first because the native thumbnail/convert path needs
+  // a real file path; _loadMedia then handles the thumbnail + GIF detection.
+  Future<void> _loadExampleVideo(String assetPath) async {
+    if (_isBusy) return;
+    try {
+      final file = await materializeAsset(assetPath);
+      final size = await file.length();
+      await _loadMedia(
+          path: file.path, name: assetPath.split('/').last, size: size);
+    } catch (e) {
+      _snack('加载示例失败: $e');
+    }
   }
 
   Widget _buildNoPreview(ThemeData theme, ColorScheme cs) {
@@ -1026,6 +1086,11 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   }
 
   Widget _buildConvInfo(ThemeData theme, ColorScheme cs) {
+    if (_srcPath == null) {
+      return Text('点击上方预览区选择视频 / GIF，或选择下方示例',
+          style:
+              theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant));
+    }
     String right;
     if (_conv == _ConvStatus.converting) {
       final pct = (_convProgress * 100).toInt();
@@ -1173,6 +1238,66 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         const SizedBox(width: 12),
         Expanded(child: primary),
       ],
+    );
+  }
+}
+
+/// Round first-frame thumbnail for a bundled example video (mov): the asset is
+/// materialized to a temp file, then its first frame is fetched natively and
+/// decoded. A spinner shows until it's ready (and stays on failure).
+class _ExampleVideoThumb extends StatefulWidget {
+  final String assetPath;
+  final ConverterService converter;
+  const _ExampleVideoThumb({
+    super.key,
+    required this.assetPath,
+    required this.converter,
+  });
+
+  @override
+  State<_ExampleVideoThumb> createState() => _ExampleVideoThumbState();
+}
+
+class _ExampleVideoThumbState extends State<_ExampleVideoThumb> {
+  ui.Image? _img;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final file = await materializeAsset(widget.assetPath);
+      final t = await widget.converter.getVideoThumbnail(file.path);
+      final img = await decodeUiImage(t.bytes);
+      if (!mounted) {
+        img.dispose();
+        return;
+      }
+      setState(() => _img = img);
+    } catch (_) {
+      // Leave the spinner/placeholder if the first frame can't be read.
+    }
+  }
+
+  @override
+  void dispose() {
+    _img?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final img = _img;
+    if (img != null) return RawImage(image: img, fit: BoxFit.cover);
+    return const Center(
+      child: SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
     );
   }
 }

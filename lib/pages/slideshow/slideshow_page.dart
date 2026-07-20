@@ -41,7 +41,7 @@ class SlideshowPage extends ConsumerStatefulWidget {
 }
 
 const int _maxSlides = 5;
-const List<int> _sizePresets = [240, 360, 480];
+const List<int> _sizePresets = [240, 360, 466, 480];
 
 const int _maxFrames = 300; // hard safety cap on total frames
 const double _minDurationSec = 1.0;
