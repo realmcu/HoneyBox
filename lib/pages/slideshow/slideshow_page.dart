@@ -15,6 +15,7 @@ import '../../services/l2_file_transfer.dart';
 import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
+import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
 
 /// 多图轮播 — compose up to [_maxSlides] pictures into a looping slideshow video
@@ -226,6 +227,40 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
       }
     } catch (e) {
       _snack('选择图片失败: $e');
+    }
+  }
+
+  // Append one bundled example image as a new slide (single add, honors the
+  // _maxSlides cap). Loaded via rootBundle → decode, same pipeline as _addImages.
+  Future<void> _addExampleImage(String assetPath) async {
+    if (_isBusy) return;
+    if (_slides.length >= _maxSlides) {
+      _snack('最多选择 $_maxSlides 张图片');
+      return;
+    }
+    try {
+      final data = await rootBundle.load(assetPath);
+      final bytes =
+          data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      final img = await decodeUiImage(bytes);
+      if (!mounted) {
+        img.dispose();
+        return;
+      }
+      _stopPlayback();
+      _slides.add(_Slide(
+        id: _nextId++,
+        name: assetPath.split('/').last,
+        src: img,
+        srcW: img.width,
+        srcH: img.height,
+      ));
+      ref.read(transferProgressProvider.notifier).reset();
+      setState(() => _editingIndex = _slides.length - 1);
+      _renderSlide(_slides.length - 1);
+      _invalidate();
+    } catch (e) {
+      _snack('加载示例失败: $e');
     }
   }
 
@@ -640,14 +675,18 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
                         ),
                       ]
                     : [
-                        if (_slides.isEmpty)
-                          _buildPickHint(theme, cs)
-                        else ...[
+                        if (_slides.isEmpty) ...[
+                          _buildPickHint(theme, cs),
+                          const SizedBox(height: 12),
+                          _buildExamples(theme, cs),
+                        ] else ...[
                           _buildPreview(theme, cs),
                           const SizedBox(height: 8),
                           _buildViewControls(theme, cs),
                           const SizedBox(height: 12),
                           _buildStrip(theme, cs),
+                          const SizedBox(height: 10),
+                          _buildExamples(theme, cs),
                           const SizedBox(height: 16),
                           _buildSizeSelector(theme, cs),
                           const SizedBox(height: 8),
@@ -689,6 +728,29 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
           ],
         ),
       ),
+    );
+  }
+
+  // A row of round example thumbnails; tapping one appends it to the selected
+  // slides (up to _maxSlides). Disabled while busy or once the cap is reached.
+  Widget _buildExamples(ThemeData theme, ColorScheme cs) {
+    final full = _slides.length >= _maxSlides;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('示例', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 8),
+        ExampleStrip(
+          count: ExampleAssets.images.length,
+          enabled: !_isBusy && !full,
+          thumbBuilder: (i) => Image.asset(
+            ExampleAssets.images[i],
+            fit: BoxFit.cover,
+            cacheWidth: 120,
+          ),
+          onTap: (i) => _addExampleImage(ExampleAssets.images[i]),
+        ),
+      ],
     );
   }
 
@@ -876,7 +938,12 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: Color(_bgColor),
-                  borderRadius: BorderRadius.circular(10),
+                  shape: BoxShape.circle,
+                ),
+                // 边框画在图片之上（foregroundDecoration），避免挤占内边距
+                // 露出底色形成黑边——与示例行的圆形缩略图保持一致。
+                foregroundDecoration: BoxDecoration(
+                  shape: BoxShape.circle,
                   border: Border.all(
                     color: selected ? cs.primary : cs.outlineVariant,
                     width: selected ? 2 : 1,
@@ -892,21 +959,25 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
                                 CircularProgressIndicator(strokeWidth: 2)),
                       ),
               ),
+              // 序号放圆形底部居中，避免旧的左下角位置露到圆外。
               Positioned(
-                left: 3,
-                bottom: 3,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(6),
+                left: 0,
+                right: 0,
+                bottom: 4,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('${i + 1}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600)),
                   ),
-                  child: Text('${i + 1}',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600)),
                 ),
               ),
               Positioned(
@@ -940,8 +1011,9 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
         child: Container(
           width: 64,
           height: 64,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
+            shape: BoxShape.circle,
             border: Border.all(color: cs.outline),
           ),
           child: Icon(Icons.add, color: cs.outline, size: 28),

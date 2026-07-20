@@ -337,7 +337,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
       } else {
         _flash(_config.transport == StreamTransportKind.wifi
             ? 'WiFi 投屏即将支持'
-            : '未连接可投屏设备（需支持流服务 FFD4/FFD5）');
+            : '未连接可投屏设备（需支持流服务 FFC4/FFC5）');
       }
       return;
     }

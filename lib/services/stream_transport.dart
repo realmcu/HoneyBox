@@ -33,7 +33,7 @@ abstract class StreamTransport {
   Stream<Uint8List> get notifications;
 }
 
-/// BLE transport over the separate Stream Service (FFD4 write / FFD5 notify).
+/// BLE transport over the separate Stream Service (FFC4 write / FFC5 notify).
 class BleStreamTransport implements StreamTransport {
   final BleManager manager;
 

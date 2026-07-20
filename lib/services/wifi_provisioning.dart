@@ -4,7 +4,7 @@ import 'dart:typed_data';
 /// L2 WiFi provisioning protocol (CMD 0x0D) — ported from desk-mate's
 /// `protocols/l2_wifi_provisioning.py`.
 ///
-/// Rides the BLE L1 command channel (FFD1 write / FFD2 notify). The app pushes
+/// Rides the BLE L1 command channel (FFC1 write / FFC2 notify). The app pushes
 /// its (local-only-hotspot) SSID/password to the device; the device joins the
 /// hotspot, starts a TCP video server, and reports its IP/port back so the app
 /// can open the WiFi streaming transport.

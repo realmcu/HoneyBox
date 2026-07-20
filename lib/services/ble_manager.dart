@@ -12,13 +12,13 @@ import 'l2_file_transfer.dart';
 // BLE UUIDs
 // ---------------------------------------------------------------------------
 
-const String _txUuid = 'FFD1';
-const String _rxUuid = 'FFD2';
+const String _txUuid = 'FFC1';
+const String _rxUuid = 'FFC2';
 
 // Separate Stream Service (UUID 484D5354-…): raw L2 video streaming, no L1.
-// Write FFD4 (KS_OPEN/FRAME/CLOSE), notify FFD5 (KS_ACK/CREDIT/REPORT).
-const String _streamTxUuid = 'FFD4';
-const String _streamRxUuid = 'FFD5';
+// Write FFC4 (KS_OPEN/FRAME/CLOSE), notify FFC5 (KS_ACK/CREDIT/REPORT).
+const String _streamTxUuid = 'FFC4';
+const String _streamRxUuid = 'FFC5';
 
 // ---------------------------------------------------------------------------
 // Connection state
@@ -62,19 +62,19 @@ class BleManager {
   /// The active file-transfer session, if one exists.
   FileTransferSession? get session => _session;
 
-  /// Whether the device exposes the separate Stream Service (FFD4/FFD5) for
+  /// Whether the device exposes the separate Stream Service (FFC4/FFC5) for
   /// real-time video streaming. False → streaming unavailable (old firmware).
   bool get streamAvailable => _streamTxChar != null && _streamRxChar != null;
 
-  /// Raw L2 messages received on the Stream Service notify (FFD5).
+  /// Raw L2 messages received on the Stream Service notify (FFC5).
   Stream<Uint8List> get streamNotifications => _streamNotifyController.stream;
 
-  /// Inbound L2 command-channel frames (FFD2, after L1 de-framing). Carries any
+  /// Inbound L2 command-channel frames (FFC2, after L1 de-framing). Carries any
   /// L2 payload not consumed by a file transfer — notably WiFi provisioning
   /// (CMD 0x0D) responses. Each event is one complete L2 frame payload.
   Stream<Uint8List> get commandNotifications => _commandNotifyController.stream;
 
-  /// Whether the command channel (FFD1/FFD2 + L1 engine) is ready. Required for
+  /// Whether the command channel (FFC1/FFC2 + L1 engine) is ready. Required for
   /// WiFi provisioning, which rides the command channel.
   bool get commandAvailable => _l1 != null && _txChar != null;
 
@@ -93,17 +93,17 @@ class BleManager {
   // --------------------------------------------------------------------------
 
   BluetoothDevice? _device;
-  BluetoothCharacteristic? _txChar; // FFD1 - write
-  BluetoothCharacteristic? _rxChar; // FFD2 - notify
-  BluetoothCharacteristic? _streamTxChar; // FFD4 - stream write
-  BluetoothCharacteristic? _streamRxChar; // FFD5 - stream notify
+  BluetoothCharacteristic? _txChar; // FFC1 - write
+  BluetoothCharacteristic? _rxChar; // FFC2 - notify
+  BluetoothCharacteristic? _streamTxChar; // FFC4 - stream write
+  BluetoothCharacteristic? _streamRxChar; // FFC5 - stream notify
   StreamSubscription<List<int>>? _streamNotificationSub;
   int _mtu = 23;
 
-  /// Broadcasts raw L2 messages received on the Stream Service (FFD5).
+  /// Broadcasts raw L2 messages received on the Stream Service (FFC5).
   final _streamNotifyController = StreamController<Uint8List>.broadcast();
 
-  /// Broadcasts inbound L2 command-channel frames (FFD2 → L1 → L2 payload).
+  /// Broadcasts inbound L2 command-channel frames (FFC2 → L1 → L2 payload).
   final _commandNotifyController = StreamController<Uint8List>.broadcast();
 
   StreamSubscription<List<int>>? _notificationSub;
@@ -119,7 +119,7 @@ class BleManager {
   FileTransferSession? _session;
 
   /// Serial write queue of (characteristic, bytes). GATT writes can't run
-  /// concurrently on one connection, so L1 (FFD1) and stream (FFD4) writes
+  /// concurrently on one connection, so L1 (FFC1) and stream (FFC4) writes
   /// share this single queue.
   final List<(BluetoothCharacteristic, Uint8List)> _writeQueue = [];
   bool _writing = false;
@@ -345,7 +345,7 @@ class BleManager {
         onLog: (String message) => debugPrint('L2: $message'),
       );
 
-      // Enable the Stream Service notify (FFD5) if the device exposes it.
+      // Enable the Stream Service notify (FFC5) if the device exposes it.
       if (_streamTxChar != null && _streamRxChar != null) {
         try {
           await _streamRxChar!.setNotifyValue(true);
@@ -354,9 +354,9 @@ class BleManager {
               _streamNotifyController.add(Uint8List.fromList(data));
             }
           });
-          debugPrint('BleManager: Stream Service ready (FFD4/FFD5)');
+          debugPrint('BleManager: Stream Service ready (FFC4/FFC5)');
         } catch (e) {
-          debugPrint('BleManager: Stream Service FFD5 subscribe failed: $e');
+          debugPrint('BleManager: Stream Service FFC5 subscribe failed: $e');
           _streamTxChar = null;
           _streamRxChar = null;
         }
@@ -392,7 +392,7 @@ class BleManager {
   // Write queue (L1 → characteristic)
   // --------------------------------------------------------------------------
 
-  /// Enqueue a raw L1 chunk for delivery over the FFD1 characteristic.
+  /// Enqueue a raw L1 chunk for delivery over the FFC1 characteristic.
   void _enqueueWrite(Uint8List chunk) {
     if (_disposed || _txChar == null) return;
     _writeQueue.add((_txChar!, chunk));
@@ -401,7 +401,7 @@ class BleManager {
     }
   }
 
-  /// Send one raw L2 stream message over the FFD4 characteristic (no L1, no
+  /// Send one raw L2 stream message over the FFC4 characteristic (no L1, no
   /// fragmentation — the caller keeps each message within one ATT write).
   /// Shares the serial queue so it never races other GATT writes.
   Future<void> writeStream(Uint8List l2) {
@@ -418,7 +418,7 @@ class BleManager {
     return completer.future;
   }
 
-  /// Send one L2 command frame over the L1 command channel (FFD1). L1 handles
+  /// Send one L2 command frame over the L1 command channel (FFC1). L1 handles
   /// framing, CRC, and MTU chunking. Returns the assigned L1 sequence number, or
   /// null if the command channel isn't ready. Used by WiFi provisioning
   /// (CMD 0x0D); file transfers use [FileTransferSession] instead.

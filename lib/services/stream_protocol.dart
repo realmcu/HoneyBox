@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 /// L2 real-time video-stream protocol (CMD_STREAM = 0x0E).
 ///
 /// Ported from the w04_web_app reference implementation. Runs over a separate
-/// GATT Stream Service (write FFD4 / notify FFD5) carrying **raw L2 messages
+/// GATT Stream Service (write FFC4 / notify FFC5) carrying **raw L2 messages
 /// with no L1 wrapper**. Reliability comes from BLE LL ARQ + credit flow
 /// control + per-frame gap retransmission (see the design spec).
 ///
@@ -244,7 +244,7 @@ class StreamSession {
   // Inbound (KS_ACK / KS_CREDIT / KS_REPORT)
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Feed a raw inbound L2 notification (from FFD5).
+  /// Feed a raw inbound L2 notification (from FFC5).
   void onNotify(Uint8List l2) {
     if (l2.length < 5 || l2[0] != cmdStream) return;
     final key = l2[2];

@@ -197,7 +197,7 @@ startScan() → FlutterBluePlus.startScan()
 
 connect(deviceId) → FlutterBluePlus.connect()
                   → 发现服务 FFD0
-                  → 获取特征 FFD1(write) / FFD2(notify)
+                  → 获取特征 FFC1(write) / FFC2(notify)
                   → 协商 MTU（requestMtu(512)）
                   → 订阅 notify
                   → 创建 L1Engine + FileTransferSession
@@ -233,8 +233,8 @@ FlutterBluePlus.onConnectionStateChanged 监听断开事件：
 ### 3.4 UUID 常量
 
 ```dart
-const TX_UUID = '0000FFD1-0000-1000-8000-00805F9B34FB';  // write
-const RX_UUID = '0000FFD2-0000-1000-8000-00805F9B34FB';  // notify
+const TX_UUID = '0000FFC1-0000-1000-8000-00805F9B34FB';  // write
+const RX_UUID = '0000FFC2-0000-1000-8000-00805F9B34FB';  // notify
 const SERVICE_UUID = '0000FFD0-0000-1000-8000-00805F9B34FB';
 ```
 
@@ -338,7 +338,7 @@ outline: Color(0xFFDADCE0)
 | ACK 超时 | 发 ABORT，SnackBar |
 | 传输中断开 | AlertDialog → 跳转扫描页 |
 | 文件 >10MB | 前置校验，SnackBar 提示 |
-| 无 FFD1/FFD2 | SnackBar "设备不支持此功能" |
+| 无 FFC1/FFC2 | SnackBar "设备不支持此功能" |
 
 ---
 
