@@ -24,7 +24,7 @@ import '../shared/preview_frame.dart';
 /// over BLE. The preview is a fixed square viewport: on load the whole image is
 /// scaled to fit (contain), and the user pinch-zooms / pans to frame the region
 /// to send — whatever is inside the square frame becomes the output (letterbox
-/// filled black). Then size 240/360/480 → auto RLE/uncompressed → send.
+/// filled black). Then size 160/240/360/466/480 → auto RLE/uncompressed → send.
 class ImagePage extends ConsumerStatefulWidget {
   final String deviceName;
   final String deviceId;
@@ -39,7 +39,7 @@ class ImagePage extends ConsumerStatefulWidget {
   ConsumerState<ImagePage> createState() => _ImagePageState();
 }
 
-const List<int> _sizePresets = [240, 360, 466, 480];
+const List<int> _sizePresets = [160, 240, 360, 466, 480];
 const double _previewMaxHRatio = 0.5; // viewport max height = 50% of screen
 
 // Common background (letterbox / out-of-frame) colors; the palette button lets
@@ -659,18 +659,30 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   }
 
   Widget _buildSizeSelector(ThemeData theme, ColorScheme cs) {
+    // Wrap (not a plain Row) so the chips flow onto a second line instead of
+    // overflowing when they don't all fit — five 3-digit presets exceed a
+    // ~360dp-wide phone. Label is top-aligned to sit level with the first row.
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('尺寸', style: theme.textTheme.titleSmall),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text('尺寸', style: theme.textTheme.titleSmall),
+        ),
         const SizedBox(width: 12),
-        ..._sizePresets.map((s) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text('$s'),
-                selected: _size == s,
-                onSelected: _isSending ? null : (_) => _onSizeTap(s),
-              ),
-            )),
+        Expanded(
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _sizePresets
+                .map((s) => PresetChip(
+                      label: '$s',
+                      selected: _size == s,
+                      onTap: _isSending ? null : () => _onSizeTap(s),
+                    ))
+                .toList(),
+          ),
+        ),
       ],
     );
   }
@@ -736,10 +748,16 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                 onChangeEnd: _isSending ? null : _onQualityChangeEnd,
               ),
             ),
+            // Fixed-width readout keeps the slider from shifting as the number
+            // changes (10% → 100%). Widened + single-line so the widest value,
+            // "100%", never soft-wraps into "100" / "%" on two lines.
             SizedBox(
-              width: 42,
+              width: 52,
               child: Text('$_quality%',
-                  textAlign: TextAlign.right, style: tt.bodyMedium),
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: tt.bodyMedium),
             ),
           ],
         ),

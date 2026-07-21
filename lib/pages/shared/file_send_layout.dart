@@ -11,6 +11,44 @@ String formatFileSize(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
+/// Compact selectable pill for the preset rows on the send pages (尺寸 / fps /
+/// 质量). Deliberately smaller than a default [ChoiceChip] — 12px label, tight
+/// padding, a shrink-wrapped tap target and no check mark — so a row of presets
+/// stays tidy and fits more options without wrapping. Colors are left to the
+/// ambient theme, so it matches each page's chips and only changes their size.
+class PresetChip extends StatelessWidget {
+  /// Text shown inside the pill.
+  final String label;
+
+  /// Whether this preset is the current selection.
+  final bool selected;
+
+  /// Tapped callback; null disables the chip (e.g. while sending / busy).
+  final VoidCallback? onTap;
+
+  const PresetChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: onTap == null ? null : (_) => onTap!(),
+      showCheckmark: false,
+      labelStyle: const TextStyle(fontSize: 12),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    );
+  }
+}
+
 /// Paints a dashed rectangular border around a given [Rect].
 class _DashedBorderPainter extends CustomPainter {
   final Color color;

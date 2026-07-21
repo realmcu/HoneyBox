@@ -1073,10 +1073,10 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
         const SizedBox(width: 8),
         ..._sizePresets.map((s) => Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text('$s'),
+              child: PresetChip(
+                label: '$s',
                 selected: _size == s,
-                onSelected: _isBusy ? null : (_) => _onSizeTap(s),
+                onTap: _isBusy ? null : () => _onSizeTap(s),
               ),
             )),
       ],
@@ -1091,10 +1091,10 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
         const SizedBox(width: 8),
         ..._qualityPresets.map((q) => Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(q.$1),
+              child: PresetChip(
+                label: q.$1,
                 selected: _quality == q.$2,
-                onSelected: _isBusy ? null : (_) => _onQualityTap(q.$2),
+                onTap: _isBusy ? null : () => _onQualityTap(q.$2),
               ),
             )),
       ],

@@ -1152,10 +1152,10 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         const SizedBox(width: 8),
         ...presets.map((v) => Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(fmt(v)),
+              child: PresetChip(
+                label: fmt(v),
                 selected: selected(v),
-                onSelected: _isBusy ? null : (_) => onTap(v),
+                onTap: _isBusy ? null : () => onTap(v),
               ),
             )),
       ],
@@ -1170,10 +1170,10 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         const SizedBox(width: 8),
         ..._qualityPresets.map((q) => Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(q.$1),
+              child: PresetChip(
+                label: q.$1,
                 selected: _quality == q.$2,
-                onSelected: _isBusy ? null : (_) => _onQualityTap(q.$2),
+                onTap: _isBusy ? null : () => _onQualityTap(q.$2),
               ),
             )),
       ],
