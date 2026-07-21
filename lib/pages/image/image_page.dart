@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../providers/transfer_provider.dart';
 import '../../services/image_bin.dart';
+import '../../services/image_jpeg.dart';
 import '../../services/raster.dart';
 import '../../services/l2_file_transfer.dart';
 import '../../services/file_cache.dart';
@@ -76,6 +77,10 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   // Conversion options.
   int _size = kImageDefaultSize; // 360
   bool _dither = false;
+  // Image quality (10..100). 100 = send the lossless RGB565 `.bin` (auto
+  // RLE/uncompressed) as before; < 100 = encode + send baseline-4:2:0 JPEG at
+  // this quality. The quality bar thus doubles as the RGB565↔JPEG selector.
+  int _quality = 100;
   int _bgColor = 0xFF000000; // viewport letterbox / out-of-frame fill
   // Preview-only: fills the square corners outside the circle, extracted from
   // the selected image via Palette. Never affects the converted resource.
@@ -88,9 +93,10 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   // smaller wins automatically (no user toggle), and both sizes are shown.
   Uint8List? _bin;
   int _binSize = 0;
-  int _rawSize = 0; // uncompressed .bin size
+  int _rawSize = 0; // uncompressed RGB565 .bin size (also the JPEG baseline)
   int _rleSize = 0; // RLE-compressed .bin size
   bool _usedCompress = false; // whether RLE (the smaller one) was chosen
+  bool _isJpeg = false; // whether _bin is a JPEG container (quality < 100)
   bool _converting = false;
   int _rebuildSeq = 0;
 
@@ -266,19 +272,41 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         ty: tyOut,
         bgColor: _bgColor,
       );
-      final ImageBinResult result = buildImageBinAdaptive(
-        img.rgba,
-        img.width,
-        img.height,
-        dither: _dither,
-      );
+
+      // Quality 100 → lossless RGB565 (auto RLE); < 100 → baseline-4:2:0 JPEG.
+      // The uncompressed RGB565 size (header + w*h*2) is the shared baseline the
+      // info row compares against, so compute it for both paths.
+      final int rawSize = 8 + img.width * img.height * 2;
+      final bool useJpeg = _quality < 100;
+      final Uint8List bin;
+      int rleSize = 0;
+      bool usedCompress = false;
+      if (useJpeg) {
+        bin = buildImageJpegBin(
+          img.rgba,
+          img.width,
+          img.height,
+          quality: _quality,
+        );
+      } else {
+        final ImageBinResult result = buildImageBinAdaptive(
+          img.rgba,
+          img.width,
+          img.height,
+          dither: _dither,
+        );
+        bin = result.bin;
+        rleSize = result.rleSize;
+        usedCompress = result.compressed;
+      }
       if (token != _rebuildSeq || !mounted) return;
       setState(() {
-        _bin = result.bin;
-        _binSize = result.bin.length;
-        _rawSize = result.rawSize;
-        _rleSize = result.rleSize;
-        _usedCompress = result.compressed;
+        _bin = bin;
+        _binSize = bin.length;
+        _rawSize = rawSize;
+        _rleSize = rleSize;
+        _usedCompress = usedCompress;
+        _isJpeg = useJpeg;
         _converting = false;
       });
     } catch (e) {
@@ -303,6 +331,20 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     _rebuild();
   }
 
+  // Live label / mode update while dragging; the (potentially heavy JPEG)
+  // re-convert is deferred to onChangeEnd so it doesn't run on every tick.
+  void _onQualityChanged(double v) {
+    if (_isSending) return;
+    final int q = v.round();
+    if (q == _quality) return;
+    setState(() => _quality = q);
+  }
+
+  void _onQualityChangeEnd(double v) {
+    if (_isSending) return;
+    _rebuild();
+  }
+
   void _onBgColorTap(int c) {
     if (_isSending) return;
     setState(() => _bgColor = c);
@@ -319,15 +361,22 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   void _send() {
     final bin = _bin;
     if (bin == null || _converting || _isSending) return;
+    // Both RGB565 and JPEG are "picture" kind (trailing byte 0); the device
+    // tells the formats apart via the payload header's type byte (0 = RGB565,
+    // 12 = JPEG). JPEG is still not cached: the cache re-send/preview path is
+    // RGB565-only (CacheKind.image, decoded via decodeImageBin). RGB565 caches
+    // as before.
     ref.read(transferProgressProvider.notifier).send(
           TYPE.image,
           bin,
           _fileName,
-          trailingByte: 0, // 0 = 图片
-          cache: CacheSpec(CacheKind.image, {
-            'size': '$_size',
-            'cmp': _usedCompress ? 'rle' : 'raw',
-          }),
+          trailingByte: 0, // 0 = 图片（RGB565 或 JPEG，由 header type 区分）
+          cache: _isJpeg
+              ? null
+              : CacheSpec(CacheKind.image, {
+                  'size': '$_size',
+                  'cmp': _usedCompress ? 'rle' : 'raw',
+                }),
         );
   }
 
@@ -425,7 +474,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                         const SizedBox(height: 8),
                         _buildBgColorRow(theme, cs),
                         const SizedBox(height: 8),
-                        _buildToggles(theme, cs),
+                        _buildEncodeRow(theme, cs),
                         const SizedBox(height: 12),
                         _buildBinInfo(theme, cs),
                       ],
@@ -648,15 +697,61 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     );
   }
 
-  Widget _buildToggles(ThemeData theme, ColorScheme cs) {
-    // RLE compression is now chosen automatically (smaller of RLE/uncompressed),
-    // so only the dither option remains user-facing.
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      title: const Text('抖动 (Floyd–Steinberg)'),
-      subtitle: const Text('改善渐变，降低色带'),
-      value: _dither,
-      onChanged: _isSending ? null : _onDitherChange,
+  // "渐变优化" (Floyd–Steinberg dither, RGB565-only) and the image-quality bar
+  // share one row. Quality 100 = lossless RGB565; below 100 = JPEG, where dither
+  // has no effect, so the toggle is disabled outside the RGB565 (100%) mode.
+  Widget _buildEncodeRow(ThemeData theme, ColorScheme cs) {
+    final tt = theme.textTheme;
+    final bool jpegMode = _quality < 100;
+    final bool ditherEnabled = !jpegMode && !_isSending;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('渐变优化',
+                style: tt.titleSmall?.copyWith(
+                    color: ditherEnabled ? null : cs.onSurfaceVariant)),
+            SizedBox(
+              width: 40,
+              child: Transform.scale(
+                scale: 0.8,
+                child: Switch(
+                  value: _dither,
+                  onChanged: ditherEnabled ? _onDitherChange : null,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text('质量', style: tt.titleSmall),
+            Expanded(
+              child: Slider(
+                value: _quality.toDouble(),
+                min: 10,
+                max: 100,
+                divisions: 90,
+                label: '$_quality%',
+                onChanged: _isSending ? null : _onQualityChanged,
+                onChangeEnd: _isSending ? null : _onQualityChangeEnd,
+              ),
+            ),
+            SizedBox(
+              width: 42,
+              child: Text('$_quality%',
+                  textAlign: TextAlign.right, style: tt.bodyMedium),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Text(
+            jpegMode
+                ? 'JPEG 压缩（baseline · YUV420），渐变优化不生效'
+                : '100% 无损发送 RGB565（自动 RLE），可开渐变优化降色带',
+            style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ),
+      ],
     );
   }
 
@@ -696,8 +791,8 @@ class _ImagePageState extends ConsumerState<ImagePage> {
       );
     }
 
-    // Before/after comparison: both encodings shown, the chosen (smaller) one
-    // highlighted; RLE compression is applied automatically.
+    // Before/after comparison: savings are measured against the uncompressed
+    // RGB565 size (_rawSize), which both encodings share as a baseline.
     final int savePct = _rawSize > 0 && _binSize < _rawSize
         ? (100 * (_rawSize - _binSize) / _rawSize).round()
         : 0;
@@ -717,9 +812,15 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         const SizedBox(height: 8),
         Row(
           children: [
-            _sizeTag(cs, tt, '未压缩', _rawSize, !_usedCompress),
-            const SizedBox(width: 8),
-            _sizeTag(cs, tt, 'RLE 压缩', _rleSize, _usedCompress),
+            if (_isJpeg) ...[
+              _sizeTag(cs, tt, 'JPEG $_quality%', _binSize, true),
+              const SizedBox(width: 8),
+              _sizeTag(cs, tt, 'RGB565', _rawSize, false),
+            ] else ...[
+              _sizeTag(cs, tt, '未压缩', _rawSize, !_usedCompress),
+              const SizedBox(width: 8),
+              _sizeTag(cs, tt, 'RLE 压缩', _rleSize, _usedCompress),
+            ],
             const Spacer(),
             if (savePct > 0)
               Text('省 $savePct%',
