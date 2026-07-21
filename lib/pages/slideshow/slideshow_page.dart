@@ -462,13 +462,18 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     });
     try {
       // Render each slide to output-resolution RGBA (framing + background baked
-      // in) for the native Cinepak encoder.
+      // in) for the native Cinepak encoder. Cinepak codes 4×4 macroblocks, so
+      // the output must be a multiple of 4. Frames are pre-rendered here, so we
+      // round the chosen size *up* (e.g. 466 → 468) before rendering — native
+      // can't resize an already-baked frame. Mapping is linear in outSize, so
+      // the framing is unchanged.
+      final int encodeSize = (_size + 3) & ~3;
       final frames = <Uint8List>[];
       for (final s in _slides) {
-        final (scale, tx, ty) = _viewportMap(s, _size);
+        final (scale, tx, ty) = _viewportMap(s, encodeSize);
         final img = await renderViewportRgba(
           s.src,
-          outSize: _size,
+          outSize: encodeSize,
           scale: scale,
           tx: tx,
           ty: ty,
@@ -480,7 +485,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
       final res = await _converter.encodeSlideshow(
         frames: frames,
         holds: holds,
-        size: _size,
+        size: encodeSize,
         fps: _slideFps,
         quality: _quality,
         onProgress: (done, total) {

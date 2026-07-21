@@ -393,6 +393,10 @@ class VideoConverter {
         return rgba
     }
 
+    // Round [v] up to the nearest multiple of 4. Cinepak codes 4×4 macroblocks,
+    // so every AVI output dimension must be a multiple of 4.
+    private fun alignUp4(v: Int): Int = (v + 3) and 3.inv()
+
     fun convert(
         path: String,
         dstW: Int,
@@ -410,11 +414,17 @@ class VideoConverter {
         cancel: AtomicBoolean,
         progress: Progress?,
     ): Result {
-        require(dstW and 3 == 0 && dstH and 3 == 0) { "分辨率必须是 4 的倍数" }
+        require(dstW > 0 && dstH > 0) { "分辨率无效" }
+        // Cinepak codes 4×4 macroblocks, so both output dimensions must be a
+        // multiple of 4. Round the requested size *up* to the nearest multiple
+        // of 4 (e.g. a 366-px panel → 368) instead of rejecting it, so odd panel
+        // resolutions still convert.
+        val outW = alignUp4(dstW)
+        val outH = alignUp4(dstH)
 
         if (isGif(path)) {
             return convertGif(
-                path, dstW, dstH, targetFps, quality, refine, strips, skipThresh, keyint,
+                path, outW, outH, targetFps, quality, refine, strips, skipThresh, keyint,
                 cropMode, crop, maxFrames, bgColor, cancel, progress,
             )
         }
@@ -440,12 +450,12 @@ class VideoConverter {
             if (estTotal > maxFrames) estTotal = maxFrames
             val plannedTotal = maxOf(1, estTotal)
 
-            val dst = Bitmap.createBitmap(dstW, dstH, Bitmap.Config.ARGB_8888)
+            val dst = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(dst)
-            val pixels = IntArray(dstW * dstH)
-            val rgba = ByteArray(dstW * dstH * 4)
+            val pixels = IntArray(outW * outH)
+            val rgba = ByteArray(outW * outH * 4)
             val enc = CinepakEncoder.Encoder(
-                dstW, dstH,
+                outW, outH,
                 CinepakEncoder.Options(
                     quality = quality, refine = refine, strips = strips,
                     skipThresh = skipThresh, keyint = keyint,
@@ -463,7 +473,7 @@ class VideoConverter {
                     j++
                     continue
                 }
-                resizeFrame(bmp, dst, canvas, dstW, dstH, cropMode, crop, bgColor, pixels, rgba)
+                resizeFrame(bmp, dst, canvas, outW, outH, cropMode, crop, bgColor, pixels, rgba)
                 bmp.recycle()
                 frames.add(enc.encode(rgba))
                 progress?.onProgress(frames.size, maxOf(estTotal, frames.size))
@@ -474,8 +484,8 @@ class VideoConverter {
             if (frames.isEmpty()) throw RuntimeException("未能解码出任何帧")
 
             val muxFps = maxOf(1, Math.round(outFps).toInt())
-            val avi = CvidAviMuxer.buildAvi(frames, dstW, dstH, muxFps)
-            return Result(avi, dstW, dstH, frames.size, outFps)
+            val avi = CvidAviMuxer.buildAvi(frames, outW, outH, muxFps)
+            return Result(avi, outW, outH, frames.size, outFps)
         } finally {
             releaseRetriever(r)
         }
