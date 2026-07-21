@@ -17,6 +17,7 @@ import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
+import '../shared/preview_frame.dart';
 
 /// Page for converting a picked image to a device RGB565 `.bin` and sending it
 /// over BLE. The preview is a fixed square viewport: on load the whole image is
@@ -76,6 +77,12 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   int _size = kImageDefaultSize; // 360
   bool _dither = false;
   int _bgColor = 0xFF000000; // viewport letterbox / out-of-frame fill
+  // Preview-only: fills the square corners outside the circle, extracted from
+  // the selected image via Palette. Never affects the converted resource.
+  Color? _previewBg;
+  // Debounces the (background) preview-color extraction so it runs only after
+  // the user stops pinch-zooming / panning, not on every interaction-end.
+  final _bgDebounce = Debouncer(const Duration(milliseconds: 350));
 
   // Conversion result. RLE-compressed vs uncompressed are both computed; the
   // smaller wins automatically (no user toggle), and both sizes are shown.
@@ -113,6 +120,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     _transfer.resetForDispose();
     _tc.dispose();
     _srcImage?.dispose();
+    _bgDebounce.dispose();
     super.dispose();
   }
 
@@ -182,6 +190,21 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     });
     ref.read(transferProgressProvider.notifier).reset();
     _rebuild();
+    _extractPreviewBg();
+  }
+
+  // Derive the preview's outside-circle fill from the selected image (Palette).
+  // Preview-only — does not touch _bgColor or the conversion pipeline.
+  Future<void> _extractPreviewBg() async {
+    // Never compute while a finger is on the preview (pan/scale in progress);
+    // it resumes after the gesture ends via the debounced onInteractionEnd.
+    if (_viewportPointers > 0) return;
+    final image = _srcImage;
+    if (image == null) return;
+    final region = framedSourceRect(_vp, _srcW, _srcH, _tc.value);
+    final color = await extractPreviewBg(image, region: region);
+    if (!mounted || _srcImage != image) return;
+    setState(() => _previewBg = color);
   }
 
   // Load one of the bundled example images (assets/example/img/*.png).
@@ -459,6 +482,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
       child: Container(
         width: v,
         height: v,
+        alignment: Alignment.center,
         color: cs.surfaceContainerHighest,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -507,31 +531,33 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double v = min(constraints.maxWidth, maxH);
-        _vp = v;
+        final double d = v - 2 * kPreviewMargin; // circle floats with a margin
+        _vp = d;
         return Center(
           child: Listener(
             // Track fingers on the viewport so page scroll can be frozen while
             // the image is being pinch-zoomed / panned (see SingleChildScrollView).
-            onPointerDown: (_) => setState(() => _viewportPointers++),
+            onPointerDown: (_) {
+              // A new touch starts: drop any pending extraction so nothing
+              // computes while the finger is down (see _extractPreviewBg).
+              _bgDebounce.cancel();
+              setState(() => _viewportPointers++);
+            },
             onPointerUp: (_) =>
                 setState(() => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
             onPointerCancel: (_) =>
                 setState(() => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
-            child: Container(
+            child: SizedBox(
               width: v,
               height: v,
-              // Ring marks the round-screen boundary; drawn over the content.
-              foregroundDecoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: cs.outlineVariant.withValues(alpha: 0.6)),
-              ),
-              child: ClipOval(
+              child: previewCircle(
+                size: d,
+                bg: _previewBg,
                 child: _srcImage == null
-                    ? _buildEmptyViewport(theme, cs, v)
+                    ? _buildEmptyViewport(theme, cs, d)
                     : SizedBox(
-                        width: v,
-                        height: v,
+                        width: d,
+                        height: d,
                         child: Stack(
                           children: [
                             Positioned.fill(
@@ -541,10 +567,13 @@ class _ImagePageState extends ConsumerState<ImagePage> {
                               minScale: 1.0,
                               maxScale: 8.0,
                               clipBehavior: Clip.hardEdge,
-                              onInteractionEnd: (_) => _rebuild(),
+                              onInteractionEnd: (_) {
+                                _rebuild();
+                                _bgDebounce.run(_extractPreviewBg);
+                              },
                               child: SizedBox(
-                                width: v,
-                                height: v,
+                                width: d,
+                                height: d,
                                 child: RawImage(
                                     image: _srcImage, fit: BoxFit.contain),
                               ),

@@ -19,6 +19,7 @@ import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
+import '../shared/preview_frame.dart';
 
 /// Page for converting a picked video **or GIF** to a device-playable
 /// AVI(CVID) and sending it over BLE. Flow: pick (mp4/mov or GIF) → frame the
@@ -89,6 +90,12 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   int _fps = 10;
   int _quality = 60;
   int _bgColor = 0xFF000000; // GIF transparent bg + viewport letterbox fill
+  // Preview-only: fills the square corners outside the circle, extracted from
+  // the first frame via Palette. Never affects the converted resource.
+  Color? _previewBg;
+  // Debounces the (background) preview-color extraction so it runs only after
+  // the user stops pinch-zooming / panning, not on every interaction-end.
+  final _bgDebounce = Debouncer(const Duration(milliseconds: 350));
 
   // Pinch-zoom viewport crop (mirrors the image page): the fixed square frame
   // maps to the full output — whatever is framed is what gets encoded. On load
@@ -149,6 +156,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     unawaited(_player.dispose()); // release native player + texture
     _tc.dispose();
     _thumb?.dispose();
+    _bgDebounce.dispose();
     super.dispose();
   }
 
@@ -294,6 +302,24 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       _tc.value = Matrix4.identity(); // reset zoom/pan to contain-fit
     });
     ref.read(transferProgressProvider.notifier).reset();
+    _extractPreviewBg();
+  }
+
+  // Derive the preview's outside-circle fill from the first frame (Palette).
+  // Preview-only — does not touch _bgColor or the conversion pipeline.
+  Future<void> _extractPreviewBg() async {
+    // Never compute while a finger is on the preview (pan/scale in progress);
+    // it resumes after the gesture ends via the debounced onInteractionEnd.
+    if (_viewportPointers > 0) return;
+    final image = _thumb;
+    if (image == null) {
+      if (mounted && _previewBg != null) setState(() => _previewBg = null);
+      return;
+    }
+    final region = framedSourceRect(_vp, _srcW, _srcH, _tc.value);
+    final color = await extractPreviewBg(image, region: region);
+    if (!mounted || _thumb != image) return;
+    setState(() => _previewBg = color);
   }
 
   // ── Convert ────────────────────────────────────────────────────────────────
@@ -751,30 +777,33 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double v = min(constraints.maxWidth, maxH);
-        _vp = v;
+        final double d = v - 2 * kPreviewMargin; // circle floats with a margin
+        _vp = d;
         return Center(
           child: GestureDetector(
             onTap: _isBusy ? null : _showPickSheet,
-            child: Container(
+            child: SizedBox(
               width: v,
               height: v,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: cs.surfaceContainerHighest,
-                border: Border.all(
-                    color: cs.outlineVariant.withValues(alpha: 0.6)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.movie_creation_outlined,
-                      size: 44, color: cs.outline),
-                  const SizedBox(height: 8),
-                  Text('点击选择视频或 GIF',
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: cs.outline)),
-                ],
+              child: previewCircle(
+                size: d,
+                bg: null,
+                child: ColoredBox(
+                  color: cs.surfaceContainerHighest,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.movie_creation_outlined,
+                            size: 44, color: cs.outline),
+                        const SizedBox(height: 8),
+                        Text('点击选择视频或 GIF',
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(color: cs.outline)),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -861,7 +890,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double v = min(constraints.maxWidth, maxH);
-        _vp = v;
+        final double d = v - 2 * kPreviewMargin; // circle floats with a margin
+        _vp = d;
         return Center(
           child: SizedBox(
             width: v,
@@ -872,48 +902,50 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                   child: Listener(
                     // Track fingers on the viewport so page scroll can be frozen
                     // while the frame is being pinch-zoomed / panned.
-                    onPointerDown: (_) => setState(() => _viewportPointers++),
+                    onPointerDown: (_) {
+                      // A new touch starts: drop any pending extraction so
+                      // nothing computes while the finger is down.
+                      _bgDebounce.cancel();
+                      setState(() => _viewportPointers++);
+                    },
                     onPointerUp: (_) => setState(() =>
                         _viewportPointers =
                             (_viewportPointers - 1).clamp(0, 99)),
                     onPointerCancel: (_) => setState(() =>
                         _viewportPointers =
                             (_viewportPointers - 1).clamp(0, 99)),
-                    child: Container(
-                      // Ring marks the round-screen boundary; drawn over content.
-                      foregroundDecoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: cs.outlineVariant.withValues(alpha: 0.6)),
-                      ),
-                      child: ClipOval(
-                        child: Stack(
-                          children: [
-                            Positioned.fill(
-                                child: ColoredBox(color: Color(_bgColor))),
-                            InteractiveViewer(
-                              transformationController: _tc,
-                              minScale: 1.0,
-                              maxScale: 8.0,
-                              clipBehavior: Clip.hardEdge,
-                              // Reframing invalidates the converted result
-                              // (re-convert is native/expensive → manual).
-                              onInteractionEnd: (_) => _invalidate(),
-                              child: SizedBox(
-                                width: v,
-                                height: v,
-                                child: _buildMediaContent(),
-                              ),
+                    child: previewCircle(
+                      size: d,
+                      bg: _previewBg,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                              child: ColoredBox(color: Color(_bgColor))),
+                          InteractiveViewer(
+                            transformationController: _tc,
+                            minScale: 1.0,
+                            maxScale: 8.0,
+                            clipBehavior: Clip.hardEdge,
+                            // Reframing invalidates the converted result
+                            // (re-convert is native/expensive → manual).
+                            onInteractionEnd: (_) {
+                              _invalidate();
+                              _bgDebounce.run(_extractPreviewBg);
+                            },
+                            child: SizedBox(
+                              width: d,
+                              height: d,
+                              child: _buildMediaContent(),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
                 Positioned(
-                  right: 6,
-                  bottom: 6,
+                  right: kPreviewMargin,
+                  bottom: kPreviewMargin,
                   child: _buildPlayControls(cs),
                 ),
               ],

@@ -61,3 +61,4 @@ coverage/
 *.pem
 .env
 .env.*
+refer/Android_OTA_SDK_v3.15.16.7z

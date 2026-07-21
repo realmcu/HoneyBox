@@ -17,6 +17,7 @@ import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
+import '../shared/preview_frame.dart';
 
 /// 多图轮播 — compose up to [_maxSlides] pictures into a looping slideshow video
 /// and send it over BLE. Each picture is framed in the same circular pinch-zoom
@@ -115,6 +116,13 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   int _size = 360;
   int _quality = 95; // HIGH — photos favor fidelity; lower it to shrink the file
   int _bgColor = 0xFF000000;
+  // Preview-only: fills the square corners outside the circle, extracted from
+  // the FIRST slide via Palette. Never affects the converted resource.
+  Color? _previewBg;
+  int? _previewBgSlideId; // slide id _previewBg was extracted from (de-dup)
+  // Debounces the (background) preview-color extraction so it runs only after
+  // the user stops pinch-zooming / panning, not on every interaction-end.
+  final _bgDebounce = Debouncer(const Duration(milliseconds: 350));
   double _durationSec = 3.0;
 
   // Framing viewport geometry (shared by every slide; each slide keeps its own
@@ -169,6 +177,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     for (final s in _slides) {
       s.dispose();
     }
+    _bgDebounce.dispose();
     super.dispose();
   }
 
@@ -222,6 +231,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
         _renderSlide(i);
       }
       _invalidate();
+      _refreshPreviewBg();
       if (picked.length > remaining) {
         _snack('已达上限，仅添加前 $remaining 张');
       }
@@ -259,6 +269,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
       setState(() => _editingIndex = _slides.length - 1);
       _renderSlide(_slides.length - 1);
       _invalidate();
+      _refreshPreviewBg();
     } catch (e) {
       _snack('加载示例失败: $e');
     }
@@ -280,6 +291,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     });
     s.dispose();
     _invalidate();
+    _refreshPreviewBg();
   }
 
   void _onReorder(int oldIndex, int newIndex) {
@@ -299,6 +311,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
       }
     });
     _invalidate();
+    _refreshPreviewBg();
   }
 
   void _selectSlide(int i) {
@@ -527,6 +540,32 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
       _convError = null;
       _conv = _ConvStatus.idle;
     });
+  }
+
+  // Refresh the preview's outside-circle fill from the FIRST slide (Palette).
+  // Skips when the first slide is unchanged; clears when there are no slides.
+  // Preview-only — does not touch _bgColor or the conversion pipeline.
+  Future<void> _refreshPreviewBg({bool force = false}) async {
+    // Never compute while a finger is on the preview (pan/scale in progress);
+    // it resumes after the gesture ends via the debounced onInteractionEnd.
+    if (_viewportPointers > 0) return;
+    if (_slides.isEmpty) {
+      _previewBgSlideId = null;
+      if (mounted && _previewBg != null) setState(() => _previewBg = null);
+      return;
+    }
+    final first = _slides.first;
+    // Same first image and framing unchanged → keep the current color. [force]
+    // is set when the first slide was reframed (its pixels-in-view changed).
+    if (!force && first.id == _previewBgSlideId) return;
+    _previewBgSlideId = first.id;
+    final region =
+        framedSourceRect(_vp, first.srcW, first.srcH, first.tc.value);
+    final color = await extractPreviewBg(first.src, region: region);
+    if (!mounted) return;
+    // The first slide may have changed again while awaiting.
+    if (_slides.isEmpty || _slides.first.id != first.id) return;
+    setState(() => _previewBg = color);
   }
 
   // ── Send ─────────────────────────────────────────────────────────────────
@@ -762,7 +801,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double v = min(constraints.maxWidth, maxH);
-        _vp = v;
+        final double d = v - 2 * kPreviewMargin; // circle floats with a margin
+        _vp = d;
         return Center(
           child: SizedBox(
             width: v,
@@ -771,12 +811,12 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
               children: [
                 Positioned.fill(
                   child: _play == _PlayState.stopped
-                      ? _buildEditingContent(cs, v)
-                      : _buildPlayingContent(cs),
+                      ? _buildEditingContent(cs, d)
+                      : _buildPlayingContent(cs, d),
                 ),
                 Positioned(
-                  right: 6,
-                  bottom: 6,
+                  right: kPreviewMargin,
+                  bottom: kPreviewMargin,
                   child: _buildPlayControls(cs),
                 ),
               ],
@@ -790,61 +830,59 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   Widget _buildEditingContent(ColorScheme cs, double v) {
     final slide = _slides[_editingIndex];
     return Listener(
-      onPointerDown: (_) => setState(() => _viewportPointers++),
+      onPointerDown: (_) {
+        // A new touch starts: drop any pending extraction so nothing computes
+        // while the finger is down.
+        _bgDebounce.cancel();
+        setState(() => _viewportPointers++);
+      },
       onPointerUp: (_) => setState(
           () => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
       onPointerCancel: (_) => setState(
           () => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
-      child: Container(
-        foregroundDecoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border:
-              Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-        ),
-        child: ClipOval(
-          child: Stack(
-            children: [
-              Positioned.fill(child: ColoredBox(color: Color(_bgColor))),
-              InteractiveViewer(
-                key: ValueKey(slide.id),
-                transformationController: slide.tc,
-                minScale: 1.0,
-                maxScale: 8.0,
-                clipBehavior: Clip.hardEdge,
-                onInteractionEnd: (_) {
-                  _renderSlide(_editingIndex);
-                  _invalidate();
-                },
-                child: SizedBox(
-                  width: v,
-                  height: v,
-                  child: RawImage(image: slide.src, fit: BoxFit.contain),
-                ),
+      child: previewCircle(
+        size: v,
+        bg: _previewBg,
+        child: Stack(
+          children: [
+            Positioned.fill(child: ColoredBox(color: Color(_bgColor))),
+            InteractiveViewer(
+              key: ValueKey(slide.id),
+              transformationController: slide.tc,
+              minScale: 1.0,
+              maxScale: 8.0,
+              clipBehavior: Clip.hardEdge,
+              onInteractionEnd: (_) {
+                _renderSlide(_editingIndex);
+                _invalidate();
+                if (_editingIndex == 0) {
+                  _bgDebounce.run(() => _refreshPreviewBg(force: true));
+                }
+              },
+              child: SizedBox(
+                width: v,
+                height: v,
+                child: RawImage(image: slide.src, fit: BoxFit.contain),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildPlayingContent(ColorScheme cs) {
+  Widget _buildPlayingContent(ColorScheme cs, double v) {
     final img =
         _slides.isNotEmpty ? _slides[_previewIdx % _slides.length].framed : null;
-    return Container(
-      foregroundDecoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-      ),
-      child: ClipOval(
-        child: Stack(
-          children: [
-            Positioned.fill(child: ColoredBox(color: Color(_bgColor))),
-            if (img != null)
-              Positioned.fill(
-                  child: RawImage(image: img, fit: BoxFit.contain)),
-          ],
-        ),
+    return previewCircle(
+      size: v,
+      bg: _previewBg,
+      child: Stack(
+        children: [
+          Positioned.fill(child: ColoredBox(color: Color(_bgColor))),
+          if (img != null)
+            Positioned.fill(child: RawImage(image: img, fit: BoxFit.contain)),
+        ],
       ),
     );
   }

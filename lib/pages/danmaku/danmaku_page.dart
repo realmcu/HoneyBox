@@ -14,6 +14,7 @@ import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
+import '../shared/preview_frame.dart';
 
 /// Page for rendering danmaku text and sending it over BLE.
 ///
@@ -482,22 +483,22 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
     return LayoutBuilder(
       builder: (context, constraints) {
         final double v = min(constraints.maxWidth, maxH);
+        final double d = v - 2 * kPreviewMargin; // circle floats with a margin
         return Center(
-          child: Container(
+          child: SizedBox(
             width: v,
             height: v,
-            foregroundDecoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border:
-                  Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-            ),
-            child: ClipOval(
+            // Danmaku fills outside the circle with the manually-chosen bg color;
+            // the same color fills inside, so the ring + shadow mark the boundary.
+            child: previewCircle(
+              size: d,
+              bg: Color(_bgColor),
               child: _previewImage == null
                   ? ColoredBox(color: Color(_bgColor))
                   : AnimatedBuilder(
                       animation: _scrollCtl,
                       builder: (_, __) => CustomPaint(
-                        size: Size(v, v),
+                        size: Size(d, d),
                         painter: _ScrollPreviewPainter(
                           strip: _previewImage!,
                           bgColor: _bgColor,
