@@ -71,6 +71,9 @@ class VideoPreviewPlayer(
         runCatching { player?.seekTo(ms) }
     }
 
+    /** Current playback position in ms (0 before prepared / after release). */
+    fun position(): Int = runCatching { player?.currentPosition ?: 0 }.getOrDefault(0)
+
     /** Release the player, surface and texture. Idempotent. */
     fun release() {
         if (released) return

@@ -131,6 +131,12 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   bool _loadingFrames = false;
   Timer? _playTimer;
 
+  // Playback clock for the preview's bottom-left time label (current / total).
+  // While playing it's sampled: real videos read MediaPlayer.currentPosition,
+  // GIFs derive it from the cycling frame index.
+  final ValueNotifier<int> _positionMs = ValueNotifier<int>(0);
+  Timer? _posTimer;
+
   @override
   void initState() {
     super.initState();
@@ -152,11 +158,13 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     _rebuildSeq++;
     _converter.cancel();
     _playTimer?.cancel();
+    _posTimer?.cancel();
     _disposeFrames();
     unawaited(_player.dispose()); // release native player + texture
     _tc.dispose();
     _thumb?.dispose();
     _bgDebounce.dispose();
+    _positionMs.dispose();
     super.dispose();
   }
 
@@ -590,12 +598,33 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     );
   }
 
+  // Drive the current-position clock while playing. Real videos poll the native
+  // player; GIFs derive position from the cycling frame index. 250ms is plenty
+  // for an mm:ss readout and keeps the channel traffic light.
+  void _startPosTimer() {
+    _posTimer?.cancel();
+    _posTimer = Timer.periodic(const Duration(milliseconds: 250), (_) async {
+      if (!mounted) return;
+      if (_isGif) {
+        final frames = _frames;
+        if (frames != null && frames.isNotEmpty) {
+          _positionMs.value = (_frameIdx % frames.length) * _frameIntervalMs;
+        }
+      } else if (_player.isReady) {
+        final pos = await _player.position();
+        if (!mounted) return;
+        _positionMs.value = pos;
+      }
+    });
+  }
+
   Future<void> _onPlayPause() async {
     if (_conv == _ConvStatus.converting) return;
     if (_isGif) {
       // GIF: cycle extracted frames (Flutter exposes no GIF frame control).
       if (_play == _PlayState.playing) {
         _playTimer?.cancel();
+        _posTimer?.cancel();
         setState(() => _play = _PlayState.paused);
         return;
       }
@@ -605,12 +634,17 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       }
       setState(() => _play = _PlayState.playing);
       _startTimer();
+      _startPosTimer();
       return;
     }
     // Video: play the original through the native texture player.
     if (_play == _PlayState.playing) {
       await _player.pause();
       if (!mounted) return;
+      _posTimer?.cancel();
+      final pos = await _player.position(); // settle on the exact pause point
+      if (!mounted) return;
+      _positionMs.value = pos;
       setState(() => _play = _PlayState.paused);
       return;
     }
@@ -621,15 +655,19 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     await _player.play();
     if (!mounted) return;
     setState(() => _play = _PlayState.playing);
+    _startPosTimer();
   }
 
   void _onStop() {
     _playTimer?.cancel();
     _playTimer = null;
+    _posTimer?.cancel();
+    _posTimer = null;
     if (!_isGif && _player.isReady) {
       unawaited(_player.pause());
       unawaited(_player.seekTo(0)); // rewind so the next Play starts from the top
     }
+    _positionMs.value = 0;
     setState(() {
       _play = _PlayState.stopped;
       _frameIdx = 0; // stop returns to the first frame (the still thumbnail)
@@ -640,10 +678,13 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   void _stopPlayback() {
     _playTimer?.cancel();
     _playTimer = null;
+    _posTimer?.cancel();
+    _posTimer = null;
     if (!_isGif && _player.isReady) {
       unawaited(_player.pause());
       unawaited(_player.seekTo(0));
     }
+    _positionMs.value = 0;
     _play = _PlayState.stopped;
     _frameIdx = 0;
   }
@@ -948,6 +989,15 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                   bottom: kPreviewMargin,
                   child: _buildPlayControls(cs),
                 ),
+                // Bottom-left: current / total time, shown once the player
+                // (video) or the extracted frames (GIF) are ready.
+                if ((_isGif && _frames != null) ||
+                    (!_isGif && _player.isReady))
+                  Positioned(
+                    left: kPreviewMargin,
+                    bottom: kPreviewMargin,
+                    child: _buildTimeLabel(),
+                  ),
               ],
             ),
           ),
@@ -1027,6 +1077,43 @@ class _VideoPageState extends ConsumerState<VideoPage> {
             tooltip: '停止',
           ),
         ],
+      ),
+    );
+  }
+
+  // mm:ss for the time label; clamps negatives to 0.
+  String _fmtTime(int ms) {
+    final totalSec = (ms < 0 ? 0 : ms) ~/ 1000;
+    final m = totalSec ~/ 60;
+    final s = totalSec % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  // Translucent "current / total" time pill for the preview's bottom-left.
+  // Total is the video duration (or the GIF preview's cycle length); current
+  // updates while playing via [_positionMs].
+  Widget _buildTimeLabel() {
+    final int total = _isGif
+        ? (_frames?.length ?? 0) * _frameIntervalMs
+        : _player.durationMs;
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(24),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        child: ValueListenableBuilder<int>(
+          valueListenable: _positionMs,
+          builder: (_, pos, __) => Text(
+            '${_fmtTime(pos)} / ${_fmtTime(total)}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              fontFeatures: [ui.FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
       ),
     );
   }

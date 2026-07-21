@@ -178,6 +178,7 @@ class MainActivity : FlutterActivity() {
                     playerFor(call)?.seekTo(call.argument<Int>("positionMs") ?: 0)
                     result.success(null)
                 }
+                "position" -> result.success(playerFor(call)?.position() ?: 0)
                 "dispose" -> {
                     val id = (call.argument<Number>("id"))?.toLong()
                     (if (id != null) players.remove(id) else null)?.release()

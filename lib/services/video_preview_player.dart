@@ -52,6 +52,15 @@ class NativeVideoPlayer {
     await _channel.invokeMethod('seekTo', {'id': id, 'positionMs': ms});
   }
 
+  /// Current playback position in ms (0 when not ready). Poll while playing to
+  /// drive a progress / time readout.
+  Future<int> position() async {
+    final id = _textureId;
+    if (id == null) return 0;
+    final res = await _channel.invokeMethod('position', {'id': id});
+    return (res as num?)?.toInt() ?? 0;
+  }
+
   /// Release the native player + texture. Safe to call multiple times.
   Future<void> dispose() async {
     final id = _textureId;
