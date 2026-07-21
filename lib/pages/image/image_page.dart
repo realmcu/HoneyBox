@@ -361,22 +361,23 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   void _send() {
     final bin = _bin;
     if (bin == null || _converting || _isSending) return;
-    // Both RGB565 and JPEG are "picture" kind (trailing byte 0); the device
-    // tells the formats apart via the payload header's type byte (0 = RGB565,
-    // 12 = JPEG). JPEG is still not cached: the cache re-send/preview path is
-    // RGB565-only (CacheKind.image, decoded via decodeImageBin). RGB565 caches
-    // as before.
+    // Both RGB565 and JPEG are "picture" kind (trailing byte 0); the device and
+    // our cache preview both tell the formats apart via the payload header's
+    // type byte (0 = RGB565, 12 = JPEG — see isImageJpegBin). Both cache under
+    // CacheKind.image; the params record the format so the picker can summarise
+    // and re-send either kind as-is (JPEG preview decodes natively, RGB565 via
+    // decodeImageBin).
     ref.read(transferProgressProvider.notifier).send(
           TYPE.image,
           bin,
           _fileName,
           trailingByte: 0, // 0 = 图片（RGB565 或 JPEG，由 header type 区分）
-          cache: _isJpeg
-              ? null
-              : CacheSpec(CacheKind.image, {
-                  'size': '$_size',
-                  'cmp': _usedCompress ? 'rle' : 'raw',
-                }),
+          cache: CacheSpec(
+            CacheKind.image,
+            _isJpeg
+                ? {'size': '$_size', 'fmt': 'jpeg', 'q': '$_quality'}
+                : {'size': '$_size', 'cmp': _usedCompress ? 'rle' : 'raw'},
+          ),
         );
   }
 

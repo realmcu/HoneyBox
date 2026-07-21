@@ -119,4 +119,38 @@ void main() {
     final lo = encodeBaselineJpegYuv420(rgba, 64, 64, quality: 20);
     expect(lo.length, lessThan(hi.length));
   });
+
+  test('isImageJpegBin / imageJpegPayload round-trip the container', () {
+    const w = 96, h = 64;
+    final bin = buildImageJpegBin(_gradient(w, h), w, h, quality: 70);
+    expect(isImageJpegBin(bin), isTrue);
+
+    // Payload is the header-stripped JFIF stream: starts SOI, ends EOI, and its
+    // length equals both the size field and (total - header).
+    final payload = imageJpegPayload(bin)!;
+    expect(payload.length, bin.length - kJpegHeaderBytes);
+    expect(payload.length,
+        ByteData.sublistView(bin).getUint32(8, Endian.little));
+    expect(payload[0], 0xFF);
+    expect(payload[1], 0xD8);
+    expect(payload[payload.length - 2], 0xFF);
+    expect(payload[payload.length - 1], 0xD9);
+  });
+
+  test('JPEG detection rejects an RGB565 .bin and short buffers', () {
+    // An RGB565 gui_rgb_data_head_t carries format 0 at offset 1, so even if its
+    // bytes 16/17 happened to be FFD8 it must not be taken for JPEG.
+    final rgb565 = Uint8List(64);
+    rgb565[1] = 0x00; // format = RGB565
+    rgb565[16] = 0xFF;
+    rgb565[17] = 0xD8;
+    expect(isImageJpegBin(rgb565), isFalse);
+    expect(imageJpegPayload(rgb565), isNull);
+
+    // Right type byte but no room for the SOI marker → not a container.
+    final truncated = Uint8List(kJpegHeaderBytes);
+    truncated[1] = 0x0C;
+    expect(isImageJpegBin(truncated), isFalse);
+    expect(imageJpegPayload(truncated), isNull);
+  });
 }

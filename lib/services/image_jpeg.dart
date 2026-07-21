@@ -516,3 +516,24 @@ Uint8List buildImageJpegBin(
   out.setRange(header.length, out.length, jpeg);
   return out;
 }
+
+/// True when [bin] is a JPEG image container produced by [buildImageJpegBin]:
+/// long enough for the 16-byte header, its type byte marks JPEG, and the payload
+/// begins with the JFIF SOI marker (0xFFD8). An RGB565 `.bin` carries format 0
+/// at offset 1, so it never matches — letting the cache/preview layer tell the
+/// two apart (both share [CacheKind.image]) without re-decoding.
+bool isImageJpegBin(Uint8List bin) {
+  return bin.length > kJpegHeaderBytes + 1 &&
+      bin[1] == _jpegHeaderType &&
+      bin[kJpegHeaderBytes] == 0xFF &&
+      bin[kJpegHeaderBytes + 1] == 0xD8;
+}
+
+/// The raw JFIF JPEG bytes (SOI … EOI) inside a JPEG container — [bin] with its
+/// 16-byte device header stripped — ready to hand to a standard JPEG decoder
+/// (e.g. Flutter's `instantiateImageCodec`). Returns null if [bin] is not a JPEG
+/// container. The result is a view over [bin]'s buffer (no copy).
+Uint8List? imageJpegPayload(Uint8List bin) {
+  if (!isImageJpegBin(bin)) return null;
+  return Uint8List.sublistView(bin, kJpegHeaderBytes);
+}

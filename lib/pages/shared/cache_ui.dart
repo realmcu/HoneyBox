@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../services/converter.dart';
 import '../../services/file_cache.dart';
 import '../../services/image_bin.dart';
+import '../../services/image_jpeg.dart';
 import 'file_send_layout.dart';
 
 // ── Formatting helpers (shared by the picker, panel and management page) ──────
@@ -39,11 +40,16 @@ String cacheParamSummary(CacheEntry e) {
     case CacheKind.image:
       final size = p['size'];
       if (size != null) parts.add('$size×$size');
-      final cmp = p['cmp'];
-      if (cmp == 'rle') {
-        parts.add('RLE');
-      } else if (cmp == 'raw') {
-        parts.add('未压缩');
+      if (p['fmt'] == 'jpeg') {
+        final q = p['q'];
+        parts.add(q != null ? 'JPEG $q%' : 'JPEG');
+      } else {
+        final cmp = p['cmp'];
+        if (cmp == 'rle') {
+          parts.add('RLE');
+        } else if (cmp == 'raw') {
+          parts.add('未压缩');
+        }
       }
       break;
     case CacheKind.danmaku:
@@ -80,6 +86,16 @@ Future<ui.Image?> loadCacheThumb(CacheEntry e) async {
   if (e.kind == CacheKind.video) return null;
   try {
     final bytes = await e.file.readAsBytes();
+    // Image caches come in two formats under the same CacheKind.image: an RGB565
+    // `.bin` or a JPEG container (header type byte distinguishes them). A JPEG
+    // container decodes through Flutter's native codec off its stripped JFIF
+    // payload; RGB565 (and danmaku) expands to RGBA via our own decoder.
+    final jpeg = imageJpegPayload(bytes);
+    if (jpeg != null) {
+      final codec = await ui.instantiateImageCodec(jpeg);
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    }
     final px = decodeImageBin(bytes);
     if (px == null) return null;
     final completer = Completer<ui.Image>();
