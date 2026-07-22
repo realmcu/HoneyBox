@@ -10,13 +10,21 @@ import '../../services/system_settings.dart';
 import '../shared/app_drawer.dart';
 import 'widgets/device_tile.dart';
 
-/// Default name filter — the app is built for eBadge devices, so we hide the
-/// noise of surrounding BLE peripherals out of the box. Clearing the filter
-/// (or the chip) reveals everything.
-const String _kDefaultFilter = 'eBadge';
+/// Fallback device-name filter used when a caller doesn't specify one.
+const String _kFallbackFilter = 'eBadge';
 
 class ScanPage extends ConsumerStatefulWidget {
-  const ScanPage({super.key});
+  /// BLE-name prefix filter applied by default when the page opens.
+  final String defaultDeviceFilter;
+
+  /// AppBar title (e.g. "eBadge" / "Watch"). Used verbatim.
+  final String appTitle;
+
+  const ScanPage({
+    super.key,
+    this.defaultDeviceFilter = _kFallbackFilter,
+    this.appTitle = 'eBadge',
+  });
 
   @override
   ConsumerState<ScanPage> createState() => _ScanPageState();
@@ -24,9 +32,9 @@ class ScanPage extends ConsumerStatefulWidget {
 
 class _ScanPageState extends ConsumerState<ScanPage>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
-  final TextEditingController _filterCtrl =
-      TextEditingController(text: _kDefaultFilter);
-  String _filter = _kDefaultFilter;
+  late final TextEditingController _filterCtrl =
+      TextEditingController(text: widget.defaultDeviceFilter);
+  late String _filter = widget.defaultDeviceFilter;
   bool _onlyConnectable = false;
   String? _connectingId;
   bool _locationOff = false;
@@ -170,7 +178,8 @@ class _ScanPageState extends ConsumerState<ScanPage>
       // Let a rightward swipe from the left half of the screen open the drawer.
       drawerEdgeDragWidth: MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
-        title: Text('扫描设备', style: tt.titleLarge?.copyWith(color: cs.onPrimary)),
+        title: Text('${widget.appTitle} · 扫描设备',
+            style: tt.titleLarge?.copyWith(color: cs.onPrimary)),
         backgroundColor: cs.primary,
         foregroundColor: cs.onPrimary,
         systemOverlayStyle: SystemUiOverlayStyle.light,
@@ -322,9 +331,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
             _filterChip(
               cs,
               label: 'eBadge',
-              selected: _filter.trim() == _kDefaultFilter,
+              selected: _filter.trim() == widget.defaultDeviceFilter,
               onSelected: (sel) =>
-                  _filterCtrl.text = sel ? _kDefaultFilter : '',
+                  _filterCtrl.text = sel ? widget.defaultDeviceFilter : '',
             ),
             _filterChip(
               cs,
