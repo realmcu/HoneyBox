@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/current_app_provider.dart';
+import '../dashboard/dashboard_app_root.dart';
 import '../ebadge/ebadge_app_root.dart';
-import '../scan/scan_page.dart';
+import '../watch/watch_app_root.dart';
 import 'app_catalog.dart';
 import 'widgets/app_card.dart';
 
@@ -51,29 +52,14 @@ class AppLauncherPage extends ConsumerWidget {
     ));
   }
 
-  /// 每个 AppId 返回对应根页面。Watch / Dashboard 暂用骨架 —— Task 8
-  /// 引入 WatchAppRoot / DashboardAppRoot 后替换 switch 分支并删除
-  /// _SkeletonRoot 与 ScanPage import。
   Widget _rootFor(AppEntry entry) {
     switch (entry.id) {
       case AppId.ebadge:
         return const EBadgeAppRoot();
       case AppId.watch:
+        return const WatchAppRoot();
       case AppId.dashboard:
-        return _SkeletonRoot(entry: entry);
+        return const DashboardAppRoot();
     }
-  }
-}
-
-class _SkeletonRoot extends ConsumerWidget {
-  final AppEntry entry;
-  const _SkeletonRoot({required this.entry});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ScanPage(
-      defaultDeviceFilter: entry.deviceFilter,
-      appTitle: entry.title,
-    );
   }
 }
