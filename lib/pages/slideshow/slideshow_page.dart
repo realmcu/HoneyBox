@@ -955,7 +955,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
         buildDefaultDragHandles: true,
         padding: const EdgeInsets.symmetric(horizontal: 2),
         itemCount: _slides.length,
-        onReorderItem: _onReorder,
+        onReorder: _onReorder,
         footer: _slides.length < _maxSlides ? _buildAddTile(cs) : null,
         itemBuilder: (ctx, i) => _buildSlideTile(ctx, cs, i),
       ),
