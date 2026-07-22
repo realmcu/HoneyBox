@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'pages/ebadge/ebadge_app_root.dart';
+import 'pages/launcher/app_launcher_page.dart';
 import 'pages/image/image_page.dart';
 import 'pages/danmaku/danmaku_page.dart';
 import 'pages/video/video_page.dart';
@@ -23,7 +24,7 @@ class EbadgeApp extends StatelessWidget {
       theme: AppTheme.lightTheme,
       // The home is a single connection-aware gate (no separate "enter scan"
       // layer). Function pages are pushed on top via named routes below.
-      home: const EBadgeAppRoot(),
+      home: const AppLauncherPage(),
       onGenerateRoute: (settings) {
         final args = settings.arguments as Map<String, String>?;
 
