@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
+import '../../providers/current_app_provider.dart';
 import '../scan/scan_page.dart';
 import '../shared/app_placeholder_page.dart';
 
 /// Dashboard（仪表盘）应用根：结构同 EBadgeAppRoot / WatchAppRoot。
+/// [PopScope] 保证返回 Launcher 时 disconnect + 清 currentApp（spec §4.4）。
 class DashboardAppRoot extends ConsumerWidget {
   const DashboardAppRoot({super.key});
 
@@ -21,15 +23,24 @@ class DashboardAppRoot extends ConsumerWidget {
     });
 
     final connected = ref.watch(connectedDeviceProvider);
-    if (connected != null) {
-      return AppPlaceholderPage(
-        appTitle: '仪表盘',
-        deviceName: connected.name,
-      );
-    }
-    return const ScanPage(
-      defaultDeviceFilter: 'Dashboard',
-      appTitle: '仪表盘',
+    final child = connected != null
+        ? AppPlaceholderPage(
+            appTitle: '仪表盘',
+            deviceName: connected.name,
+          )
+        : const ScanPage(
+            defaultDeviceFilter: 'Dashboard',
+            appTitle: '仪表盘',
+          );
+
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) return;
+        ref.read(bleNotifierProvider.notifier).disconnect();
+        ref.read(currentAppProvider.notifier).state = null;
+      },
+      child: child,
     );
   }
 }

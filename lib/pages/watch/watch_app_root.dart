@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
+import '../../providers/current_app_provider.dart';
 import '../scan/scan_page.dart';
 import '../shared/app_placeholder_page.dart';
 
 /// Watch 应用根：结构与 EBadgeAppRoot 一致，功能页替换为占位。
+/// [PopScope] 保证返回 Launcher 时 disconnect + 清 currentApp（spec §4.4）。
 class WatchAppRoot extends ConsumerWidget {
   const WatchAppRoot({super.key});
 
@@ -21,15 +23,24 @@ class WatchAppRoot extends ConsumerWidget {
     });
 
     final connected = ref.watch(connectedDeviceProvider);
-    if (connected != null) {
-      return AppPlaceholderPage(
-        appTitle: 'Watch',
-        deviceName: connected.name,
-      );
-    }
-    return const ScanPage(
-      defaultDeviceFilter: 'Watch',
-      appTitle: 'Watch',
+    final child = connected != null
+        ? AppPlaceholderPage(
+            appTitle: 'Watch',
+            deviceName: connected.name,
+          )
+        : const ScanPage(
+            defaultDeviceFilter: 'Watch',
+            appTitle: 'Watch',
+          );
+
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) return;
+        ref.read(bleNotifierProvider.notifier).disconnect();
+        ref.read(currentAppProvider.notifier).state = null;
+      },
+      child: child,
     );
   }
 }
