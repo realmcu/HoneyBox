@@ -95,7 +95,7 @@ Invoke-RestMethod "https://gitee.com/api/v5/repos/realmcu/hmi-android-apk/releas
   返回的 `tag_name` 应为最新版本，`apk` 中应包含刚上传的 `.apk`。
 - ⚠️ 只打 tag、不上传 APK，老版本 **不会** 提示更新。
 
-## 6.（可选）SHA-256 强校验
+## 6. SHA-256 强校验
 
 客户端已兼容强校验：若 Release notes（body）中声明了 SHA-256，下载与「复用本地已下载包」
 时都会比对哈希；未声明则回退到「文件大小 + ZIP 魔数」弱校验。
