@@ -1,4 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+
+import 'resource_pack.dart';
 
 /// Normalized crop rectangle (0..1) relative to the source frame. Mirrors the
 /// miniprogram's interactive crop box; takes precedence over [cropMode].
@@ -125,20 +130,43 @@ class ConverterService {
     int maxEdge = 200,
   }) async {
     _ensureHandler();
-    final res = await _method.invokeMethod('decodeCvid', {
-      'path': path,
-      'maxCount': maxCount,
-      'maxEdge': maxEdge,
-    });
-    final map = (res as Map).cast<dynamic, dynamic>();
-    final raw = (map['frames'] as List).cast<Object?>();
-    final frames = <Uint8List>[
-      for (final f in raw) f as Uint8List,
-    ];
-    return VideoPreview(
-      frames: frames,
-      intervalMs: (map['intervalMs'] as num?)?.toInt() ?? 100,
-    );
+    // New video caches store the whole resource package; the playable AVI is its
+    // primary resource (resource[0]). The native decoder only reads a file path,
+    // so extract the inner AVI to a temp file and decode that. Legacy caches are
+    // a bare AVI (packagePrimaryResource → null) and decode from their own path.
+    File? temp;
+    String decodePath = path;
+    try {
+      final Uint8List bytes = await File(path).readAsBytes();
+      final Uint8List? inner = packagePrimaryResource(bytes);
+      if (inner != null) {
+        final dir = await getTemporaryDirectory();
+        final name = path.split(RegExp(r'[\\/]')).last;
+        temp = File('${dir.path}/cvid_preview_$name.avi');
+        await temp.writeAsBytes(inner, flush: true);
+        decodePath = temp.path;
+      }
+      final res = await _method.invokeMethod('decodeCvid', {
+        'path': decodePath,
+        'maxCount': maxCount,
+        'maxEdge': maxEdge,
+      });
+      final map = (res as Map).cast<dynamic, dynamic>();
+      final raw = (map['frames'] as List).cast<Object?>();
+      final frames = <Uint8List>[
+        for (final f in raw) f as Uint8List,
+      ];
+      return VideoPreview(
+        frames: frames,
+        intervalMs: (map['intervalMs'] as num?)?.toInt() ?? 100,
+      );
+    } finally {
+      if (temp != null) {
+        try {
+          await temp.delete();
+        } catch (_) {/* best-effort temp cleanup */}
+      }
+    }
   }
 
   /// Render a pre-drawn danmaku [strip] (raw RGBA, [stripW]×[stripH]) as a

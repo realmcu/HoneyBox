@@ -7,8 +7,11 @@
 // `utils/image-bin.js` (decodeAndResize/coverCrop) and `utils/text-bin.js`
 // (renderDanmaku). Output RGBA feeds buildImageBin().
 
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+
+import 'image_bin.dart';
 
 /// Decoded pixels: [rgba] is width*height*4 bytes (R,G,B,A).
 class RgbaImage {
@@ -32,6 +35,22 @@ Future<ui.Image> decodeUiImage(Uint8List bytes) async {
   final ui.Codec codec = await ui.instantiateImageCodec(bytes);
   final ui.FrameInfo frame = await codec.getNextFrame();
   return frame.image;
+}
+
+/// Wrap already-decoded RGBA8888 pixels ([RgbaImage]) back into a ui.Image, e.g.
+/// to hand a page's freshly-rendered frame to [generateThumbnailArgb8565Bin]
+/// (which draws through a Canvas and so needs a ui.Image). Callers own the
+/// returned image and must dispose it.
+Future<ui.Image> imageFromRgba(RgbaImage img) {
+  final Completer<ui.Image> completer = Completer<ui.Image>();
+  ui.decodeImageFromPixels(
+    img.rgba,
+    img.width,
+    img.height,
+    ui.PixelFormat.rgba8888,
+    completer.complete,
+  );
+  return completer.future;
 }
 
 // Centered cover-crop rect (keep target aspect ratio, trim overflow — no
@@ -284,4 +303,296 @@ Future<RgbaImage> renderDanmakuRgba({
     throw StateError('图片生成失败');
   }
   return RgbaImage(bd.buffer.asUint8List(), width, height);
+}
+
+// ── Circular badge thumbnail (bg + centered content, border + shadow) ────────
+
+/// Default overall thumbnail edge (px). The disc, its border and drop shadow are
+/// all inset to fit inside this square; the corners outside the disc stay
+/// transparent (ARGB8565 keeps that alpha).
+const int kThumbnailSize = 160;
+
+/// How far the content circle is inset from [radius] (the badge's nominal
+/// radius), in px. The frame (shadow + halo) hugs the content edge and fills
+/// outward to the FIXED outer rim (radius + haloWidth), so no transparent gap
+/// shows between content and frame. Smaller = larger content / narrower frame
+/// (0 = content reaches [radius]); larger = smaller content / wider frame. The
+/// outer circle size stays fixed regardless of this value.
+const double _kContentInset = 3.0;
+
+/// Compose a circular "badge" thumbnail into a transparent [size]×[size] RGBA,
+/// mirroring the on-screen preview circle (`previewCircle` in
+/// preview_frame.dart): the [content] centered, a soft dark drop shadow, and a
+/// faint translucent white halo rim around the edge. The interior has no solid
+/// backdrop ([bgColor] transparent by default), so only these elements — not a
+/// filled square — show, and the badge reads on any device background.
+///
+/// The drop shadow ([shadowColor]/[shadowBlur]/[shadowOffset]) is the deep
+/// outline that keeps the pale edge legible against light content or a light
+/// background. The halo ([haloColor], a translucent white [haloWidth] rim) is
+/// painted as a disc one [haloWidth] larger than the badge, then covered by the
+/// content — so only its rim shows AND the content's anti-aliased edge is backed
+/// by the halo, not by transparency (otherwise a dark seam appears between image
+/// and edge). ARGB8565 keeps the per-pixel alpha, so shadow, halo and the
+/// transparent corners all survive encoding.
+///
+/// [content] is the resource preview — a decoded image, a video first frame, or
+/// a pre-rendered danmaku bitmap (as a [ui.Image]). When [cover] is true it is
+/// centre-cropped to fill the disc; when false it is contained (scaled to fit,
+/// centered) so e.g. wide danmaku text isn't clipped. The disc is filled with
+/// [bgColor] first, so contained/transparent content composites over the
+/// background ("含背景，内容在中间").
+Future<RgbaImage> renderCircularThumbnailRgba(
+  ui.Image content, {
+  int size = kThumbnailSize,
+  int bgColor = 0x00000000,
+  bool cover = true,
+  double haloWidth = 0,
+  int haloColor = 0x21FFFFFF,
+  double shadowBlur = 5.0,
+  int shadowColor = 0x66000000,
+  ui.Offset shadowOffset = const ui.Offset(0, 2),
+}) async {
+  final double s = size.toDouble();
+  final ui.Offset center = ui.Offset(s / 2, s / 2);
+  // Inset the disc so the halo rim and the drop shadow's blur + offset all stay
+  // within the square (nothing clipped at the edges).
+  final double shadowReach =
+      shadowBlur + shadowOffset.dx.abs() + shadowOffset.dy.abs();
+  final double margin = shadowReach > haloWidth ? shadowReach : haloWidth;
+  final double radius = (s / 2 - margin) < 1 ? 1 : (s / 2 - margin);
+  // Content circle radius (the badge itself), inset from [radius]. The frame
+  // (shadow + halo) hugs THIS edge and fills outward to the fixed outer rim, so
+  // a smaller content leaves no transparent gap between it and the frame.
+  final double contentRadius =
+      (radius - _kContentInset) >= 1 ? radius - _kContentInset : radius;
+
+  final ui.PictureRecorder recorder = ui.PictureRecorder();
+  final ui.Canvas canvas = ui.Canvas(recorder, ui.Rect.fromLTWH(0, 0, s, s));
+
+  // 1)+2) Frame RING hugging the content. Clip to OUTSIDE the [contentRadius]
+  //    circle (the content's edge) so the shadow + halo fill outward from there
+  //    to the fixed outer rim — leaving NO transparent gap between the content
+  //    and the frame. The content (drawn last) covers the interior; the frame's
+  //    inner edge sits exactly on the content edge, while its outer edge stays
+  //    put (radius + haloWidth) no matter how large the content is.
+  canvas.save();
+  canvas.clipPath(ui.Path.combine(
+    ui.PathOperation.difference,
+    ui.Path()..addRect(ui.Rect.fromLTWH(0, 0, s, s)),
+    ui.Path()
+      ..addOval(ui.Rect.fromCircle(center: center, radius: contentRadius)),
+  ));
+
+  // 1) Drop shadow: a soft blurred dark disc beneath the badge — the ring clip
+  //    keeps only its outer (un-occluded) part, the deep outline that lets the
+  //    pale edge read against any background (mirrors previewCircle's shadow).
+  if (shadowBlur > 0 || shadowOffset != ui.Offset.zero) {
+    canvas.drawCircle(
+      center + shadowOffset,
+      contentRadius,
+      ui.Paint()
+        ..color = ui.Color(shadowColor)
+        ..maskFilter = ui.MaskFilter.blur(ui.BlurStyle.normal, shadowBlur),
+    );
+  }
+
+  // 2) Faint translucent white halo out to the fixed outer rim (radius +
+  //    haloWidth); the clip leaves the band from the content edge
+  //    ([contentRadius]) out to that rim — filling the frame and hugging the
+  //    content (the canvas analogue of previewCircle's white `spreadRadius`).
+  if (haloWidth > 0) {
+    canvas.drawCircle(
+      center,
+      radius + haloWidth,
+      ui.Paint()..color = ui.Color(haloColor),
+    );
+  }
+  canvas.restore();
+
+  // 3) Background disc — only for CONTAIN mode (letterboxed / translucent
+  //    content needs a backdrop). In COVER mode we deliberately OMIT it so the
+  //    inset ring in step 4 stays TRANSPARENT and the (variable) device
+  //    background shows through instead of a mismatched disc-colour rim.
+  final bool hasDisc = ((bgColor >> 24) & 0xff) != 0;
+  if (hasDisc && !cover) {
+    canvas.drawCircle(center, radius, ui.Paint()..color = ui.Color(bgColor));
+  }
+
+  // 4) Content at [contentRadius] (computed above). COVER: fill the circle with
+  //    an ImageShader via drawCircle, so the edge gets a SINGLE clean
+  //    anti-aliased pass (RGB stays the image colour). The old
+  //    clipPath(oval)+drawImageRect gave a DOUBLE-AA edge wherever the image rect
+  //    was tangent to the clip circle — cover scales the short side to the
+  //    diameter, so the rect touches the circle at the short-side ends — thinning
+  //    those points to a greyer, uneven partial-alpha line. CONTAIN: keep clip +
+  //    centred drawImageRect (image fits inside, backed by the disc).
+  if (cover) {
+    _drawCoverCircle(canvas, content, center, contentRadius);
+  } else {
+    canvas.save();
+    canvas.clipPath(ui.Path()
+      ..addOval(ui.Rect.fromCircle(center: center, radius: contentRadius)));
+    _drawContentInDisc(canvas, content, center, contentRadius, false);
+    canvas.restore();
+  }
+
+  final ui.Picture picture = recorder.endRecording();
+  final ui.Image out = await picture.toImage(size, size);
+  final ByteData? bd =
+      await out.toByteData(format: ui.ImageByteFormat.rawRgba);
+  out.dispose();
+  picture.dispose();
+  if (bd == null) {
+    throw StateError('缩略图生成失败');
+  }
+  return RgbaImage(bd.buffer.asUint8List(), size, size);
+}
+
+// Draw [content] centered within the disc at [center]/[radius]. cover → scale by
+// the shorter side so the disc is fully filled (overflow cropped by the caller's
+// clip); contain → scale by the longer side so the whole content fits.
+void _drawContentInDisc(
+  ui.Canvas canvas,
+  ui.Image content,
+  ui.Offset center,
+  double radius,
+  bool cover,
+) {
+  final int iw = content.width;
+  final int ih = content.height;
+  if (iw <= 0 || ih <= 0) return;
+  final double d = radius * 2;
+  final double scale =
+      cover ? d / (iw < ih ? iw : ih) : d / (iw > ih ? iw : ih);
+  final double dw = iw * scale;
+  final double dh = ih * scale;
+  canvas.drawImageRect(
+    content,
+    ui.Rect.fromLTWH(0, 0, iw.toDouble(), ih.toDouble()),
+    ui.Rect.fromLTWH(center.dx - dw / 2, center.dy - dh / 2, dw, dh),
+    ui.Paint()
+      ..filterQuality = ui.FilterQuality.high
+      ..isAntiAlias = true,
+  );
+}
+
+// Fill a [radius] circle at [center] with [content] scaled COVER (short side ==
+// diameter; the overflow of the long side falls outside the circle) using an
+// ImageShader. The only anti-aliased edge is drawCircle's own — a single clean
+// partial-alpha ramp whose RGB is the image colour — which avoids the double AA
+// (and greyer, uneven edge) of a clipPath + drawImageRect whose rect is tangent
+// to the clip circle at the short-side ends.
+void _drawCoverCircle(
+  ui.Canvas canvas,
+  ui.Image content,
+  ui.Offset center,
+  double radius,
+) {
+  final int iw = content.width;
+  final int ih = content.height;
+  if (iw <= 0 || ih <= 0) return;
+  final double scale = (radius * 2) / (iw < ih ? iw : ih);
+  // Column-major 4x4: scale about the origin, then translate so the scaled image
+  // is centred on [center]. Maps shader (image-pixel) space → canvas space.
+  final Float64List matrix = Float64List.fromList(<double>[
+    scale, 0, 0, 0, //
+    0, scale, 0, 0, //
+    0, 0, 1, 0, //
+    center.dx - iw * scale / 2, center.dy - ih * scale / 2, 0, 1, //
+  ]);
+  canvas.drawCircle(
+    center,
+    radius,
+    ui.Paint()
+      ..isAntiAlias = true
+      ..filterQuality = ui.FilterQuality.high
+      ..shader = ui.ImageShader(
+          content, ui.TileMode.clamp, ui.TileMode.clamp, matrix,
+          filterQuality: ui.FilterQuality.high),
+  );
+}
+
+/// Compose a danmaku [strip] onto a square [screenSize]² device-screen image:
+/// fill [bgColor] opaque, then draw the strip LEFT-aligned (x = 0) and
+/// vertically centered at its native device px — a still of the round screen's
+/// scrolling main-face at scroll offset 0 (mirrors the page's 滚动预览, which
+/// fills the viewport with the bg and sweeps the v-centered strip across it).
+///
+/// Feed the result to [generateThumbnailArgb8565Bin] (cover): the badge's
+/// content circle is the inscribed circle of this screen, so it shows the
+/// strip's LEFT edge over the danmaku background — not a centre-crop of the bare
+/// strip. Caller owns the returned image (dispose it); [strip] is not disposed.
+Future<ui.Image> composeDanmakuScreenImage(
+  ui.Image strip, {
+  int screenSize = 360,
+  int bgColor = 0xFF000000,
+}) async {
+  final int side = screenSize < 1 ? 1 : screenSize;
+  final double s = side.toDouble();
+  final ui.PictureRecorder recorder = ui.PictureRecorder();
+  final ui.Canvas canvas = ui.Canvas(recorder, ui.Rect.fromLTWH(0, 0, s, s));
+  canvas.drawRect(
+      ui.Rect.fromLTWH(0, 0, s, s), ui.Paint()..color = ui.Color(bgColor));
+  final double sw = strip.width.toDouble();
+  final double sh = strip.height.toDouble();
+  if (sw > 0 && sh > 0) {
+    // Vertical centering matches _ScrollPreviewPainter's dy = (screen - stripH)/2;
+    // left edge pinned to x = 0. Wide strips overflow right (clipped to the
+    // circle later); short strips leave bg to their right — as on the round
+    // screen at scroll offset 0.
+    final double dy = (s - sh) / 2;
+    canvas.drawImageRect(
+      strip,
+      ui.Rect.fromLTWH(0, 0, sw, sh),
+      ui.Rect.fromLTWH(0, dy, sw, sh),
+      ui.Paint()..filterQuality = ui.FilterQuality.high,
+    );
+  }
+  final ui.Picture picture = recorder.endRecording();
+  final ui.Image out = await picture.toImage(side, side);
+  picture.dispose();
+  return out;
+}
+
+/// Full thumbnail generator: render [content] into a circular badge (see
+/// [renderCircularThumbnailRgba]) and encode it as an ARGB8565 `.bin`,
+/// adaptively choosing the smaller of the raw / RLE encodings. This is the
+/// artifact the resource packer appends as its final ("thumbnail") resource.
+/// Pass an opaque [bgColor] (the page's preview background) to fill the disc so
+/// the badge matches the on-screen preview; leave it transparent for a
+/// backdrop-less badge (e.g. danmu, text only). [dither] defaults to true: the
+/// badge's soft shadow/halo produce a smooth grey ramp that visibly bands when
+/// quantized to RGB565, so Floyd–Steinberg is applied to break up the banding.
+Future<Uint8List> generateThumbnailArgb8565Bin(
+  ui.Image content, {
+  int size = kThumbnailSize,
+  int bgColor = 0x00000000,
+  bool cover = true,
+  bool dither = true,
+}) async {
+  final RgbaImage badge = await renderCircularThumbnailRgba(
+    content,
+    size: size,
+    bgColor: bgColor,
+    cover: cover,
+    // previewCircle's look: an opaque [bgColor] disc (behind the content only,
+    // to back its edge → no dark seam) + a faint white halo rim + a soft drop
+    // shadow. Unlike previewCircle (whose black 0.4 / blur size*0.11 shadow sits
+    // over an OPAQUE bg field), our frame is transparent so the changeable
+    // header bg shows *through* it — the same shadow then reads as a dark ring.
+    // So keep the shadow TIGHT (small blur, hugging the edge) and VERY FAINT
+    // (alpha ≈ 0.02), and the white halo light too (≈ 0.04): together they read
+    // as a whisper-thin floaty rim, not a visible border, over any background.
+    // The frame is enlarged by shrinking the CONTENT (see [_kContentInset]), not
+    // by widening/darkening this halo — the outer circle size stays put.
+    haloWidth: size * 0.03,
+    haloColor: 0x0AFFFFFF,
+    shadowBlur: size * 0.045,
+    shadowOffset: ui.Offset(0, size * 0.02),
+    shadowColor: 0x06000000,
+  );
+  return buildArgb8565BinAdaptive(badge.rgba, badge.width, badge.height,
+          dither: dither)
+      .bin;
 }

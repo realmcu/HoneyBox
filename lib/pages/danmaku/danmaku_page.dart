@@ -9,12 +9,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/transfer_provider.dart';
 import '../../services/image_bin.dart';
 import '../../services/raster.dart';
+import '../../services/resource_pack.dart';
 import '../../services/l2_file_transfer.dart';
 import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
 import '../shared/color_picker_dialog.dart';
 import '../shared/file_send_layout.dart';
 import '../shared/preview_frame.dart';
+import '../shared/thumbnail_export.dart';
 
 /// Page for rendering danmaku text and sending it over BLE.
 ///
@@ -99,6 +101,8 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
   Uint8List? _bin;
   int _binSize = 0;
   int _rebuildSeq = 0;
+  // Guards the async thumbnail/package build in _send against re-entrant taps.
+  bool _packaging = false;
 
   // Cache mode: a loaded cached danmaku replaces the editor with a read-only
   // panel; the send button then re-sends those bytes unchanged.
@@ -289,22 +293,92 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // Always sends the full-text image, regardless of the preview mode.
-  void _send() {
-    if (_isSending) return;
+  // Always sends the full-text image, regardless of the preview mode. The bare
+  // bin is wrapped into a resource package: resource[0] is the full-text image,
+  // resource[1] a 160 circular thumbnail of the preview strip. The device reads
+  // the danmaku kind from the package header's type (ResourceType.danmaku), so
+  // no trailing kind byte is appended. TYPE.image stays as the transport tag.
+  Future<void> _send() async {
+    if (_isSending || _packaging) return;
     if (_controller.text.trim().isEmpty) {
       _snack('请输入弹幕内容');
       return;
     }
     final bin = _bin;
-    if (bin == null) return;
-    ref.read(transferProgressProvider.notifier).send(
-          TYPE.image,
-          bin,
-          'danmaku.bin',
-          trailingByte: 1, // 1 = 弹幕
-          cache: CacheSpec(CacheKind.danmaku, {'w': '$_imgW', 'h': '$_imgH'}),
-        );
+    final preview = _previewImage;
+    if (bin == null || preview == null) return;
+    _packaging = true;
+    try {
+      // _previewImage is page-owned (already includes bg) — do NOT dispose it.
+      // Compose it onto the round screen (bg fill + strip left-aligned,
+      // vertically centered) so the badge shows the strip's LEFT edge over the
+      // danmaku background — matching the 滚动预览 — not a centre-crop of the
+      // bare strip. The composed screen IS ours, so dispose it.
+      final ui.Image screen = await composeDanmakuScreenImage(
+        preview,
+        screenSize: _screenSize,
+        bgColor: _bgColor,
+      );
+      final Uint8List thumb;
+      try {
+        thumb = await generateThumbnailArgb8565Bin(screen, bgColor: _bgColor);
+      } finally {
+        screen.dispose();
+      }
+      if (!mounted) return;
+      final Uint8List pkg = buildResourcePack(
+        type: ResourceType.danmaku,
+        bgColor: _bgColor,
+        resources: [bin],
+        thumbnail: thumb,
+      );
+      ref.read(transferProgressProvider.notifier).send(
+            TYPE.image,
+            pkg,
+            'danmaku.bin',
+            cache: CacheSpec(CacheKind.danmaku, {'w': '$_imgW', 'h': '$_imgH'}),
+          );
+    } catch (e) {
+      _snack('打包失败: $e');
+    } finally {
+      _packaging = false;
+    }
+  }
+
+  // ── Export thumbnail ─────────────────────────────────────────────────────
+  // Save the danmaku badge (the converted circular ARGB8565 thumbnail,
+  // resource[1]) to a user-picked file — byte-for-byte what _send packages
+  // (same round-screen composition). Filename carries the bg colour as a hex
+  // suffix; danmaku has no source file, so the base is a fixed "danmaku".
+  Future<void> _exportThumbnail() async {
+    if (_isSending || _packaging) return;
+    final preview = _previewImage;
+    if (preview == null) return;
+    _packaging = true; // reuse the re-entrancy guard
+    try {
+      final ui.Image screen = await composeDanmakuScreenImage(
+        preview,
+        screenSize: _screenSize,
+        bgColor: _bgColor,
+      );
+      final Uint8List thumb;
+      try {
+        thumb = await generateThumbnailArgb8565Bin(screen, bgColor: _bgColor);
+      } finally {
+        screen.dispose();
+      }
+      if (!mounted) return;
+      await exportThumbnailBin(
+        context,
+        bin: thumb,
+        sourceName: 'danmaku',
+        bgColor: _bgColor,
+      );
+    } catch (e) {
+      _snack('导出失败: $e');
+    } finally {
+      _packaging = false;
+    }
   }
 
   // ── Cache load / send ────────────────────────────────────────────────────
@@ -336,11 +410,12 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
     final bytes = _cacheBytes;
     final entry = _cacheEntry;
     if (bytes == null || entry == null || _isSending) return;
+    // Cache holds the whole resource package (or a legacy bare bin); resend it
+    // verbatim — no trailing byte, no repackaging.
     ref.read(transferProgressProvider.notifier).send(
           entry.kind.fileType,
           bytes,
           entry.kind.deviceName,
-          trailingByte: entry.kind.trailingByte,
         );
   }
 
@@ -352,7 +427,17 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
     final sending = transferState.status == TransferStatus.sending;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('发送弹幕')),
+      appBar: AppBar(
+        title: const Text('发送弹幕'),
+        actions: [
+          if (_previewImage != null && !_cacheMode)
+            IconButton(
+              onPressed: (_isSending || _packaging) ? null : _exportThumbnail,
+              icon: const Icon(Icons.save_alt),
+              tooltip: '导出缩略图',
+            ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(

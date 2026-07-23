@@ -12,6 +12,7 @@ import '../../providers/transfer_provider.dart';
 import '../../services/image_bin.dart';
 import '../../services/image_jpeg.dart';
 import '../../services/raster.dart';
+import '../../services/resource_pack.dart';
 import '../../services/l2_file_transfer.dart';
 import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
@@ -19,6 +20,7 @@ import '../shared/color_picker_dialog.dart';
 import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
 import '../shared/preview_frame.dart';
+import '../shared/thumbnail_export.dart';
 
 /// Page for converting a picked image to a device RGB565 `.bin` and sending it
 /// over BLE. The preview is a fixed square viewport: on load the whole image is
@@ -99,6 +101,13 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   bool _isJpeg = false; // whether _bin is a JPEG container (quality < 100)
   bool _converting = false;
   int _rebuildSeq = 0;
+
+  // The framed output RGBA of the current result, kept so _send can render a
+  // matching 160 circular thumbnail as the package's second resource.
+  RgbaImage? _rendered;
+  // Guards the async thumbnail/package build in _send against re-entrant taps
+  // (the transfer's "sending" state only latches once send() is finally called).
+  bool _packaging = false;
 
   // Cache mode: when a cached file is loaded, the editing UI is replaced by a
   // read-only panel and the send button re-sends the cached bytes as-is.
@@ -192,6 +201,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
       _binSize = 0;
       _rawSize = 0;
       _rleSize = 0;
+      _rendered = null;
       _tc.value = Matrix4.identity(); // reset zoom/pan to fit
     });
     ref.read(transferProgressProvider.notifier).reset();
@@ -307,6 +317,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
         _rleSize = rleSize;
         _usedCompress = usedCompress;
         _isJpeg = useJpeg;
+        _rendered = img;
         _converting = false;
       });
     } catch (e) {
@@ -358,27 +369,95 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
-  void _send() {
+  // Wrap the converted picture + a generated thumbnail into a resource package
+  // and send that. resource[0] is the picture (_bin, RGB565 or JPEG — the device
+  // tells them apart via that payload's own header type byte, 0 = RGB565 /
+  // 12 = JPEG); resource[1] is a 160 circular ARGB8565 thumbnail of the framed
+  // frame. The device reads the package header's type/bg_color, so no trailing
+  // content-kind byte is appended anymore. The whole package is what gets cached.
+  Future<void> _send() async {
     final bin = _bin;
-    if (bin == null || _converting || _isSending) return;
-    // Both RGB565 and JPEG are "picture" kind (trailing byte 0); the device and
-    // our cache preview both tell the formats apart via the payload header's
-    // type byte (0 = RGB565, 12 = JPEG — see isImageJpegBin). Both cache under
-    // CacheKind.image; the params record the format so the picker can summarise
-    // and re-send either kind as-is (JPEG preview decodes natively, RGB565 via
-    // decodeImageBin).
-    ref.read(transferProgressProvider.notifier).send(
-          TYPE.image,
-          bin,
-          _fileName,
-          trailingByte: 0, // 0 = 图片（RGB565 或 JPEG，由 header type 区分）
-          cache: CacheSpec(
-            CacheKind.image,
-            _isJpeg
-                ? {'size': '$_size', 'fmt': 'jpeg', 'q': '$_quality'}
-                : {'size': '$_size', 'cmp': _usedCompress ? 'rle' : 'raw'},
-          ),
-        );
+    final rendered = _rendered;
+    if (bin == null ||
+        rendered == null ||
+        _converting ||
+        _isSending ||
+        _packaging) {
+      return;
+    }
+    _packaging = true;
+    try {
+      // Preview background (outside-circle fill, extracted from the content;
+      // falls back to the chosen colour). Used both as the header bg and as the
+      // thumbnail's opaque disc, so the badge matches the on-screen preview.
+      final int bgArgb = _previewBg?.toARGB32() ?? _bgColor;
+      final ui.Image content = await imageFromRgba(rendered);
+      final Uint8List thumb;
+      try {
+        thumb = await generateThumbnailArgb8565Bin(content, bgColor: bgArgb);
+      } finally {
+        content.dispose();
+      }
+      if (!mounted) return;
+      final Uint8List pkg = buildResourcePack(
+        type: ResourceType.image,
+        bgColor: bgArgb,
+        resources: [bin],
+        thumbnail: thumb,
+      );
+      ref.read(transferProgressProvider.notifier).send(
+            TYPE.image,
+            pkg,
+            _fileName,
+            cache: CacheSpec(
+              CacheKind.image,
+              _isJpeg
+                  ? {'size': '$_size', 'fmt': 'jpeg', 'q': '$_quality'}
+                  : {'size': '$_size', 'cmp': _usedCompress ? 'rle' : 'raw'},
+            ),
+          );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('打包失败: $e')),
+      );
+    } finally {
+      _packaging = false;
+    }
+  }
+
+  // ── Export thumbnail ─────────────────────────────────────────────────────
+  // Save just the generated badge (the converted circular ARGB8565 thumbnail,
+  // resource[1]) to a user-picked file — byte-for-byte what _send packages.
+  // The filename carries the header/bg colour as a hex suffix.
+  Future<void> _exportThumbnail() async {
+    final rendered = _rendered;
+    if (rendered == null || _isSending || _converting || _packaging) return;
+    _packaging = true; // reuse the re-entrancy guard
+    try {
+      final int bgArgb = _previewBg?.toARGB32() ?? _bgColor;
+      final ui.Image content = await imageFromRgba(rendered);
+      final Uint8List thumb;
+      try {
+        thumb = await generateThumbnailArgb8565Bin(content, bgColor: bgArgb);
+      } finally {
+        content.dispose();
+      }
+      if (!mounted) return;
+      await exportThumbnailBin(
+        context,
+        bin: thumb,
+        sourceName: _fileName,
+        bgColor: bgArgb,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败: $e')),
+      );
+    } finally {
+      _packaging = false;
+    }
   }
 
   // ── Cache load / send ────────────────────────────────────────────────────
@@ -413,11 +492,12 @@ class _ImagePageState extends ConsumerState<ImagePage> {
     final bytes = _cacheBytes;
     final entry = _cacheEntry;
     if (bytes == null || entry == null || _isSending) return;
+    // The cache holds the whole resource package (or, for legacy caches, a bare
+    // bin); either way resend it verbatim — no trailing byte, no repackaging.
     ref.read(transferProgressProvider.notifier).send(
           entry.kind.fileType,
           bytes,
           entry.kind.deviceName,
-          trailingByte: entry.kind.trailingByte,
         );
   }
 
@@ -432,12 +512,21 @@ class _ImagePageState extends ConsumerState<ImagePage> {
       appBar: AppBar(
         title: const Text('发送图片'),
         actions: [
-          if (_selectedImage != null && !_cacheMode)
+          if (_selectedImage != null && !_cacheMode) ...[
+            IconButton(
+              onPressed:
+                  (_rendered == null || _isSending || _converting || _packaging)
+                      ? null
+                      : _exportThumbnail,
+              icon: const Icon(Icons.save_alt),
+              tooltip: '导出缩略图',
+            ),
             IconButton(
               onPressed: _isSending ? null : _pickImage,
               icon: const Icon(Icons.folder_open),
               tooltip: '更换图片',
             ),
+          ],
         ],
       ),
       body: Column(

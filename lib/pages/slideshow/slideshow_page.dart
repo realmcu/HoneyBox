@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../providers/transfer_provider.dart';
 import '../../services/converter.dart';
 import '../../services/raster.dart';
+import '../../services/resource_pack.dart';
 import '../../services/l2_file_transfer.dart';
 import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
@@ -18,6 +19,7 @@ import '../shared/color_picker_dialog.dart';
 import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
 import '../shared/preview_frame.dart';
+import '../shared/thumbnail_export.dart';
 
 /// 多图轮播 — compose up to [_maxSlides] pictures into a looping slideshow video
 /// and send it over BLE. Each picture is framed in the same circular pinch-zoom
@@ -138,6 +140,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   _ConvStatus _conv = _ConvStatus.idle;
   String? _convError;
   int _rebuildSeq = 0;
+  // Guards the async thumbnail/package build in _send against re-entrant taps.
+  bool _packaging = false;
 
   // Cache mode: when a cached carousel is loaded, the composer UI is replaced by
   // a read-only panel and the send button re-sends the cached bytes as-is.
@@ -574,20 +578,77 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   }
 
   // ── Send ─────────────────────────────────────────────────────────────────
-  void _send() {
+  // Wrap the composed AVI + a thumbnail into a resource package: resource[0] is
+  // the carousel AVI(CVID), resource[1] a 160 circular ARGB8565 thumbnail of the
+  // first slide's framed picture. The device reads the kind from the package
+  // header's type (ResourceType.video); TYPE.video stays as the transport tag.
+  Future<void> _send() async {
     final avi = _avi;
-    if (avi == null || _conv != _ConvStatus.ready || _sending) return;
-    ref.read(transferProgressProvider.notifier).send(
-          TYPE.video,
-          avi,
-          'carousel.avi',
-          cache: CacheSpec(CacheKind.video, {
-            'src': 'slideshow', // tag so the picker can show only carousels
-            'size': '$_size',
-            'frames': '$_frameCount',
-            'slides': '${_slides.length}',
-          }),
-        );
+    if (avi == null ||
+        _conv != _ConvStatus.ready ||
+        _sending ||
+        _packaging ||
+        _slides.isEmpty) {
+      return;
+    }
+    // First slide's framed picture (page-owned — do NOT dispose); fall back to
+    // its raw source if it hasn't been framed yet.
+    final ui.Image content = _slides.first.framed ?? _slides.first.src;
+    _packaging = true;
+    try {
+      final Uint8List thumb =
+          await generateThumbnailArgb8565Bin(content);
+      if (!mounted) return;
+      // Header bg = the colour that fills the preview area outside the circle
+      // (extracted from the first slide); fall back to the chosen background.
+      final int bgArgb = _previewBg?.toARGB32() ?? _bgColor;
+      final Uint8List pkg = buildResourcePack(
+        type: ResourceType.video,
+        bgColor: bgArgb,
+        resources: [avi],
+        thumbnail: thumb,
+      );
+      ref.read(transferProgressProvider.notifier).send(
+            TYPE.video,
+            pkg,
+            'carousel.avi',
+            cache: CacheSpec(CacheKind.video, {
+              'src': 'slideshow', // tag so the picker can show only carousels
+              'size': '$_size',
+              'frames': '$_frameCount',
+              'slides': '${_slides.length}',
+            }),
+          );
+    } catch (e) {
+      _snack('打包失败: $e');
+    } finally {
+      _packaging = false;
+    }
+  }
+
+  // ── Export thumbnail ─────────────────────────────────────────────────────
+  // Save the first-slide badge (the converted circular ARGB8565 thumbnail,
+  // resource[1]) to a user-picked file — byte-for-byte what _send packages.
+  // Filename carries the header/bg colour as a hex suffix; base is "carousel".
+  Future<void> _exportThumbnail() async {
+    if (_isBusy || _packaging || _slides.isEmpty) return;
+    final ui.Image content = _slides.first.framed ?? _slides.first.src;
+    _packaging = true; // reuse the re-entrancy guard
+    try {
+      final Uint8List thumb = await generateThumbnailArgb8565Bin(content);
+      if (!mounted) return;
+      final int bgArgb = _previewBg?.toARGB32() ?? _bgColor;
+      await exportThumbnailBin(
+        context,
+        bin: thumb,
+        sourceName: 'carousel',
+        bgColor: bgArgb,
+      );
+    } catch (e) {
+      _snack('导出失败: $e');
+    } finally {
+      _packaging = false;
+    }
   }
 
   // ── Cache load / send ────────────────────────────────────────────────────
@@ -623,6 +684,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   }
 
   // Re-send the loaded cache bytes unchanged; no cache: arg so it isn't re-cached.
+  // The cache holds the whole resource package (or a legacy bare AVI); either way
+  // resend it verbatim — no trailing byte, no repackaging.
   void _sendCache() {
     final bytes = _cacheBytes;
     final entry = _cacheEntry;
@@ -631,7 +694,6 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
           entry.kind.fileType,
           bytes,
           entry.kind.deviceName,
-          trailingByte: entry.kind.trailingByte,
         );
   }
 
@@ -690,7 +752,12 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
       appBar: AppBar(
         title: const Text('多图轮播'),
         actions: [
-          if (_slides.isNotEmpty && !_cacheMode)
+          if (_slides.isNotEmpty && !_cacheMode) ...[
+            IconButton(
+              onPressed: (_isBusy || _packaging) ? null : _exportThumbnail,
+              icon: const Icon(Icons.save_alt),
+              tooltip: '导出缩略图',
+            ),
             IconButton(
               onPressed: (_isBusy || _slides.length >= _maxSlides)
                   ? null
@@ -698,6 +765,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
               icon: const Icon(Icons.add_photo_alternate_outlined),
               tooltip: '添加图片',
             ),
+          ],
         ],
       ),
       body: Column(

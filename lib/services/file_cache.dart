@@ -8,20 +8,21 @@ import 'app_settings.dart';
 import 'l2_file_transfer.dart';
 
 /// Categories of send-cache entry. Each maps a cached artifact back to the exact
-/// [send] parameters that reproduce it (device file type + optional content-kind
-/// trailing byte), so a cached file can be re-sent through the normal transfer
-/// flow without re-conversion. [key] is the on-disk tag; [ext] the file suffix.
+/// [send] parameters that reproduce it (device file type), so a cached file can
+/// be re-sent through the normal transfer flow without re-conversion. Cached
+/// bytes are the whole resource package; the device reads the content kind from
+/// the package header, so no content-kind trailing byte is involved anymore.
+/// [key] is the on-disk tag; [ext] the file suffix.
 enum CacheKind {
-  image('image', '图片', 'bin', TYPE.image, 0, 'image.bin'),
-  danmaku('danmaku', '弹幕', 'bin', TYPE.image, 1, 'danmaku.bin'),
-  video('video', '视频', 'avi', TYPE.video, null, 'video.avi');
+  image('image', '图片', 'bin', TYPE.image, 'image.bin'),
+  danmaku('danmaku', '弹幕', 'bin', TYPE.image, 'danmaku.bin'),
+  video('video', '视频', 'avi', TYPE.video, 'video.avi');
 
   const CacheKind(
     this.key,
     this.label,
     this.ext,
     this.fileType,
-    this.trailingByte,
     this.deviceName,
   );
 
@@ -36,9 +37,6 @@ enum CacheKind {
 
   /// Device file type ([TYPE.image] / [TYPE.video]) used when re-sending.
   final int fileType;
-
-  /// Content-kind byte appended on send (image=0, danmaku=1), or null (video).
-  final int? trailingByte;
 
   /// Default filename presented to the device on (re)send.
   final String deviceName;

@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'ble_provider.dart';
 import '../services/file_cache.dart';
+import '../services/resource_pack.dart';
 
 enum TransferStatus { idle, sending, done, error }
 
@@ -49,17 +51,16 @@ class TransferProgressNotifier extends StateNotifier<TransferState> {
 
   /// Send a file via BLE. Sets up progress/complete/error callbacks.
   ///
-  /// When [trailingByte] is non-null it is appended as one extra byte at the
-  /// very end of [buffer], becoming the last byte of the transferred payload.
-  /// Used to tag the kind of a TYPE.image file for the device: 0 = picture,
-  /// 1 = danmaku.
+  /// [buffer] is sent verbatim — for real sends it is a resource package whose
+  /// header already carries the content kind and background colour, so no extra
+  /// tag byte is appended.
   ///
-  /// When [cache] is non-null, the (pre-trailing-byte) [buffer] is written to
-  /// the local send-cache on successful completion, so it can later be reloaded
-  /// and re-sent without re-conversion. Pass null (the default) to skip caching
-  /// — e.g. when re-sending a file that was itself loaded from the cache.
+  /// When [cache] is non-null, [buffer] is written to the local send-cache on
+  /// successful completion, so it can later be reloaded and re-sent without
+  /// re-conversion. Pass null (the default) to skip caching — e.g. when
+  /// re-sending a file that was itself loaded from the cache.
   void send(int fileType, Uint8List buffer, String filename,
-      {int? trailingByte, CacheSpec? cache}) {
+      {CacheSpec? cache}) {
     final bleManager = _ref.read(bleManagerProvider);
     final session = bleManager.session;
     if (session == null) {
@@ -86,9 +87,9 @@ class TransferProgressNotifier extends StateNotifier<TransferState> {
 
     session.onComplete = () {
       state = const TransferState(status: TransferStatus.done, progress: 1.0);
-      // Cache the converted artifact on success only (fire-and-forget). The
-      // cached buffer excludes the trailing content-kind byte so re-sending it
-      // through send() reproduces the identical payload.
+      // Cache the sent package on success only (fire-and-forget). The cached
+      // buffer is exactly what was sent, so re-sending it reproduces it byte for
+      // byte.
       if (cache != null) {
         _ref.read(fileCacheProvider).add(cache.kind, buffer, cache.params);
       }
@@ -101,14 +102,18 @@ class TransferProgressNotifier extends StateNotifier<TransferState> {
       );
     };
 
-    // Optionally append the one-byte content-kind tag (image=0, danmaku=1) so
-    // it rides along as the final byte of the payload.
-    final payload = trailingByte == null
-        ? buffer
-        : (Uint8List(buffer.length + 1)
-          ..setRange(0, buffer.length, buffer)
-          ..[buffer.length] = trailingByte & 0xFF);
-    session.send(fileType, payload, filename);
+    // Log the package header being sent (both fresh sends and cache re-sends go
+    // through here). Legacy bare-bin caches aren't packages → note that instead.
+    final ResourcePack? pack = parseResourcePack(buffer);
+    if (pack != null) {
+      debugPrint('发送/资源包 ${pack.describeHeader()} '
+          '→ "$filename" (TYPE=$fileType)');
+    } else {
+      debugPrint('发送/裸数据 ${buffer.length}B → "$filename" '
+          '(TYPE=$fileType, 非资源包)');
+    }
+
+    session.send(fileType, buffer, filename);
   }
 
   void abort() {

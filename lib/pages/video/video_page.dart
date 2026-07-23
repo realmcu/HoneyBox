@@ -13,6 +13,7 @@ import '../../providers/transfer_provider.dart';
 import '../../services/converter.dart';
 import '../../services/video_preview_player.dart';
 import '../../services/raster.dart';
+import '../../services/resource_pack.dart';
 import '../../services/l2_file_transfer.dart';
 import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
@@ -20,6 +21,7 @@ import '../shared/color_picker_dialog.dart';
 import '../shared/example_assets.dart';
 import '../shared/file_send_layout.dart';
 import '../shared/preview_frame.dart';
+import '../shared/thumbnail_export.dart';
 
 /// Page for converting a picked video **or GIF** to a device-playable
 /// AVI(CVID) and sending it over BLE. Flow: pick (mp4/mov or GIF) → frame the
@@ -112,6 +114,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   _ConvStatus _conv = _ConvStatus.idle;
   String? _convError;
   int _rebuildSeq = 0;
+  // Guards the async thumbnail/package build in _send against re-entrant taps.
+  bool _packaging = false;
 
   // Cache mode: when a cached AVI is loaded, the picker/convert UI is replaced
   // by a read-only panel and the send button re-sends the cached bytes as-is.
@@ -468,21 +472,129 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
-  void _send() {
+  // Wrap the converted AVI + a thumbnail into a resource package: resource[0] is
+  // the AVI(CVID), resource[1] a 160 circular ARGB8565 thumbnail of the framed
+  // first frame (the first frame rendered through the same viewport transform
+  // the native converter applied). The device reads the kind from the package
+  // header's type (ResourceType.video); TYPE.video stays as the transport tag.
+  Future<void> _send() async {
     final avi = _avi;
-    if (avi == null || _conv != _ConvStatus.ready || _sending) return;
-    ref.read(transferProgressProvider.notifier).send(
-          TYPE.video,
-          avi,
-          _fileName,
-          cache: CacheSpec(CacheKind.video, {
-            'src': _isGif ? 'gif' : 'video', // distinguishes GIF/视频/轮播 in cache
-            'size': '$_size',
-            'fps': '$_fps',
-            'q': '$_quality',
-            'frames': '$_frameCount',
-          }),
-        );
+    final thumbSrc = _thumb;
+    if (avi == null ||
+        thumbSrc == null ||
+        _conv != _ConvStatus.ready ||
+        _sending ||
+        _packaging ||
+        _vp <= 0 ||
+        _srcW <= 0 ||
+        _srcH <= 0) {
+      return;
+    }
+    _packaging = true;
+    try {
+      // Reproduce the converter's framing of the first frame (mirrors the image
+      // page's src→output affine map) into a _size² RGBA, then a round thumbnail.
+      final double v = _vp;
+      final double s0 = min(v / _srcW, v / _srcH);
+      final double lx = (v - _srcW * s0) / 2;
+      final double ly = (v - _srcH * s0) / 2;
+      final m = _tc.value;
+      final double k = m.getMaxScaleOnAxis();
+      final double f = _size / v;
+      final ui.Image content = await renderViewportImage(
+        thumbSrc,
+        outSize: _size,
+        scale: k * s0 * f,
+        tx: (k * lx + m.storage[12]) * f,
+        ty: (k * ly + m.storage[13]) * f,
+        bgColor: _bgColor,
+      );
+      final Uint8List thumb;
+      try {
+        thumb = await generateThumbnailArgb8565Bin(content);
+      } finally {
+        content.dispose();
+      }
+      if (!mounted) return;
+      // Header bg = the colour that fills the preview area outside the circle
+      // (extracted from the first frame); fall back to the chosen background.
+      final int bgArgb = _previewBg?.toARGB32() ?? _bgColor;
+      final Uint8List pkg = buildResourcePack(
+        type: ResourceType.video,
+        bgColor: bgArgb,
+        resources: [avi],
+        thumbnail: thumb,
+      );
+      ref.read(transferProgressProvider.notifier).send(
+            TYPE.video,
+            pkg,
+            _fileName,
+            cache: CacheSpec(CacheKind.video, {
+              'src': _isGif ? 'gif' : 'video', // distinguishes GIF/视频/轮播 in cache
+              'size': '$_size',
+              'fps': '$_fps',
+              'q': '$_quality',
+              'frames': '$_frameCount',
+            }),
+          );
+    } catch (e) {
+      _snack('打包失败: $e');
+    } finally {
+      _packaging = false;
+    }
+  }
+
+  // ── Export thumbnail ─────────────────────────────────────────────────────
+  // Save just the first-frame badge (the converted circular ARGB8565 thumbnail,
+  // resource[1]) to a user-picked file. Same framing math as _send, but it
+  // needs only the first frame + viewport — so it works before/without encoding
+  // the AVI. The filename carries the header/bg colour as a hex suffix.
+  Future<void> _exportThumbnail() async {
+    final thumbSrc = _thumb;
+    if (thumbSrc == null ||
+        _vp <= 0 ||
+        _srcW <= 0 ||
+        _srcH <= 0 ||
+        _isBusy ||
+        _packaging) {
+      return;
+    }
+    _packaging = true; // reuse the re-entrancy guard
+    try {
+      final double v = _vp;
+      final double s0 = min(v / _srcW, v / _srcH);
+      final double lx = (v - _srcW * s0) / 2;
+      final double ly = (v - _srcH * s0) / 2;
+      final m = _tc.value;
+      final double k = m.getMaxScaleOnAxis();
+      final double f = _size / v;
+      final ui.Image content = await renderViewportImage(
+        thumbSrc,
+        outSize: _size,
+        scale: k * s0 * f,
+        tx: (k * lx + m.storage[12]) * f,
+        ty: (k * ly + m.storage[13]) * f,
+        bgColor: _bgColor,
+      );
+      final int bgArgb = _previewBg?.toARGB32() ?? _bgColor;
+      final Uint8List thumb;
+      try {
+        thumb = await generateThumbnailArgb8565Bin(content);
+      } finally {
+        content.dispose();
+      }
+      if (!mounted) return;
+      await exportThumbnailBin(
+        context,
+        bin: thumb,
+        sourceName: _fileName,
+        bgColor: bgArgb,
+      );
+    } catch (e) {
+      _snack('导出失败: $e');
+    } finally {
+      _packaging = false;
+    }
   }
 
   // ── Cache load / send ────────────────────────────────────────────────────
@@ -517,6 +629,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   }
 
   // Re-send the loaded cache bytes unchanged; no cache: arg so it isn't re-cached.
+  // The cache holds the whole resource package (or a legacy bare AVI); either way
+  // resend it verbatim — no trailing byte, no repackaging.
   void _sendCache() {
     final bytes = _cacheBytes;
     final entry = _cacheEntry;
@@ -525,7 +639,6 @@ class _VideoPageState extends ConsumerState<VideoPage> {
           entry.kind.fileType,
           bytes,
           entry.kind.deviceName,
-          trailingByte: entry.kind.trailingByte,
         );
   }
 
@@ -710,12 +823,25 @@ class _VideoPageState extends ConsumerState<VideoPage> {
       appBar: AppBar(
         title: const Text('发送视频'),
         actions: [
-          if (_srcPath != null && !_cacheMode)
+          if (_srcPath != null && !_cacheMode) ...[
+            IconButton(
+              onPressed: (_thumb == null ||
+                      _vp <= 0 ||
+                      _srcW <= 0 ||
+                      _srcH <= 0 ||
+                      _isBusy ||
+                      _packaging)
+                  ? null
+                  : _exportThumbnail,
+              icon: const Icon(Icons.save_alt),
+              tooltip: '导出缩略图',
+            ),
             IconButton(
               onPressed: _isBusy ? null : _showPickSheet,
               icon: const Icon(Icons.folder_open),
               tooltip: '重新选择',
             ),
+          ],
         ],
       ),
       body: Column(
@@ -857,7 +983,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   // one loads that bundled video / GIF directly.
   Widget _buildExamples(ThemeData theme, ColorScheme cs,
       {required bool enabled}) {
-    final items = [...ExampleAssets.videos, ...ExampleAssets.gifs];
+    final items = [...ExampleAssets.gifs, ...ExampleAssets.videos];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

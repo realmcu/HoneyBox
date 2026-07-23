@@ -9,6 +9,7 @@ import '../../services/converter.dart';
 import '../../services/file_cache.dart';
 import '../../services/image_bin.dart';
 import '../../services/image_jpeg.dart';
+import '../../services/resource_pack.dart';
 import 'file_send_layout.dart';
 
 // ── Formatting helpers (shared by the picker, panel and management page) ──────
@@ -85,7 +86,11 @@ String cacheParamSummary(CacheEntry e) {
 Future<ui.Image?> loadCacheThumb(CacheEntry e) async {
   if (e.kind == CacheKind.video) return null;
   try {
-    final bytes = await e.file.readAsBytes();
+    final raw = await e.file.readAsBytes();
+    // New caches hold the whole resource package; the preview is its primary
+    // resource (resource[0] — the full picture/danmaku). Legacy caches are a
+    // bare bin, for which packagePrimaryResource returns null → use as-is.
+    final bytes = packagePrimaryResource(raw) ?? raw;
     // Image caches come in two formats under the same CacheKind.image: an RGB565
     // `.bin` or a JPEG container (header type byte distinguishes them). A JPEG
     // container decodes through Flutter's native codec off its stripped JFIF
@@ -109,6 +114,34 @@ Future<ui.Image?> loadCacheThumb(CacheEntry e) async {
     return completer.future;
   } catch (_) {
     return null;
+  }
+}
+
+/// Decode a cache entry's embedded circular badge — resource[1], the 160×160
+/// ARGB8565 thumbnail — to an image, plus the package header's bg colour
+/// (0x00RRGGBB). Returns `(null, bgColor)` if the package carries no thumbnail
+/// and `(null, null)` for a legacy bare-bin cache (no package) or on failure.
+/// Callers own the returned [ui.Image] and must dispose it.
+Future<({ui.Image? image, int? bgColor})> loadCacheBadge(CacheEntry e) async {
+  try {
+    final raw = await e.file.readAsBytes();
+    final pack = parseResourcePack(raw);
+    if (pack == null) return (image: null, bgColor: null); // legacy bare bin
+    final thumb = pack.thumbnail;
+    if (thumb == null) return (image: null, bgColor: pack.bgColor);
+    final px = decodeArgb8565Bin(thumb);
+    if (px == null) return (image: null, bgColor: pack.bgColor);
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      px.rgba,
+      px.width,
+      px.height,
+      ui.PixelFormat.rgba8888,
+      completer.complete,
+    );
+    return (image: await completer.future, bgColor: pack.bgColor);
+  } catch (_) {
+    return (image: null, bgColor: null);
   }
 }
 
@@ -194,6 +227,109 @@ class _CacheThumbState extends State<CacheThumb> {
         height: s,
         color: cs.surfaceContainerHighest,
         alignment: Alignment.center,
+        child: content,
+      ),
+    );
+  }
+}
+
+// ── Badge view ────────────────────────────────────────────────────────────────
+
+/// Previews a cache entry's embedded circular badge (resource[1]) centered on
+/// its header bg colour — i.e. exactly how the round device screen renders it:
+/// the badge frame is transparent, so the (variable) bg shows through. Decodes
+/// the ARGB8565 badge itself and disposes it; shows a note for legacy bare-bin
+/// caches that carry no embedded thumbnail.
+class CacheBadgeView extends StatefulWidget {
+  final CacheEntry entry;
+  final double? maxHeight;
+  const CacheBadgeView({super.key, required this.entry, this.maxHeight});
+
+  @override
+  State<CacheBadgeView> createState() => _CacheBadgeViewState();
+}
+
+class _CacheBadgeViewState extends State<CacheBadgeView> {
+  ui.Image? _badge;
+  int? _bgColor;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(CacheBadgeView old) {
+    super.didUpdateWidget(old);
+    if (old.entry.file.path != widget.entry.file.path) {
+      _badge?.dispose();
+      _badge = null;
+      _bgColor = null;
+      _loading = true;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final res = await loadCacheBadge(widget.entry);
+    if (!mounted) {
+      res.image?.dispose();
+      return;
+    }
+    setState(() {
+      _badge?.dispose();
+      _badge = res.image;
+      _bgColor = res.bgColor;
+      _loading = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _badge?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final double maxH =
+        widget.maxHeight ?? MediaQuery.of(context).size.height * 0.34;
+    // The device fills the round screen with the header bg (0x00RRGGBB); show it
+    // opaque behind the badge. Legacy caches (no package) have no bg → surface.
+    final Color bg = _bgColor == null
+        ? cs.surfaceContainerHighest
+        : Color(0xFF000000 | (_bgColor! & 0x00FFFFFF));
+    Widget content;
+    if (_loading) {
+      content = const SizedBox(
+        width: 28,
+        height: 28,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    } else if (_badge == null) {
+      content = Text('无缩略图',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: cs.onSurfaceVariant));
+    } else {
+      final double side = maxH - 24;
+      content = SizedBox(
+        width: side,
+        height: side,
+        child: RawImage(image: _badge, fit: BoxFit.contain),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        height: maxH,
+        width: double.infinity,
+        color: bg,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(12),
         child: content,
       ),
     );
@@ -472,19 +608,30 @@ Future<bool?> showCachePreview(BuildContext context, CacheEntry entry) {
   );
 }
 
-class _CachePreviewSheet extends ConsumerWidget {
+class _CachePreviewSheet extends ConsumerStatefulWidget {
   final CacheEntry entry;
   const _CachePreviewSheet({required this.entry});
 
-  Future<void> _delete(BuildContext context, WidgetRef ref) async {
-    await ref.read(fileCacheProvider).delete(entry.file);
-    if (context.mounted) Navigator.of(context).pop(true);
+  @override
+  ConsumerState<_CachePreviewSheet> createState() => _CachePreviewSheetState();
+}
+
+class _CachePreviewSheetState extends ConsumerState<_CachePreviewSheet> {
+  // false = 内容 (primary resource: the picture / danmaku still / video);
+  // true = 缩略图 (the embedded badge, resource[1], on its header bg colour).
+  bool _showBadge = false;
+
+  Future<void> _delete() async {
+    await ref.read(fileCacheProvider).delete(widget.entry.file);
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final entry = widget.entry;
+    final double maxH = MediaQuery.of(context).size.height * 0.42;
     return SafeArea(
       top: false,
       child: ConstrainedBox(
@@ -505,9 +652,37 @@ class _CachePreviewSheet extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 12),
-              CachePreview(
-                entry: entry,
-                maxHeight: MediaQuery.of(context).size.height * 0.42,
+              // 内容 / 缩略图 toggle. 缩略图 shows the embedded badge centered on
+              // its header bg colour — how the round device screen displays it.
+              Center(
+                child: SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                      value: false,
+                      icon: Icon(Icons.image_outlined, size: 18),
+                      label: Text('内容'),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      icon: Icon(Icons.circle_outlined, size: 18),
+                      label: Text('缩略图'),
+                    ),
+                  ],
+                  selected: {_showBadge},
+                  onSelectionChanged: (s) =>
+                      setState(() => _showBadge = s.first),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Keep both mounted (IndexedStack) so toggling never re-decodes the
+              // video frames / badge — instant switch, no flicker.
+              IndexedStack(
+                index: _showBadge ? 1 : 0,
+                children: [
+                  CachePreview(entry: entry, maxHeight: maxH),
+                  CacheBadgeView(entry: entry, maxHeight: maxH),
+                ],
               ),
               const SizedBox(height: 16),
               CacheInfoCard(entry: entry),
@@ -515,7 +690,7 @@ class _CachePreviewSheet extends ConsumerWidget {
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
-                  onPressed: () => _delete(context, ref),
+                  onPressed: _delete,
                   icon: Icon(Icons.delete_outline, color: cs.error),
                   label: Text('删除', style: TextStyle(color: cs.error)),
                 ),

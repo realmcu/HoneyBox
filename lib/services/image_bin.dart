@@ -6,18 +6,29 @@
 // canvas) lives in `raster.dart`; this file is pure Dart (dart:typed_data only)
 // so it stays testable and off the Flutter dependency.
 //
-// Output format (RGB565):
-//   uncompressed: [gui_rgb_data_head_t 8B] [pixel data: w*h*2]
+// Output format (RGB565, 2 bytes/px — or ARGB8565, 3 bytes/px with alpha):
+//   uncompressed: [gui_rgb_data_head_t 8B] [pixel data: w*h*pixelBytes]
 //   RLE:          [gui_rgb_data_head_t 8B] [imdc_file_header_t 12B]
 //                 [offset table (h+1)*4] [compressed data]
 
 import 'dart:typed_data';
 
-// ── Pixel format (matches SDK GUI_FormatType; only RGB565 used) ──────────────
+// ── Pixel format (matches SDK GUI_FormatType) ────────────────────────────────
+// Values confirmed against the reference converter (honeygui-design/tools/
+// image-converter/types.ts): RGB565 = 0, ARGB8565 = 1, RGB888 = 3, JPEG = 12.
 const int _pixelFormatRgb565 = 0;
 
-// imdc pixel_bytes enum: RGB565 -> BYTES_2 (0)
+/// GUI_FormatType for packed ARGB8565 (RGB565 colour + 8-bit alpha, 3 bytes/px),
+/// used by the thumbnail encoder. (The planar RTKARGB8565 = 15 is a separate
+/// format we do not emit.)
+const int _pixelFormatArgb8565 = 1;
+
+// imdc pixel_bytes field. The reference's FORMAT_TO_PIXEL_BYTES maps ARGB8565 →
+// BYTES_3 (value 1) and RGB565 → BYTES_2 (value 0) — we mirror that map. (The
+// PixelBytes enum's own inline comment grouping ARGB8565 under BYTES_2 is stale;
+// converter.ts uses the map, so value 1 is what the device sees.)
 const int _pixelBytesRgb565 = 0;
+const int _pixelBytesArgb8565 = 1;
 
 // RLE algorithm constants (compress/rle.ts)
 const int _compressRle = 0;
@@ -34,6 +45,11 @@ const int _rgbDataHeaderBytes = 8;
 int _rgbToRgb565(int r, int g, int b) {
   return (((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)) & 0xFFFF;
 }
+
+/// Pack a 0xAARRGGBB colour into an RGB565 value (0..0xFFFF), e.g. for the
+/// resource package's `bg_color` field. Alpha is ignored.
+int rgb565FromArgb(int argb) =>
+    _rgbToRgb565((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF);
 
 int _clamp255(num v) {
   final int i = v.round();
@@ -140,6 +156,54 @@ Uint8List rgbaToRgb565Bytes(Uint8List rgba, int width, int height, bool dither) 
     final int v = _rgbToRgb565(rBuf[p], gBuf[p], bBuf[p]);
     out[o++] = v & 0xFF;
     out[o++] = (v >> 8) & 0xFF;
+  }
+  return out;
+}
+
+/// Convert [rgba] (4 bytes/pixel, R,G,B,A) to ARGB8565: 3 bytes/pixel, a
+/// little-endian RGB565 colour (2 bytes) followed by the 8-bit alpha byte —
+/// the layout the reference converter emits (`writeUInt16LE(rgb565); writeUInt8(a)`).
+/// Unlike [rgbaToRgb565Bytes] the colour is NOT premultiplied over black, since
+/// the alpha channel is preserved. When [dither] is true, Floyd–Steinberg is
+/// applied to the colour channels (alpha untouched), matching the reference,
+/// which dithers RGB565 and ARGB8565 alike. Used by the thumbnail encoder.
+Uint8List rgbaToArgb8565Bytes(
+  Uint8List rgba,
+  int width,
+  int height, {
+  bool dither = false,
+}) {
+  if (!dither) {
+    final out = Uint8List(width * height * 3);
+    int o = 0;
+    for (int i = 0; i < rgba.length; i += 4) {
+      final int v = _rgbToRgb565(rgba[i], rgba[i + 1], rgba[i + 2]);
+      out[o++] = v & 0xFF;
+      out[o++] = (v >> 8) & 0xFF;
+      out[o++] = rgba[i + 3];
+    }
+    return out;
+  }
+
+  final int n = width * height;
+  final rBuf = Uint8List(n);
+  final gBuf = Uint8List(n);
+  final bBuf = Uint8List(n);
+  final aBuf = Uint8List(n);
+  for (int i = 0, p = 0; p < n; i += 4, p++) {
+    rBuf[p] = rgba[i];
+    gBuf[p] = rgba[i + 1];
+    bBuf[p] = rgba[i + 2];
+    aBuf[p] = rgba[i + 3];
+  }
+  _floydSteinberg(rBuf, gBuf, bBuf, width, height);
+  final out = Uint8List(n * 3);
+  int o = 0;
+  for (int p = 0; p < n; p++) {
+    final int v = _rgbToRgb565(rBuf[p], gBuf[p], bBuf[p]);
+    out[o++] = v & 0xFF;
+    out[o++] = (v >> 8) & 0xFF;
+    out[o++] = aBuf[p];
   }
   return out;
 }
@@ -256,17 +320,19 @@ Uint8List buildImageBin(
   return _buildFromPixels(pixelData, width, height, compress);
 }
 
-/// Build the `.bin` from already-converted RGB565 [pixelData]. Split out so the
+/// Build the `.bin` from already-converted [pixelData]. Split out so the
 /// adaptive builder can convert pixels once and produce both variants cheaply.
+/// Defaults describe RGB565 (2 bytes/px); the ARGB8565 path passes its own
+/// [format]/[pixelBytes]/[pixelBytesEnum].
 Uint8List _buildFromPixels(
   Uint8List pixelData,
   int width,
   int height,
-  bool compress,
-) {
-  const int format = _pixelFormatRgb565;
-  const int pixelBytes = 2;
-
+  bool compress, {
+  int format = _pixelFormatRgb565,
+  int pixelBytes = 2,
+  int pixelBytesEnum = _pixelBytesRgb565,
+}) {
   final Uint8List header = _packRgbDataHeader(width, height, format, compress);
 
   if (!compress) {
@@ -278,7 +344,7 @@ Uint8List _buildFromPixels(
     _compressRle,
     _rleRunLen1,
     _rleRunLen2,
-    _pixelBytesRgb565,
+    pixelBytesEnum,
     width,
     height,
   );
@@ -323,15 +389,64 @@ ImageBinResult buildImageBinAdaptive(
   int height, {
   bool dither = false,
 }) {
-  const int pixelBytes = 2; // RGB565
   final Uint8List pixelData = rgbaToRgb565Bytes(rgba, width, height, dither);
+  return _buildAdaptiveFromPixels(
+    pixelData,
+    width,
+    height,
+    format: _pixelFormatRgb565,
+    pixelBytes: 2,
+    pixelBytesEnum: _pixelBytesRgb565,
+  );
+}
 
-  // The uncompressed size is fixed by geometry (header + w*h*2), so derive it
-  // directly instead of materializing those bytes just to measure them.
+/// ARGB8565 counterpart of [buildImageBinAdaptive]: converts [rgba] to ARGB8565
+/// (3 bytes/px, alpha preserved; [dither] applies Floyd–Steinberg to colour) and
+/// returns whichever of the uncompressed / RLE encodings is smaller. Used to
+/// encode the 160×160 circular thumbnail.
+ImageBinResult buildArgb8565BinAdaptive(
+  Uint8List rgba,
+  int width,
+  int height, {
+  bool dither = false,
+}) {
+  final Uint8List pixelData = rgbaToArgb8565Bytes(rgba, width, height, dither: dither);
+  return _buildAdaptiveFromPixels(
+    pixelData,
+    width,
+    height,
+    format: _pixelFormatArgb8565,
+    pixelBytes: 3,
+    pixelBytesEnum: _pixelBytesArgb8565,
+  );
+}
+
+/// Shared body of the adaptive builders: encode [pixelData] both uncompressed
+/// and RLE-compressed, return the smaller. RLE can be *larger* than raw for
+/// noisy content (per-line + offset-table overhead), so picking adaptively
+/// always yields the smallest transfer.
+ImageBinResult _buildAdaptiveFromPixels(
+  Uint8List pixelData,
+  int width,
+  int height, {
+  required int format,
+  required int pixelBytes,
+  required int pixelBytesEnum,
+}) {
+  // The uncompressed size is fixed by geometry (header + w*h*pixelBytes), so
+  // derive it directly instead of materializing those bytes just to measure.
   final int rawSize = _rgbDataHeaderBytes + width * height * pixelBytes;
 
   // RLE is data-dependent — it must actually be built to know its size.
-  final Uint8List rle = _buildFromPixels(pixelData, width, height, true);
+  final Uint8List rle = _buildFromPixels(
+    pixelData,
+    width,
+    height,
+    true,
+    format: format,
+    pixelBytes: pixelBytes,
+    pixelBytesEnum: pixelBytesEnum,
+  );
   if (rle.length < rawSize) {
     return ImageBinResult(
       bin: rle,
@@ -342,7 +457,15 @@ ImageBinResult buildImageBinAdaptive(
   }
 
   // RLE didn't shrink it — materialize the uncompressed variant only now.
-  final Uint8List raw = _buildFromPixels(pixelData, width, height, false);
+  final Uint8List raw = _buildFromPixels(
+    pixelData,
+    width,
+    height,
+    false,
+    format: format,
+    pixelBytes: pixelBytes,
+    pixelBytesEnum: pixelBytesEnum,
+  );
   return ImageBinResult(
     bin: raw,
     compressed: false,
@@ -376,6 +499,17 @@ void _writeRgb565(Uint8List rgba, int o, int v) {
   rgba[o + 1] = (g6 << 2) | (g6 >> 4);
   rgba[o + 2] = (b5 << 3) | (b5 >> 2);
   rgba[o + 3] = 0xFF;
+}
+
+/// Like [_writeRgb565] but carries the supplied [a]lpha byte through (ARGB8565).
+void _writeArgb8565(Uint8List rgba, int o, int v, int a) {
+  final int r5 = (v >> 11) & 0x1F;
+  final int g6 = (v >> 5) & 0x3F;
+  final int b5 = v & 0x1F;
+  rgba[o] = (r5 << 3) | (r5 >> 2);
+  rgba[o + 1] = (g6 << 2) | (g6 >> 4);
+  rgba[o + 2] = (b5 << 3) | (b5 >> 2);
+  rgba[o + 3] = a;
 }
 
 /// Decode a HoneyGUI RGB565 `.bin` (uncompressed **or** RLE, as produced by
@@ -423,6 +557,57 @@ ImageBinPixels? decodeImageBin(Uint8List bin) {
       p += 3;
       for (int k = 0; k < run && col < width; k++) {
         _writeRgb565(rgba, rowBase + col * 4, v);
+        col++;
+      }
+    }
+  }
+  return ImageBinPixels(rgba: rgba, width: width, height: height);
+}
+
+/// Decode an ARGB8565 `.bin` (uncompressed **or** RLE, as produced by
+/// [buildArgb8565BinAdaptive]) back into RGBA8888 with the alpha channel
+/// preserved. Inverse of the encoder; returns null on short/malformed input.
+/// Provided mainly for round-trip testing — the firmware is the real consumer.
+ImageBinPixels? decodeArgb8565Bin(Uint8List bin) {
+  if (bin.length < _rgbDataHeaderBytes) return null;
+  final bd = ByteData.sublistView(bin);
+  final int flags = bd.getUint8(0);
+  final bool compressed = (flags & (1 << 4)) != 0;
+  final int width = bd.getInt16(2, Endian.little);
+  final int height = bd.getInt16(4, Endian.little);
+  if (width <= 0 || height <= 0) return null;
+  final int n = width * height;
+  final rgba = Uint8List(n * 4);
+
+  if (!compressed) {
+    if (bin.length < _rgbDataHeaderBytes + n * 3) return null;
+    int p = _rgbDataHeaderBytes;
+    for (int i = 0; i < n; i++) {
+      _writeArgb8565(
+          rgba, i * 4, bd.getUint16(p, Endian.little), bd.getUint8(p + 2));
+      p += 3;
+    }
+    return ImageBinPixels(rgba: rgba, width: width, height: height);
+  }
+
+  const int tableStart = _rgbDataHeaderBytes + 12;
+  if (bin.length < tableStart + (height + 1) * 4) return null;
+  for (int line = 0; line < height; line++) {
+    final int start =
+        _rgbDataHeaderBytes + bd.getUint32(tableStart + line * 4, Endian.little);
+    final int end = _rgbDataHeaderBytes +
+        bd.getUint32(tableStart + (line + 1) * 4, Endian.little);
+    int p = start;
+    int col = 0;
+    final int rowBase = line * width * 4;
+    // Each node is 4 bytes: [len][px_lo][px_hi][alpha].
+    while (p + 3 < end && col < width) {
+      final int run = bd.getUint8(p);
+      final int v = bd.getUint16(p + 1, Endian.little);
+      final int a = bd.getUint8(p + 3);
+      p += 4;
+      for (int k = 0; k < run && col < width; k++) {
+        _writeArgb8565(rgba, rowBase + col * 4, v, a);
         col++;
       }
     }
