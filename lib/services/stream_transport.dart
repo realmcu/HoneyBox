@@ -73,5 +73,5 @@ class WifiStreamTransport implements StreamTransport {
       Future.error(UnimplementedError('WiFi 流媒体传输即将支持'));
 
   @override
-  Stream<Uint8List> get notifications => Stream<Uint8List>.empty();
+  Stream<Uint8List> get notifications => const Stream<Uint8List>.empty();
 }

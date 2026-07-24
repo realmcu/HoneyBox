@@ -52,22 +52,14 @@ class PresetChip extends StatelessWidget {
 /// Paints a dashed rectangular border around a given [Rect].
 class _DashedBorderPainter extends CustomPainter {
   final Color color;
-  final double strokeWidth;
-  final double dashWidth;
-  final double dashGap;
 
-  _DashedBorderPainter({
-    required this.color,
-    this.strokeWidth = 1.5,
-    this.dashWidth = 6,
-    this.dashGap = 4,
-  });
+  _DashedBorderPainter({required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = color
-      ..strokeWidth = strokeWidth
+      ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke;
 
     final path = Path()
@@ -80,10 +72,10 @@ class _DashedBorderPainter extends CustomPainter {
     for (final metric in metrics) {
       double distance = 0;
       while (distance < metric.length) {
-        final end = min(distance + dashWidth, metric.length);
+        final end = min(distance + 6, metric.length);
         final segmentPath = metric.extractPath(distance, end);
         canvas.drawPath(segmentPath, paint);
-        distance += dashWidth + dashGap;
+        distance += 6 + 4;
       }
     }
   }
@@ -154,7 +146,7 @@ class FileSendLayout extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 16),
               child: LinearProgressIndicator(
                 value: transferState.progress,
-                backgroundColor: colorScheme.surfaceVariant,
+                backgroundColor: colorScheme.surfaceContainerHighest,
                 color: colorScheme.primary,
                 minHeight: 6,
                 borderRadius: BorderRadius.circular(3),
@@ -167,7 +159,7 @@ class FileSendLayout extends StatelessWidget {
             child: CustomPaint(
               painter: _DashedBorderPainter(
                 color: fileName != null
-                    ? colorScheme.primary.withOpacity(0.5)
+                    ? colorScheme.primary.withValues(alpha: 0.5)
                     : colorScheme.outline,
               ),
               child: Container(

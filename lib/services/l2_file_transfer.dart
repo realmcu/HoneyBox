@@ -1,4 +1,4 @@
-import 'dart:async' as _async;
+import 'dart:async' as async_;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -203,7 +203,7 @@ L2Frame? parseL2Frame(Uint8List data) {
 // ---------------------------------------------------------------------------
 
 /// Typedef for a no-argument callback used by [TimerProvider].
-typedef void TimerCallback();
+typedef TimerCallback = void Function();
 
 /// Minimal abstraction so [FileTransferSession] can use timers without a
 /// direct `dart:async` dependency on the public API. Production code uses
@@ -215,11 +215,11 @@ abstract class TimerProvider {
 
 /// Default timer provider backed by `dart:async.Timer`.
 class _DefaultTimerProvider implements TimerProvider {
-  _async.Timer? _timer;
+  async_.Timer? _timer;
 
   @override
   void start(Duration duration, TimerCallback callback) {
-    _timer = _async.Timer(duration, callback);
+    _timer = async_.Timer(duration, callback);
   }
 
   @override
@@ -237,7 +237,7 @@ class _DefaultTimerProvider implements TimerProvider {
 ///
 /// Returns the L1 sequence number assigned to the frame, which the session
 /// uses to match ACKs.
-typedef int SendL2Fn(Uint8List frame);
+typedef SendL2Fn = int Function(Uint8List frame);
 
 /// Manages the L2 file-transfer state machine.
 ///
@@ -279,7 +279,7 @@ class FileTransferSession {
 
   /// Optional injected timer provider. When null, a default dart:async-based
   /// provider is used automatically.
-  TimerProvider? _timerProvider;
+  final TimerProvider? _timerProvider;
 
   /// Lazily-allocated default timer provider. Instance-level so each session
   /// owns its own timer (avoids cross-session interference).
