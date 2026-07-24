@@ -1,4 +1,4 @@
-package com.ebadge.ebadge_app
+package com.honeygui.honeybox
 
 /**
  * Muxes Cinepak (CVID) frames into a standard AVI(CVID) container — a faithful

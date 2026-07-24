@@ -1,4 +1,4 @@
-package com.ebadge.ebadge_app
+package com.honeygui.honeybox
 
 /**
  * Pure-Kotlin Cinepak (CVID) decoder — the exact inverse of [CinepakEncoder] and

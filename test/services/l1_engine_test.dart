@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:ebadge_app/services/l1_engine.dart';
-import 'package:ebadge_app/services/l2_file_transfer.dart';
+import 'package:honeybox/services/l1_engine.dart';
+import 'package:honeybox/services/l2_file_transfer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // CRC-16/ARC (poly 0xA001 reflected, init 0) over the L2 payload only

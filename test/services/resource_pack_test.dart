@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:ebadge_app/services/resource_pack.dart';
+import 'package:honeybox/services/resource_pack.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Uint8List _bytes(List<int> b) => Uint8List.fromList(b);

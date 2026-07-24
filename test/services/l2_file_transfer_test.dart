@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:ebadge_app/services/l2_file_transfer.dart';
+import 'package:honeybox/services/l2_file_transfer.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class FakeTimerProvider implements TimerProvider {

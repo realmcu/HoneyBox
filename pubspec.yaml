@@ -1,4 +1,4 @@
-name: ebadge_app
+name: honeybox
 description: HoneyBox device debugging and content management application.
 publish_to: 'none'
 version: 0.8.5+5

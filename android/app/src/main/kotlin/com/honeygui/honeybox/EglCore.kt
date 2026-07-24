@@ -1,4 +1,4 @@
-package com.ebadge.ebadge_app
+package com.honeygui.honeybox
 
 import android.opengl.EGL14
 import android.opengl.EGLConfig

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ebadge_app/pages/launcher/app_launcher_page.dart';
-import 'package:ebadge_app/pages/launcher/app_catalog.dart';
-import 'package:ebadge_app/pages/launcher/widgets/app_card.dart';
+import 'package:honeybox/pages/launcher/app_launcher_page.dart';
+import 'package:honeybox/pages/launcher/app_catalog.dart';
+import 'package:honeybox/pages/launcher/widgets/app_card.dart';
 
 void main() {
   Widget wrap(Widget child) => ProviderScope(

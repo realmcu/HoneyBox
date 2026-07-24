@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:ebadge_app/services/image_bin.dart';
+import 'package:honeybox/services/image_bin.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // Build w*h*4 RGBA from a per-pixel generator returning [r,g,b,a].

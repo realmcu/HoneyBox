@@ -1,4 +1,4 @@
-package com.ebadge.ebadge_app
+package com.honeygui.honeybox
 
 import android.content.Intent
 import android.os.Handler

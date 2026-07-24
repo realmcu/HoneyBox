@@ -1,16 +1,208 @@
 # HoneyBox
 
-Flutter-based BLE debugging tool for HoneyBox devices, with Android and Windows support.
+HoneyBox 是一款基于 Flutter 开发的内部设备调试工具，面向电子胸牌等硬件的连接、内容制作、文件传输和功能验证。项目目前支持 Android 与 Windows，主要通过 BLE 与设备通信；Android 还提供本地热点配网和 WiFi 视频通道。
 
-## Getting Started
+> 本项目仅用于研发和调试，不作为商业产品发布。
 
-This project is a starting point for a Flutter application.
+## 主要功能
 
-A few resources to get you started if this is your first Flutter project:
+### 设备连接
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+- 扫描附近的 BLE 设备，并按设备名称过滤
+- 显示设备名称、地址、信号强度和可连接状态
+- 建立连接、发现服务并维护连接状态
+- 在设备断开时自动返回扫描页面并清理传输状态
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 内容制作与传输
+
+- **图片**：选择图片、裁剪取景、调整尺寸/背景/质量并发送到设备
+- **弹幕**：编辑文字、字体、字号、颜色和滚动模式并生成内容
+- **视频 / GIF**：转换媒体文件并通过设备协议传输
+- **多图轮播**：组合多张图片，配置画面质量、停留时长并生成轮播内容
+- **拍照投屏**：采集相机画面，经编码后通过 BLE 或 WiFi 视频通道发送
+- **本地缓存**：保存转换后的内容，支持查看、筛选、复用和清理
+
+### 设备与应用管理
+
+- Android 本地热点配网与 WiFi/TCP 视频连接
+- 应用内版本检查与 APK 更新流程
+- 缓存容量设置和缓存管理
+- OTA 页面引导用户使用 Realtek OTA App 完成固件升级
+
+## 当前完成度
+
+| 模块 | 状态 | 说明 |
+| --- | --- | --- |
+| eBadge | 可用 | BLE 扫描、连接、内容制作与传输已实现 |
+| Watch | 预览 | 已保留应用入口，业务功能尚未实现 |
+| 仪表盘 | 预览 | 已保留应用入口，业务功能尚未实现 |
+| 芯片配置 | 预留 | 当前为占位页面 |
+| OTA 升级 | 外部工具 | 由 Realtek OTA App 执行 |
+
+## 平台支持
+
+| 能力 | Android | Windows |
+| --- | :---: | :---: |
+| BLE 扫描与连接 | ✓ | ✓ |
+| 图片、弹幕、视频和轮播传输 | ✓ | ✓ |
+| BLE 拍照投屏 | ✓ | 取决于相机和插件支持 |
+| 本地热点配网 | ✓ | — |
+| WiFi/TCP 视频通道 | ✓ | — |
+| 应用内 APK 更新 | ✓ | — |
+
+Android application ID 和 namespace 均为 `com.honeygui.honeybox`，Dart package 名称为 `honeybox`。由于不再沿用旧应用标识，Android 会将 HoneyBox 识别为一个新的独立应用，不能覆盖安装旧版 eBadge。
+
+## 技术栈
+
+- Flutter / Dart
+- Material Design
+- Riverpod 状态管理
+- `flutter_blue_plus` BLE 通信
+- 自定义 L1/L2 文件传输协议
+- 图片、视频和流媒体转换处理
+- Android 本地热点与 WiFi/TCP 通道
+- Windows C++ Runner 与 WinRT BLE 插件
+
+## 项目结构
+
+```text
+lib/
+├── pages/          页面与业务入口
+├── providers/      Riverpod 状态管理
+├── services/       BLE、传输协议、媒体转换、缓存和 WiFi 服务
+└── theme/          应用主题
+test/               Flutter 单元测试和组件测试
+tool/               构建辅助脚本
+windows/            Windows Runner 与 CMake 配置
+android/            Android 平台配置
+assets/             图片及示例媒体资源
+```
+
+## 开发环境
+
+建议使用项目 `.metadata` 对应的 Flutter stable 版本。开始前先确认环境：
+
+```powershell
+flutter doctor -v
+flutter pub get
+```
+
+### Android 环境
+
+- Flutter SDK
+- Android SDK 与 Android Studio
+- 已启用开发者选项和 USB 调试的 Android 设备
+- 支持 BLE 的真机；部分功能还需要相机和 WiFi
+
+### Windows 环境
+
+- Windows 10 或 Windows 11
+- Visual Studio，安装“使用 C++ 的桌面开发”工作负载
+- Windows SDK、CMake 和 NuGet
+- 支持 BLE 的 Windows 设备
+
+Flutter Windows 插件通常通过 symlink 接入项目。Windows 创建 symlink 需要管理员权限或开发者模式；如果开发环境两者都不可用，可在 `windows/flutter/ephemeral/.plugin_symlinks` 下使用目录 junction 指向 Pub Cache 中的插件目录。junction 只属于本机构建产物，不应提交到 Git。
+
+## 运行项目
+
+查看可用设备：
+
+```powershell
+flutter devices
+```
+
+运行 Android：
+
+```powershell
+flutter run -d <android-device-id>
+```
+
+运行 Windows：
+
+```powershell
+flutter run -d windows
+```
+
+## 构建发布包
+
+### Android APK
+
+```powershell
+flutter build apk --release
+```
+
+主要产物：
+
+```text
+build/app/outputs/apk/release/HoneyBox-release.apk
+```
+
+当前 Release 构建使用 debug 签名，仅适合内部调试和安装测试，不适合正式发布。
+
+### Windows EXE
+
+普通环境可直接构建：
+
+```powershell
+flutter build windows --release
+```
+
+在当前无管理员权限、使用 junction 的构建环境中，可避免重新执行 `pub get`：
+
+```powershell
+$env:TrackFileAccess = 'false'
+$env:_CL_ = '/D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS'
+$env:PATH = "$env:LOCALAPPDATA\NuGet\CommandLine;$env:PATH"
+flutter build windows --release --no-pub
+```
+
+主要产物：
+
+```text
+build/windows/x64/runner/Release/HoneyBox.exe
+```
+
+运行 Windows 程序时，应保留 Release 目录中的 DLL、`data` 等配套文件，不能只复制 EXE。
+
+## Windows BLE 稳定性补丁
+
+`flutter_blue_plus_winrt 0.0.20` 在启动或停止扫描时，可能让同步 WinRT 异常越过 Flutter 原生回调并终止进程。项目通过以下文件在 CMake 构建阶段生成补丁源码，不直接修改 Pub Cache：
+
+- `tool/patch_flutter_blue_plus_winrt.ps1`
+- `test/windows/flutter_blue_plus_winrt_patch_test.ps1`
+- `windows/CMakeLists.txt`
+
+当插件源码结构变化导致补丁无法安全应用时，CMake 会主动终止构建，而不是静默生成未经保护的程序。
+
+## 测试
+
+运行 Flutter 测试：
+
+```powershell
+flutter test
+```
+
+运行 Windows 插件补丁回归测试：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File test\windows\flutter_blue_plus_winrt_patch_test.ps1
+```
+
+提交前建议同时检查 diff 格式：
+
+```powershell
+git diff --check
+```
+
+## 使用注意事项
+
+- Android BLE 扫描需要蓝牙权限；部分 Android 版本还要求定位服务处于开启状态。
+- Windows 不使用 Android 的运行时蓝牙与定位权限流程。
+- 首次连接、扫描或开启热点时，请按系统提示授予所需权限。
+- BLE 和 WiFi 功能依赖目标设备固件及对应服务正常工作。
+- Watch、仪表盘和芯片配置入口目前不代表功能已经完成。
+- 请勿提交 `build/`、`windows/flutter/ephemeral/` 或本机插件 junction。
+
+## 许可证与用途
+
+HoneyBox 是内部研发调试工具。项目连接 `flutter_blue_plus` 时声明 `License.nonprofit`，其使用方式以非商业调试场景为前提。如未来用途发生变化，应重新评估第三方依赖许可、Android 签名和发布配置。

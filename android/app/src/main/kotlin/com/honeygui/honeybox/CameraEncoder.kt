@@ -1,4 +1,4 @@
-package com.ebadge.ebadge_app
+package com.honeygui.honeybox
 
 import android.content.Context
 import android.graphics.Bitmap

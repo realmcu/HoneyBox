@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:ebadge_app/services/image_jpeg.dart';
+import 'package:honeybox/services/image_jpeg.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // A simple opaque RGBA gradient, w*h*4 bytes.

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ebadge_app/pages/launcher/app_catalog.dart';
+import 'package:honeybox/pages/launcher/app_catalog.dart';
 
 void main() {
   group('kAppCatalog', () {
