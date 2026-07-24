@@ -932,7 +932,8 @@ class _StreamPageState extends ConsumerState<StreamPage>
         action: const SizedBox(
           width: 28,
           height: 28,
-          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+          child:
+              CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
         ),
       );
     }

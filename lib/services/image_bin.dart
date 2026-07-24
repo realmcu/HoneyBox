@@ -108,7 +108,8 @@ void _floydSteinberg(
 /// RGB565 has no alpha: semi-transparent pixels are pre-multiplied over black.
 /// [rgba] is 4 bytes/pixel (R,G,B,A). Returns little-endian RGB565 bytes
 /// (w*h*2). When [dither] is true, applies Floyd–Steinberg before quantizing.
-Uint8List rgbaToRgb565Bytes(Uint8List rgba, int width, int height, bool dither) {
+Uint8List rgbaToRgb565Bytes(
+    Uint8List rgba, int width, int height, bool dither) {
   if (!dither) {
     final out = Uint8List(width * height * 2);
     int o = 0;
@@ -215,7 +216,8 @@ class _RleResult {
   _RleResult(this.compressed, this.lineOffsets);
 }
 
-_RleResult _rleCompress(Uint8List pixelData, int width, int height, int pixelBytes) {
+_RleResult _rleCompress(
+    Uint8List pixelData, int width, int height, int pixelBytes) {
   final int bytesPerLine = width * pixelBytes;
   final compressed = <int>[];
   final lineOffsets = List<int>.filled(height, 0);
@@ -355,10 +357,11 @@ Uint8List _buildFromPixels(
   final offsetTable = Uint8List((height + 1) * 4);
   final odv = ByteData.view(offsetTable.buffer);
   for (int i = 0; i < height; i++) {
-    odv.setUint32(i * 4, (imdcOffset + rle.lineOffsets[i]) & 0xFFFFFFFF, Endian.little);
+    odv.setUint32(
+        i * 4, (imdcOffset + rle.lineOffsets[i]) & 0xFFFFFFFF, Endian.little);
   }
-  odv.setUint32(
-      height * 4, (imdcOffset + rle.compressed.length) & 0xFFFFFFFF, Endian.little);
+  odv.setUint32(height * 4, (imdcOffset + rle.compressed.length) & 0xFFFFFFFF,
+      Endian.little);
 
   return _concat([header, imdc, offsetTable, rle.compressed]);
 }
@@ -410,7 +413,8 @@ ImageBinResult buildArgb8565BinAdaptive(
   int height, {
   bool dither = false,
 }) {
-  final Uint8List pixelData = rgbaToArgb8565Bytes(rgba, width, height, dither: dither);
+  final Uint8List pixelData =
+      rgbaToArgb8565Bytes(rgba, width, height, dither: dither);
   return _buildAdaptiveFromPixels(
     pixelData,
     width,
@@ -543,8 +547,8 @@ ImageBinPixels? decodeImageBin(Uint8List bin) {
   const int tableStart = _rgbDataHeaderBytes + 12;
   if (bin.length < tableStart + (height + 1) * 4) return null;
   for (int line = 0; line < height; line++) {
-    final int start =
-        _rgbDataHeaderBytes + bd.getUint32(tableStart + line * 4, Endian.little);
+    final int start = _rgbDataHeaderBytes +
+        bd.getUint32(tableStart + line * 4, Endian.little);
     final int end = _rgbDataHeaderBytes +
         bd.getUint32(tableStart + (line + 1) * 4, Endian.little);
     int p = start;
@@ -593,8 +597,8 @@ ImageBinPixels? decodeArgb8565Bin(Uint8List bin) {
   const int tableStart = _rgbDataHeaderBytes + 12;
   if (bin.length < tableStart + (height + 1) * 4) return null;
   for (int line = 0; line < height; line++) {
-    final int start =
-        _rgbDataHeaderBytes + bd.getUint32(tableStart + line * 4, Endian.little);
+    final int start = _rgbDataHeaderBytes +
+        bd.getUint32(tableStart + line * 4, Endian.little);
     final int end = _rgbDataHeaderBytes +
         bd.getUint32(tableStart + (line + 1) * 4, Endian.little);
     int p = start;

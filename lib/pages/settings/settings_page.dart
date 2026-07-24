@@ -53,7 +53,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 
-  Widget _cacheLimitCard(ThemeData theme, ColorScheme cs, AppSettings settings) {
+  Widget _cacheLimitCard(
+      ThemeData theme, ColorScheme cs, AppSettings settings) {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -63,7 +64,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           children: [
             Row(
               children: [
-                Icon(Icons.sd_storage_outlined, size: 20, color: cs.onSurfaceVariant),
+                Icon(Icons.sd_storage_outlined,
+                    size: 20, color: cs.onSurfaceVariant),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text('本地缓存上限', style: theme.textTheme.titleMedium),
@@ -110,8 +112,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
             const SizedBox(height: 6),
             Text('已用 ${formatFileSize(used)} / $limitMB MB',
-                style:
-                    theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: cs.onSurfaceVariant)),
           ],
         );
       },
@@ -128,7 +130,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           future: _usage,
           builder: (context, snap) => Text(
             snap.hasData ? '当前已用 ${formatFileSize(snap.data!)}' : '查看并删除已缓存的文件',
-            style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            style:
+                theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
         ),
         trailing: const Icon(Icons.chevron_right),

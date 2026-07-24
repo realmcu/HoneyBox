@@ -49,7 +49,11 @@ class VideoPage extends ConsumerStatefulWidget {
 
 const List<int> _sizePresets = [240, 360, 466, 480];
 const List<int> _fpsPresets = [10, 15, 20, 24];
-const List<(String, int)> _qualityPresets = [('LOW', 15), ('MED', 60), ('HIGH', 95)];
+const List<(String, int)> _qualityPresets = [
+  ('LOW', 15),
+  ('MED', 60),
+  ('HIGH', 95)
+];
 
 // Background colors for transparent GIFs (opaque ARGB). Black first (default,
 // matches the miniprogram), then white and a few accents.
@@ -62,7 +66,8 @@ const List<int> _bgColors = [
   0xFFFFCC00,
 ];
 
-const double _previewMaxHRatio = 0.5; // circular viewport max height = 50% screen
+const double _previewMaxHRatio =
+    0.5; // circular viewport max height = 50% screen
 
 enum _ConvStatus { idle, converting, ready, error }
 
@@ -85,7 +90,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   ui.Image? _thumb;
   int _srcW = 0;
   int _srcH = 0;
-  bool _isGif = false; // GIF source → preview via extracted frames, not MediaPlayer
+  bool _isGif =
+      false; // GIF source → preview via extracted frames, not MediaPlayer
 
   // Conversion options.
   int _size = 360;
@@ -530,7 +536,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
             pkg,
             _fileName,
             cache: CacheSpec(CacheKind.video, {
-              'src': _isGif ? 'gif' : 'video', // distinguishes GIF/视频/轮播 in cache
+              'src':
+                  _isGif ? 'gif' : 'video', // distinguishes GIF/视频/轮播 in cache
               'size': '$_size',
               'fps': '$_fps',
               'q': '$_quality',
@@ -778,7 +785,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
     _posTimer = null;
     if (!_isGif && _player.isReady) {
       unawaited(_player.pause());
-      unawaited(_player.seekTo(0)); // rewind so the next Play starts from the top
+      unawaited(
+          _player.seekTo(0)); // rewind so the next Play starts from the top
     }
     _positionMs.value = 0;
     setState(() {
@@ -878,13 +886,16 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                         const SizedBox(height: 10),
                         _buildExamples(theme, cs, enabled: !_isBusy),
                         const SizedBox(height: 16),
-                        _buildChipRow(theme, '尺寸', _sizePresets,
-                            (s) => s == _size, (s) => _onSizeTap(s),
+                        _buildChipRow(
+                            theme,
+                            '尺寸',
+                            _sizePresets,
+                            (s) => s == _size,
+                            (s) => _onSizeTap(s),
                             (s) => '$s'),
                         const SizedBox(height: 8),
                         _buildChipRow(theme, '帧率', _fpsPresets,
-                            (f) => f == _fps, (f) => _onFpsTap(f),
-                            (f) => '$f'),
+                            (f) => f == _fps, (f) => _onFpsTap(f), (f) => '$f'),
                         const SizedBox(height: 8),
                         _buildQualityRow(theme),
                         const SizedBox(height: 8),
@@ -1075,12 +1086,10 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                       _bgDebounce.cancel();
                       setState(() => _viewportPointers++);
                     },
-                    onPointerUp: (_) => setState(() =>
-                        _viewportPointers =
-                            (_viewportPointers - 1).clamp(0, 99)),
-                    onPointerCancel: (_) => setState(() =>
-                        _viewportPointers =
-                            (_viewportPointers - 1).clamp(0, 99)),
+                    onPointerUp: (_) => setState(() => _viewportPointers =
+                        (_viewportPointers - 1).clamp(0, 99)),
+                    onPointerCancel: (_) => setState(() => _viewportPointers =
+                        (_viewportPointers - 1).clamp(0, 99)),
                     child: previewCircle(
                       size: d,
                       bg: _previewBg,
@@ -1117,8 +1126,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                 ),
                 // Bottom-left: current / total time, shown once the player
                 // (video) or the extracted frames (GIF) are ready.
-                if ((_isGif && _frames != null) ||
-                    (!_isGif && _player.isReady))
+                if ((_isGif && _frames != null) || (!_isGif && _player.isReady))
                   Positioned(
                     left: kPreviewMargin,
                     bottom: kPreviewMargin,
@@ -1193,8 +1201,7 @@ class _VideoPageState extends ConsumerState<VideoPage> {
                   tooltip: isPlaying ? '暂停' : '播放',
                 ),
           IconButton(
-            onPressed:
-                canPlay && _play != _PlayState.stopped ? _onStop : null,
+            onPressed: canPlay && _play != _PlayState.stopped ? _onStop : null,
             icon: const Icon(Icons.stop),
             iconSize: 22,
             color: Colors.white,
@@ -1219,9 +1226,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
   // Total is the video duration (or the GIF preview's cycle length); current
   // updates while playing via [_positionMs].
   Widget _buildTimeLabel() {
-    final int total = _isGif
-        ? (_frames?.length ?? 0) * _frameIntervalMs
-        : _player.durationMs;
+    final int total =
+        _isGif ? (_frames?.length ?? 0) * _frameIntervalMs : _player.durationMs;
     return Material(
       color: Colors.black.withValues(alpha: 0.45),
       borderRadius: BorderRadius.circular(24),
@@ -1354,8 +1360,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
         Flexible(
           child: Text(right,
               textAlign: TextAlign.right,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                  color: cs.primary, fontWeight: FontWeight.w600)),
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: cs.primary, fontWeight: FontWeight.w600)),
         ),
       ],
     );
@@ -1405,8 +1411,8 @@ class _VideoPageState extends ConsumerState<VideoPage> {
             Flexible(
               child: Text(state.errorMessage ?? '发送失败',
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                      color: cs.error, fontWeight: FontWeight.w600)),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: cs.error, fontWeight: FontWeight.w600)),
             ),
           ],
         );

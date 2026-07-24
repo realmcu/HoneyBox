@@ -64,8 +64,7 @@ class WifiManager extends ChangeNotifier {
   String? get deviceIp => _deviceIp;
   int get devicePort => _devicePort;
 
-  bool get isConnected =>
-      _phase == WifiPhase.connected && client.isConnected;
+  bool get isConnected => _phase == WifiPhase.connected && client.isConnected;
 
   /// True once the device has reported an IP — a TCP-only reconnect is possible.
   bool get canReconnect => _deviceIp != null && _deviceIp!.isNotEmpty;
@@ -228,11 +227,11 @@ class WifiManager extends ChangeNotifier {
     }
 
     try {
-      final ack = await _ackCompleter!.future
-          .timeout(const Duration(seconds: 8));
+      final ack =
+          await _ackCompleter!.future.timeout(const Duration(seconds: 8));
       if (!ack.accepted) {
-        _setPhase(WifiPhase.failed,
-            '设备拒绝配网：${WifiProv.ackErrorText(ack.error)}');
+        _setPhase(
+            WifiPhase.failed, '设备拒绝配网：${WifiProv.ackErrorText(ack.error)}');
         return;
       }
     } on TimeoutException {
@@ -246,8 +245,8 @@ class WifiManager extends ChangeNotifier {
     _startStatusPolling();
     WifiStatus status;
     try {
-      status = await _statusCompleter!.future
-          .timeout(const Duration(seconds: 30));
+      status =
+          await _statusCompleter!.future.timeout(const Duration(seconds: 30));
     } on TimeoutException {
       _stopStatusPolling();
       _setPhase(WifiPhase.failed, '等待设备连接超时（30s）');
@@ -299,8 +298,7 @@ class WifiManager extends ChangeNotifier {
   }
 
   Future<bool> _openTcp() async {
-    _setPhase(WifiPhase.tcpConnecting,
-        '正在连接 $_deviceIp:$_devicePort…');
+    _setPhase(WifiPhase.tcpConnecting, '正在连接 $_deviceIp:$_devicePort…');
     final ok = await client.connect(_deviceIp!, _devicePort);
     if (ok) {
       _setPhase(WifiPhase.connected, '已连接 $_deviceIp:$_devicePort');

@@ -37,7 +37,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
   @override
   void initState() {
     super.initState();
-    _hsv = HSVColor.fromColor(Color(0xFF000000 | (widget.initialArgb & 0xFFFFFF)));
+    _hsv =
+        HSVColor.fromColor(Color(0xFF000000 | (widget.initialArgb & 0xFFFFFF)));
   }
 
   // HSV → opaque ARGB int, computed directly (avoids version-sensitive Color
@@ -53,17 +54,35 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
     double r, g, b;
     switch (i % 6) {
       case 0:
-        r = v; g = t; b = p; break;
+        r = v;
+        g = t;
+        b = p;
+        break;
       case 1:
-        r = q; g = v; b = p; break;
+        r = q;
+        g = v;
+        b = p;
+        break;
       case 2:
-        r = p; g = v; b = t; break;
+        r = p;
+        g = v;
+        b = t;
+        break;
       case 3:
-        r = p; g = q; b = v; break;
+        r = p;
+        g = q;
+        b = v;
+        break;
       case 4:
-        r = t; g = p; b = v; break;
+        r = t;
+        g = p;
+        b = v;
+        break;
       default:
-        r = v; g = p; b = q; break;
+        r = v;
+        g = p;
+        b = q;
+        break;
     }
     int ch(double x) => (x * 255).round().clamp(0, 255);
     return 0xFF000000 | (ch(r) << 16) | (ch(g) << 8) | ch(b);
@@ -342,7 +361,8 @@ class _PaletteButton extends StatelessWidget {
           shape: BoxShape.circle,
           border: Border.all(color: cs.outlineVariant),
         ),
-        child: Icon(Icons.palette_outlined, size: size * 0.55, color: cs.primary),
+        child:
+            Icon(Icons.palette_outlined, size: size * 0.55, color: cs.primary),
       ),
     );
   }

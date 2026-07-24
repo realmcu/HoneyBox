@@ -39,7 +39,8 @@ void main() {
   group('rgbaToArgb8565Bytes', () {
     test('emits 3 bytes/px: little-endian RGB565 then the raw alpha byte', () {
       // px0 pure red (a=200), px1 pure green (a=50).
-      final rgba = _rgba(2, 1, (x, y) => x == 0 ? [255, 0, 0, 200] : [0, 255, 0, 50]);
+      final rgba =
+          _rgba(2, 1, (x, y) => x == 0 ? [255, 0, 0, 200] : [0, 255, 0, 50]);
       final bytes = rgbaToArgb8565Bytes(rgba, 2, 1);
       expect(bytes.length, 2 * 1 * 3);
       // Red = 0xF800 → lo 0x00, hi 0xF8, alpha 200.
@@ -57,7 +58,8 @@ void main() {
     test('uncompressed header + round-trip preserves alpha exactly', () {
       const w = 8, h = 6;
       // A noisy pattern so RLE loses → uncompressed path is chosen.
-      final rgba = _rgba(w, h, (x, y) => [x * 30, y * 40, (x ^ y) * 20, (x * 8 + y) & 0xFF]);
+      final rgba = _rgba(
+          w, h, (x, y) => [x * 30, y * 40, (x ^ y) * 20, (x * 8 + y) & 0xFF]);
       final res = buildArgb8565BinAdaptive(rgba, w, h);
 
       expect(res.compressed, isFalse, reason: 'noisy content should not RLE');
@@ -99,15 +101,17 @@ void main() {
       expect(p[3], 128, reason: 'alpha exact');
       // Colour is 565-quantized then expanded; assert it matches a raw-encoded
       // decode of the same source (encoder self-consistency).
-      final rawDec = decodeArgb8565Bin(
-          (buildArgb8565BinAdaptive(_rgba(1, 1, (x, y) => [100, 150, 200, 128]), 1, 1)).bin)!;
+      final rawDec = decodeArgb8565Bin((buildArgb8565BinAdaptive(
+              _rgba(1, 1, (x, y) => [100, 150, 200, 128]), 1, 1))
+          .bin)!;
       expect(p.sublist(0, 3), _at(rawDec, 0, 0).sublist(0, 3));
     });
 
     test('raw and RLE encodings decode to the same pixels', () {
       const w = 12, h = 10;
       // Blocky content: RLE-friendly runs but with variety across lines.
-      final rgba = _rgba(w, h, (x, y) => [(x ~/ 3) * 60, (y ~/ 2) * 50, 80, x < 6 ? 255 : 100]);
+      final rgba = _rgba(w, h,
+          (x, y) => [(x ~/ 3) * 60, (y ~/ 2) * 50, 80, x < 6 ? 255 : 100]);
       final res = buildArgb8565BinAdaptive(rgba, w, h);
       final decAdaptive = decodeArgb8565Bin(res.bin)!;
 

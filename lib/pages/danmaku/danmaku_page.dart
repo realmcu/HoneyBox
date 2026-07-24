@@ -124,7 +124,8 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
     _transfer = ref.read(transferProgressProvider.notifier);
     _scrollCtl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 3), // replaced per period in _syncScrollAnim
+      duration:
+          const Duration(seconds: 3), // replaced per period in _syncScrollAnim
     );
     _controller.addListener(_onTextChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _rebuild());
@@ -534,7 +535,8 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
       alignment: Alignment.center,
       padding: const EdgeInsets.all(12),
       child: _previewImage == null
-          ? Text('预览', style: theme.textTheme.bodyMedium?.copyWith(color: cs.outline))
+          ? Text('预览',
+              style: theme.textTheme.bodyMedium?.copyWith(color: cs.outline))
           : Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -750,8 +752,8 @@ class _DanmakuPageState extends ConsumerState<DanmakuPage>
             Flexible(
               child: Text(state.errorMessage ?? '发送失败',
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                      color: cs.error, fontWeight: FontWeight.w600)),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: cs.error, fontWeight: FontWeight.w600)),
             ),
           ],
         );

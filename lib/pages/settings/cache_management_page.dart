@@ -69,9 +69,11 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
         content: const Text('将删除全部本地缓存文件，此操作不可恢复。'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true), child: const Text('清空')),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('清空')),
         ],
       ),
     );
@@ -189,7 +191,8 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
                 visualDensity: VisualDensity.compact,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 labelPadding: const EdgeInsets.symmetric(horizontal: 2),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               ),
             ),
         ],
@@ -204,7 +207,8 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
       title: Text('${e.kind.label} · ${cacheParamSummary(e)}',
           maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text('${cacheTimeLabel(e.time)} · ${formatFileSize(e.size)}',
-          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+          style:
+              theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
       trailing: IconButton(
         icon: Icon(Icons.delete_outline, color: cs.error),
         tooltip: '删除',

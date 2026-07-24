@@ -52,8 +52,10 @@ Uint8List buildStreamOpen(int sid, int codec, int w, int h, int fps) {
   return buildL2Cmd(cmdStream, ksOpen, [
     sid & 0xFF,
     codec & 0xFF,
-    w & 0xFF, (w >> 8) & 0xFF,
-    h & 0xFF, (h >> 8) & 0xFF,
+    w & 0xFF,
+    (w >> 8) & 0xFF,
+    h & 0xFF,
+    (h >> 8) & 0xFF,
     fps & 0xFF,
   ]);
 }

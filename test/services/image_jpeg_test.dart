@@ -76,7 +76,8 @@ void main() {
   });
 
   test('encodes a baseline JFIF JPEG with 4:2:0 sampling (Y = 2x2)', () {
-    final jpeg = encodeBaselineJpegYuv420(_gradient(48, 48), 48, 48, quality: 75);
+    final jpeg =
+        encodeBaselineJpegYuv420(_gradient(48, 48), 48, 48, quality: 75);
     final parsed = _walk(jpeg, 0);
 
     expect(parsed.endsWithEoi, isTrue, reason: 'must end with EOI (FFD9)');
@@ -104,8 +105,8 @@ void main() {
 
   test('handles non-multiple-of-16 dimensions (edge MCU padding)', () {
     // 360 is not a multiple of 16 → last MCU column/row is padded.
-    final jpeg = encodeBaselineJpegYuv420(_gradient(360, 360), 360, 360,
-        quality: 60);
+    final jpeg =
+        encodeBaselineJpegYuv420(_gradient(360, 360), 360, 360, quality: 60);
     final parsed = _walk(jpeg, 0);
     expect(parsed.endsWithEoi, isTrue);
     final sof = parsed.sof0!;
@@ -129,8 +130,8 @@ void main() {
     // length equals both the size field and (total - header).
     final payload = imageJpegPayload(bin)!;
     expect(payload.length, bin.length - kJpegHeaderBytes);
-    expect(payload.length,
-        ByteData.sublistView(bin).getUint32(8, Endian.little));
+    expect(
+        payload.length, ByteData.sublistView(bin).getUint32(8, Endian.little));
     expect(payload[0], 0xFF);
     expect(payload[1], 0xD8);
     expect(payload[payload.length - 2], 0xFF);

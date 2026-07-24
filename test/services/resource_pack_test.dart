@@ -20,7 +20,8 @@ void main() {
       );
 
       const int num = 3; // a, b, thumbnail
-      const int headerBytes = kResourcePackHeaderBytes + num * 4; // 10 + 12 = 22
+      const int headerBytes =
+          kResourcePackHeaderBytes + num * 4; // 10 + 12 = 22
       const int total = headerBytes + 3 + 5 + 7; // 37
 
       expect(pack.length, total);
@@ -29,7 +30,8 @@ void main() {
       expect(dv.getUint8(1), num, reason: 'resource_num counts the thumbnail');
       expect(dv.getUint32(2, Endian.little), 0x00123456,
           reason: 'bg_color u32 LE, alpha byte forced to 0');
-      expect(dv.getUint32(6, Endian.little), total, reason: 'size = whole package');
+      expect(dv.getUint32(6, Endian.little), total,
+          reason: 'size = whole package');
 
       // offset[] — a at headerBytes, then contiguous.
       expect(dv.getUint32(10, Endian.little), headerBytes); // 22
@@ -98,7 +100,9 @@ void main() {
       final pack = buildResourcePack(
         type: ResourceType.image,
         bgColor: 0,
-        resources: [_bytes([1, 2])],
+        resources: [
+          _bytes([1, 2])
+        ],
         thumbnail: _bytes([3, 4]),
       );
       // Truncated below the payload end.
@@ -106,7 +110,8 @@ void main() {
 
       // Corrupt the size field so it no longer matches the buffer length.
       final corrupt = Uint8List.fromList(pack);
-      ByteData.view(corrupt.buffer).setUint32(6, pack.length + 4, Endian.little);
+      ByteData.view(corrupt.buffer)
+          .setUint32(6, pack.length + 4, Endian.little);
       expect(parseResourcePack(corrupt), isNull);
 
       // Too short even for the fixed header.

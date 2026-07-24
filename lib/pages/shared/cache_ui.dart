@@ -205,8 +205,8 @@ class _CacheThumbState extends State<CacheThumb> {
     final s = widget.size;
     Widget content;
     if (widget.entry.kind == CacheKind.video || (!_loading && _img == null)) {
-      content =
-          Icon(cacheKindIcon(widget.entry.kind), color: cs.onSurfaceVariant, size: s * 0.5);
+      content = Icon(cacheKindIcon(widget.entry.kind),
+          color: cs.onSurfaceVariant, size: s * 0.5);
     } else if (_img == null) {
       content = SizedBox(
         width: s * 0.4,
@@ -312,8 +312,8 @@ class _CacheBadgeViewState extends State<CacheBadgeView> {
       );
     } else if (_badge == null) {
       content = Text('无缩略图',
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: cs.onSurfaceVariant));
+          style:
+              theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant));
     } else {
       final double side = maxH - 24;
       content = SizedBox(
@@ -343,7 +343,8 @@ class _CacheBadgeViewState extends State<CacheBadgeView> {
 class CacheLoadButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final String tooltip;
-  const CacheLoadButton({super.key, required this.onPressed, this.tooltip = '载入缓存'});
+  const CacheLoadButton(
+      {super.key, required this.onPressed, this.tooltip = '载入缓存'});
 
   @override
   Widget build(BuildContext context) {
@@ -406,8 +407,9 @@ class _CachePickerSheetState extends ConsumerState<_CachePickerSheet> {
   @override
   void initState() {
     super.initState();
-    _future =
-        ref.read(fileCacheProvider).list(kind: widget.kind, where: widget.where);
+    _future = ref
+        .read(fileCacheProvider)
+        .list(kind: widget.kind, where: widget.where);
   }
 
   void _reload() {
@@ -441,8 +443,7 @@ class _CachePickerSheetState extends ConsumerState<_CachePickerSheet> {
                 children: [
                   Icon(cacheKindIcon(widget.kind), size: 20, color: cs.primary),
                   const SizedBox(width: 8),
-                  Text('选择$_label缓存',
-                      style: theme.textTheme.titleMedium),
+                  Text('选择$_label缓存', style: theme.textTheme.titleMedium),
                 ],
               ),
             ),
@@ -635,8 +636,8 @@ class _CachePreviewSheetState extends ConsumerState<_CachePreviewSheet> {
     return SafeArea(
       top: false,
       child: ConstrainedBox(
-        constraints:
-            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85),
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
           child: Column(
@@ -899,7 +900,9 @@ class _CachePreviewState extends State<CachePreview> {
       padding: const EdgeInsets.all(12),
       child: _preview == null
           ? const SizedBox(
-              width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2))
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 2))
           : (e.kind == CacheKind.image
               // Image caches are square and represent the round screen.
               ? ClipOval(
@@ -940,7 +943,9 @@ class _CachePreviewState extends State<CachePreview> {
       );
     } else if (_frames == null) {
       content = const SizedBox(
-        width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2));
+          width: 28,
+          height: 28,
+          child: CircularProgressIndicator(strokeWidth: 2));
     } else {
       final frames = _frames!;
       final img = frames[_frameIdx % frames.length];

@@ -135,8 +135,9 @@ class TcpVideoClient {
     _connected = false;
     if (s != null) {
       try {
-        await s.flush().timeout(const Duration(milliseconds: 300),
-            onTimeout: () {});
+        await s
+            .flush()
+            .timeout(const Duration(milliseconds: 300), onTimeout: () {});
       } catch (_) {}
       try {
         await s.close();

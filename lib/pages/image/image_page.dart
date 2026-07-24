@@ -185,8 +185,7 @@ class _ImagePageState extends ConsumerState<ImagePage> {
   // Apply an already-decoded image as the current selection (shared by the
   // gallery picker and the built-in examples). [marker] is only a non-null
   // "something is loaded" flag — conversion works off [decoded], not its path.
-  void _applyDecoded(
-      ui.Image decoded, int byteLen, String name, XFile marker) {
+  void _applyDecoded(ui.Image decoded, int byteLen, String name, XFile marker) {
     _srcImage?.dispose();
     final base =
         name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : name;
@@ -682,10 +681,10 @@ class _ImagePageState extends ConsumerState<ImagePage> {
               _bgDebounce.cancel();
               setState(() => _viewportPointers++);
             },
-            onPointerUp: (_) =>
-                setState(() => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
-            onPointerCancel: (_) =>
-                setState(() => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
+            onPointerUp: (_) => setState(
+                () => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
+            onPointerCancel: (_) => setState(
+                () => _viewportPointers = (_viewportPointers - 1).clamp(0, 99)),
             child: SizedBox(
               width: v,
               height: v,
@@ -913,8 +912,8 @@ class _ImagePageState extends ConsumerState<ImagePage> {
             Text('原图 ${formatFileSize(_sourceSize)}',
                 style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
             Text('$_size×$_size · 已用 ${formatFileSize(_binSize)}',
-                style: tt.bodyMedium?.copyWith(
-                    color: cs.primary, fontWeight: FontWeight.w600)),
+                style: tt.bodyMedium
+                    ?.copyWith(color: cs.primary, fontWeight: FontWeight.w600)),
           ],
         ),
         const SizedBox(height: 8),
@@ -987,8 +986,8 @@ class _ImagePageState extends ConsumerState<ImagePage> {
             Flexible(
               child: Text(state.errorMessage ?? '发送失败',
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                      color: cs.error, fontWeight: FontWeight.w600)),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: cs.error, fontWeight: FontWeight.w600)),
             ),
           ],
         );

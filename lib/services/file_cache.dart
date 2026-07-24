@@ -183,7 +183,8 @@ class FileCache {
 
   Future<void> _enforceLimit({required String? keepName}) async {
     try {
-      final limitBytes = _ref.read(appSettingsProvider).cacheLimitMB * 1024 * 1024;
+      final limitBytes =
+          _ref.read(appSettingsProvider).cacheLimitMB * 1024 * 1024;
       final all = await list(); // newest first
       var total = all.fold<int>(0, (sum, e) => sum + e.size);
       if (total <= limitBytes) return;
@@ -217,7 +218,8 @@ class FileCache {
       return null;
     }
     final time = _parseStamp(parts[0]) ?? st.modified;
-    final params = parts.length >= 3 ? _decodeParams(parts[2]) : <String, String>{};
+    final params =
+        parts.length >= 3 ? _decodeParams(parts[2]) : <String, String>{};
     return CacheEntry(
       file: f,
       kind: kind,
@@ -251,8 +253,7 @@ class FileCache {
   static String _san(String v) => v.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
 
   static String _two(int n) => n < 10 ? '0$n' : '$n';
-  static String _three(int n) =>
-      n < 10 ? '00$n' : (n < 100 ? '0$n' : '$n');
+  static String _three(int n) => n < 10 ? '00$n' : (n < 100 ? '0$n' : '$n');
 
   /// `yyyyMMdd-HHmmss-SSS` (local time) — the filename time prefix.
   static String _fmtStamp(DateTime t) =>

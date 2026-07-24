@@ -128,8 +128,7 @@ Future<RgbaImage> cropResizeToRgba(
   );
   final ui.Picture picture = recorder.endRecording();
   final ui.Image out = await picture.toImage(targetW, targetH);
-  final ByteData? bd =
-      await out.toByteData(format: ui.ImageByteFormat.rawRgba);
+  final ByteData? bd = await out.toByteData(format: ui.ImageByteFormat.rawRgba);
   out.dispose();
   picture.dispose();
   if (bd == null) {
@@ -195,8 +194,7 @@ Future<RgbaImage> renderViewportRgba(
     ty: ty,
     bgColor: bgColor,
   );
-  final ByteData? bd =
-      await out.toByteData(format: ui.ImageByteFormat.rawRgba);
+  final ByteData? bd = await out.toByteData(format: ui.ImageByteFormat.rawRgba);
   out.dispose();
   if (bd == null) {
     throw StateError('图片像素读取失败');
@@ -274,8 +272,9 @@ Future<RgbaImage> renderDanmakuRgba({
   }
 
   final int width = (maxW.ceil() + padX * 2) < 1 ? 1 : maxW.ceil() + padX * 2;
-  final int height =
-      (lineH * lines.length + padY * 2) < 1 ? 1 : lineH * lines.length + padY * 2;
+  final int height = (lineH * lines.length + padY * 2) < 1
+      ? 1
+      : lineH * lines.length + padY * 2;
 
   final ui.PictureRecorder recorder = ui.PictureRecorder();
   final ui.Canvas canvas = ui.Canvas(recorder);
@@ -295,8 +294,7 @@ Future<RgbaImage> renderDanmakuRgba({
 
   final ui.Picture picture = recorder.endRecording();
   final ui.Image out = await picture.toImage(width, height);
-  final ByteData? bd =
-      await out.toByteData(format: ui.ImageByteFormat.rawRgba);
+  final ByteData? bd = await out.toByteData(format: ui.ImageByteFormat.rawRgba);
   out.dispose();
   picture.dispose();
   if (bd == null) {
@@ -439,8 +437,7 @@ Future<RgbaImage> renderCircularThumbnailRgba(
 
   final ui.Picture picture = recorder.endRecording();
   final ui.Image out = await picture.toImage(size, size);
-  final ByteData? bd =
-      await out.toByteData(format: ui.ImageByteFormat.rawRgba);
+  final ByteData? bd = await out.toByteData(format: ui.ImageByteFormat.rawRgba);
   out.dispose();
   picture.dispose();
   if (bd == null) {

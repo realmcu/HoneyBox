@@ -19,9 +19,9 @@ class AppSettings {
   Map<String, dynamic> toJson() => {'cacheLimitMB': cacheLimitMB};
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
-        cacheLimitMB: ((json['cacheLimitMB'] as num?)?.toInt() ??
-                kDefaultCacheLimitMB)
-            .clamp(kMinCacheLimitMB, kMaxCacheLimitMB),
+        cacheLimitMB:
+            ((json['cacheLimitMB'] as num?)?.toInt() ?? kDefaultCacheLimitMB)
+                .clamp(kMinCacheLimitMB, kMaxCacheLimitMB),
       );
 }
 

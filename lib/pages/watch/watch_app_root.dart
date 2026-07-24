@@ -14,8 +14,7 @@ class WatchAppRoot extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.listen<ConnectedDeviceInfo?>(connectedDeviceProvider, (prev, next) {
       if (prev != null && next == null) {
-        Navigator.of(context)
-            .popUntil((r) => r.settings.name == '/watch-root');
+        Navigator.of(context).popUntil((r) => r.settings.name == '/watch-root');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('设备已断开')),
         );

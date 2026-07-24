@@ -53,14 +53,19 @@ const double _maxDurationSec = 5.0;
 
 // Cinepak quality presets for the still key frames — same LOW/MED/HIGH model as
 // the video page. Photos benefit from codebook fidelity, so the default is HIGH.
-const List<(String, int)> _qualityPresets = [('LOW', 15), ('MED', 60), ('HIGH', 95)];
+const List<(String, int)> _qualityPresets = [
+  ('LOW', 15),
+  ('MED', 60),
+  ('HIGH', 95)
+];
 
 // Resolution of the cached framed snapshots used for the thumbnail strip and
 // the motion preview. Independent of the chosen output [_size] (framing is the
 // same at any resolution), so changing size never re-renders these.
 const int _previewRes = 360;
 
-const double _previewMaxHRatio = 0.5; // circular viewport max height = 50% screen
+const double _previewMaxHRatio =
+    0.5; // circular viewport max height = 50% screen
 
 // Letterbox / out-of-frame fill colors (shared with the image/video pages).
 const List<int> _bgColors = [
@@ -116,7 +121,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
 
   // Options.
   int _size = 360;
-  int _quality = 95; // HIGH — photos favor fidelity; lower it to shrink the file
+  int _quality =
+      95; // HIGH — photos favor fidelity; lower it to shrink the file
   int _bgColor = 0xFF000000;
   // Preview-only: fills the square corners outside the circle, extracted from
   // the FIRST slide via Palette. Never affects the converted resource.
@@ -596,8 +602,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     final ui.Image content = _slides.first.framed ?? _slides.first.src;
     _packaging = true;
     try {
-      final Uint8List thumb =
-          await generateThumbnailArgb8565Bin(content);
+      final Uint8List thumb = await generateThumbnailArgb8565Bin(content);
       if (!mounted) return;
       // Header bg = the colour that fills the preview area outside the circle
       // (extracted from the first slide); fall back to the chosen background.
@@ -759,9 +764,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
               tooltip: '导出缩略图',
             ),
             IconButton(
-              onPressed: (_isBusy || _slides.length >= _maxSlides)
-                  ? null
-                  : _addImages,
+              onPressed:
+                  (_isBusy || _slides.length >= _maxSlides) ? null : _addImages,
               icon: const Icon(Icons.add_photo_alternate_outlined),
               tooltip: '添加图片',
             ),
@@ -945,8 +949,9 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
   }
 
   Widget _buildPlayingContent(ColorScheme cs, double v) {
-    final img =
-        _slides.isNotEmpty ? _slides[_previewIdx % _slides.length].framed : null;
+    final img = _slides.isNotEmpty
+        ? _slides[_previewIdx % _slides.length].framed
+        : null;
     return previewCircle(
       size: v,
       bg: _previewBg,
@@ -980,8 +985,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
             tooltip: isPlaying ? '暂停' : '预览',
           ),
           IconButton(
-            onPressed:
-                canPlay && _play != _PlayState.stopped ? _onStop : null,
+            onPressed: canPlay && _play != _PlayState.stopped ? _onStop : null,
             icon: const Icon(Icons.stop),
             iconSize: 22,
             color: Colors.white,
@@ -1066,8 +1070,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
                         child: SizedBox(
                             width: 16,
                             height: 16,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2)),
+                            child: CircularProgressIndicator(strokeWidth: 2)),
                       ),
               ),
               // 序号放圆形底部居中，避免旧的左下角位置露到圆外。
@@ -1077,8 +1080,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
                 bottom: 4,
                 child: Center(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(8),
@@ -1210,8 +1213,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
         SizedBox(
           width: 48,
           child: Text('${_durationSec.toStringAsFixed(1)}s',
-              textAlign: TextAlign.right,
-              style: theme.textTheme.bodyMedium),
+              textAlign: TextAlign.right, style: theme.textTheme.bodyMedium),
         ),
       ],
     );
@@ -1230,7 +1232,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text('${_slides.length} 张 · 约 ${_actualDurationSec.toStringAsFixed(1)}s',
+        Text(
+            '${_slides.length} 张 · 约 ${_actualDurationSec.toStringAsFixed(1)}s',
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: cs.onSurfaceVariant)),
         Flexible(
@@ -1322,8 +1325,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
             Flexible(
               child: Text(state.errorMessage ?? '发送失败',
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                      color: cs.error, fontWeight: FontWeight.w600)),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: cs.error, fontWeight: FontWeight.w600)),
             ),
           ],
         );
@@ -1359,8 +1362,8 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
             onPressed: _cancelConvert,
             icon: const Icon(Icons.close),
             label: const Text('取消合成'),
-            style:
-                OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48)),
           ),
         ],
       );

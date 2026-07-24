@@ -164,10 +164,10 @@ class EncoderConfig {
               .clamp(kH264MinBitrate, kH264MaxBitrate))
           .toInt(),
       iFrameIntervalSec: (json['iFrameIntervalSec'] as num?)?.toInt() ?? 6,
-      transport: (transIndex >= 0 &&
-              transIndex < StreamTransportKind.values.length)
-          ? StreamTransportKind.values[transIndex]
-          : StreamTransportKind.ble,
+      transport:
+          (transIndex >= 0 && transIndex < StreamTransportKind.values.length)
+              ? StreamTransportKind.values[transIndex]
+              : StreamTransportKind.ble,
       msv1Skip: json['msv1Skip'] as bool? ?? true,
       msv1SkipThr: (json['msv1SkipThr'] as num?)?.toInt() ?? 0,
       jpegQuality: (json['jpegQuality'] as num?)?.toInt() ?? 80,
@@ -274,9 +274,9 @@ class EncoderService {
   /// Begin listening for native events. Call once before [openCamera].
   void listen() {
     _eventSub ??= _events.receiveBroadcastStream().listen(
-      _handleEvent,
-      onError: (Object e) => onError?.call('事件流错误: $e'),
-    );
+          _handleEvent,
+          onError: (Object e) => onError?.call('事件流错误: $e'),
+        );
   }
 
   void _handleEvent(dynamic event) {

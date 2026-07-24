@@ -365,7 +365,8 @@ class BleManager {
       if (_streamTxChar != null && _streamRxChar != null) {
         try {
           await _streamRxChar!.setNotifyValue(true);
-          _streamNotificationSub = _streamRxChar!.onValueReceived.listen((data) {
+          _streamNotificationSub =
+              _streamRxChar!.onValueReceived.listen((data) {
             if (!_disposed) {
               _streamNotifyController.add(Uint8List.fromList(data));
             }

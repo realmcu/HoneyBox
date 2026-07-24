@@ -186,9 +186,8 @@ class _WifiPageState extends ConsumerState<WifiPage> {
               connected
                   ? Icons.wifi
                   : (active ? Icons.wifi_tethering : Icons.wifi_tethering_off),
-              color: connected
-                  ? cs.primary
-                  : (active ? cs.secondary : cs.outline),
+              color:
+                  connected ? cs.primary : (active ? cs.secondary : cs.outline),
               size: 28,
             ),
             const SizedBox(width: 12),

@@ -110,15 +110,15 @@ class _DevicePageState extends ConsumerState<DevicePage>
     _ActionItem(
         icon: Icons.chat_bubble_outline, title: '弹幕', route: '/danmaku'),
     _ActionItem(
-        icon: Icons.movie_creation_outlined, title: '视频 / GIF', route: '/video'),
+        icon: Icons.movie_creation_outlined,
+        title: '视频 / GIF',
+        route: '/video'),
     _ActionItem(
         icon: Icons.burst_mode_outlined, title: '多图轮播', route: '/slideshow'),
     // 拍照投屏 — Apple-style AirPlay/screen-mirroring glyph.
-    _ActionItem(
-        icon: Icons.airplay, title: '拍照投屏', route: '/stream'),
+    _ActionItem(icon: Icons.airplay, title: '拍照投屏', route: '/stream'),
     // OTA 升级 — reserved; the internal page is intentionally empty for now.
-    _ActionItem(
-        icon: Icons.system_update_alt, title: 'OTA 升级', route: '/ota'),
+    _ActionItem(icon: Icons.system_update_alt, title: 'OTA 升级', route: '/ota'),
   ];
 
   @override
@@ -169,14 +169,13 @@ class _DevicePageState extends ConsumerState<DevicePage>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('已连接',
-                              style: tt.titleSmall
-                                  ?.copyWith(color: cs.secondary)),
+                              style:
+                                  tt.titleSmall?.copyWith(color: cs.secondary)),
                           const SizedBox(height: 2),
                           Text(widget.deviceName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style:
-                                  tt.bodySmall?.copyWith(color: cs.outline)),
+                              style: tt.bodySmall?.copyWith(color: cs.outline)),
                         ],
                       ),
                     ),

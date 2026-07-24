@@ -98,8 +98,8 @@ Uint8List buildResourcePack({
   dv.setUint32(2, bgColor & 0x00FFFFFF, Endian.little); // ARGB, alpha byte 0
   dv.setUint32(6, total & 0xFFFFFFFF, Endian.little);
   for (int i = 0; i < num; i++) {
-    dv.setUint32(
-        kResourcePackHeaderBytes + i * 4, offsets[i] & 0xFFFFFFFF, Endian.little);
+    dv.setUint32(kResourcePackHeaderBytes + i * 4, offsets[i] & 0xFFFFFFFF,
+        Endian.little);
   }
   for (int i = 0; i < num; i++) {
     out.setRange(offsets[i], offsets[i] + all[i].length, all[i]);

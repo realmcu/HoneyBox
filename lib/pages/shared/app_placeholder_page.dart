@@ -20,8 +20,8 @@ class AppPlaceholderPage extends ConsumerWidget {
     final tt = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
-        title: Text(appTitle,
-            style: tt.titleLarge?.copyWith(color: cs.onPrimary)),
+        title:
+            Text(appTitle, style: tt.titleLarge?.copyWith(color: cs.onPrimary)),
         backgroundColor: cs.primary,
         foregroundColor: cs.onPrimary,
       ),
@@ -29,8 +29,7 @@ class AppPlaceholderPage extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.construction_outlined,
-                size: 64, color: cs.outline),
+            Icon(Icons.construction_outlined, size: 64, color: cs.outline),
             const SizedBox(height: 16),
             Text('$appTitle 功能开发中', style: tt.titleMedium),
             const SizedBox(height: 8),
