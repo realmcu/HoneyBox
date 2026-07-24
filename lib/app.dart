@@ -19,7 +19,7 @@ class EbadgeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'eBadge',
+      title: 'HoneyBox',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       // The home is a single connection-aware gate (no separate "enter scan"
@@ -91,4 +91,3 @@ class EbadgeApp extends StatelessWidget {
     );
   }
 }
-

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -163,7 +164,13 @@ class BleManager {
   // --------------------------------------------------------------------------
 
   /// Request Bluetooth runtime permissions on Android.
+  ///
+  /// On non-Android platforms (Windows desktop, iOS, etc.) there is no
+  /// permission_handler runtime-permission model for BLE, so this is a no-op
+  /// that reports success. On Windows the WinRT BLE APIs are accessible
+  /// directly from the Win32 process without capability declarations.
   Future<bool> _ensureBlePermissions() async {
+    if (!Platform.isAndroid) return true;
     final scan = await Permission.bluetoothScan.request();
     final connect = await Permission.bluetoothConnect.request();
     if (scan.isGranted && connect.isGranted) return true;
@@ -211,10 +218,16 @@ class BleManager {
     );
 
     try {
-      await FlutterBluePlus.startScan(
-        androidScanMode: AndroidScanMode.lowLatency,
-        androidUsesFineLocation: true,
-      );
+      // Android-only scan tuning (androidScanMode / androidUsesFineLocation)
+      // is not applicable on Windows desktop, so branch the call by platform.
+      if (Platform.isAndroid) {
+        await FlutterBluePlus.startScan(
+          androidScanMode: AndroidScanMode.lowLatency,
+          androidUsesFineLocation: true,
+        );
+      } else {
+        await FlutterBluePlus.startScan();
+      }
     } catch (e) {
       stopScan();
       _setState(BleState.disconnected);
@@ -251,7 +264,10 @@ class BleManager {
       _device = BluetoothDevice(remoteId: DeviceIdentifier(deviceId));
 
       // Connect with timeout.
+      // flutter_blue_plus 2.x requires an explicit License declaration.
+      // HoneyBox is an internal debugging tool and uses the nonprofit tier.
       await _device!.connect(
+        license: License.nonprofit,
         timeout: const Duration(seconds: 10),
       );
       debugPrint('BleManager: connected, discovering services');

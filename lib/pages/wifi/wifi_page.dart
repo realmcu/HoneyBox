@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -37,6 +39,11 @@ class _WifiPageState extends ConsumerState<WifiPage> {
   }
 
   Future<bool> _ensurePermissions() async {
+    // The local-hotspot provisioning flow is Android-only (startLocalOnlyHotspot
+    // + NEARBY_WIFI_DEVICES / ACCESS_FINE_LOCATION). On non-Android platforms
+    // there are no such runtime permissions to request, so report success and
+    // let the underlying manager decide feature availability.
+    if (!Platform.isAndroid) return true;
     // startLocalOnlyHotspot needs NEARBY_WIFI_DEVICES on Android 13+ and
     // ACCESS_FINE_LOCATION on older builds — request both, proceed if the
     // OS-relevant one is granted.

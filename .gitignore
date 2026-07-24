@@ -42,7 +42,7 @@ linux/
 web/
 
 # Windows
-windows/
+/windows/flutter/ephemeral/
 
 # IDE
 .idea/

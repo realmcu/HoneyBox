@@ -6,14 +6,17 @@
 // tree, read text, and verify that the values of widget properties are correct.
 
 import 'package:ebadge_app/app.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() {
-  testWidgets('EbadgeApp shows scan page', (WidgetTester tester) async {
+  testWidgets('EbadgeApp shows app launcher', (WidgetTester tester) async {
     await tester.pumpWidget(const ProviderScope(child: EbadgeApp()));
     await tester.pump();
 
-    expect(find.text('扫描设备'), findsOneWidget);
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(app.title, 'HoneyBox');
+    expect(find.text('选择应用'), findsOneWidget);
   });
 }

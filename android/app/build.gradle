@@ -37,6 +37,12 @@ android {
             signingConfig = signingConfigs.debug
         }
     }
+
+    applicationVariants.configureEach { variant ->
+        variant.outputs.configureEach {
+            outputFileName = "HoneyBox-${variant.buildType.name}.apk"
+        }
+    }
 }
 
 flutter {

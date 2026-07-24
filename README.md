@@ -1,6 +1,6 @@
-# ebadge_app
+# HoneyBox
 
-A new Flutter project.
+Flutter-based BLE debugging tool for HoneyBox devices, with Android and Windows support.
 
 ## Getting Started
 

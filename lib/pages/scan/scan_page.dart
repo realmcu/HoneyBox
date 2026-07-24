@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -98,6 +99,13 @@ class _ScanPageState extends ConsumerState<ScanPage>
   /// turning location off stops scanning; turning it back on resumes it
   /// immediately.
   Future<void> _checkLocationService() async {
+    // Location-services gating is an Android BLE-scan requirement only. On
+    // Windows/other desktops there is no such coupling, so never let a
+    // location-off state block scanning there.
+    if (!Platform.isAndroid) {
+      if (_locationOff) setState(() => _locationOff = false);
+      return;
+    }
     final status = await Permission.location.serviceStatus;
     if (!mounted) return;
     final off = status == ServiceStatus.disabled;
