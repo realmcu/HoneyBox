@@ -127,3 +127,57 @@ jobs:
 
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed lib/ test/
+
+  # ─── Job 5: Publish Release ───────────────────────────────────────
+  release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [build-android, build-windows, lint]
+    if: github.event_name == 'push' && github.ref_name == 'master'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate version tag
+        id: tag
+        run: |
+          DATE_TAG="v$(date -u '+%Y%m%d.%H%M%S')"
+          echo "tag=${DATE_TAG}" >> $GITHUB_OUTPUT
+          echo "Release: ${DATE_TAG}"
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: honeybox-apk-debug
+          path: release-artifacts/
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: honeybox-windows-release
+          path: release-artifacts/windows/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "HoneyBox ${{ steps.tag.outputs.tag }}"
+          body: |
+            ## HoneyBox ${{ steps.tag.outputs.tag }}
+
+            🚀 Auto-built from commit ${{ github.sha }}
+
+            ### Downloads
+            - **Android APK** — `honeybox-apk-debug`
+            - **Windows x64** — `honeybox-windows-release`
+
+            > This is an automated build — may not be fully tested.
+          files: |
+            release-artifacts/**
+          prerelease: true
+          generate_release_notes: true
