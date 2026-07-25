@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HoneyBox · Watch 应用主页预览</title>
+<style>
+  /* ---- Design tokens：与 lib/theme/app_theme.dart 对齐 ---- */
+  :root {
+    --primary:            #0072BC;   /* Realtek 品牌蓝，AppBar / 主强调 */
+    --primary-container:  #D3E3FD;
+    --watch-accent:       #2E7D6B;   /* Watch 在 app_catalog 里的 accent 青绿 */
+    --watch-accent-soft:  #E1F0EC;
+    --secondary:          #34A853;
+    --error:              #EA4335;
+    --surface:            #FFFFFF;
+    --surface-high:       #F0F0F3;
+    --background:         #F5F5F7;
+    --outline:            #DADCE0;
+    --text-primary:       #1F1F1F;
+    --text-secondary:     #5F6368;
+    --text-tertiary:      #9AA0A6;
+    --radius-card:        16px;
+    --radius-chip:        12px;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #E8E8ED;
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 64px;
+    gap: 20px;
+  }
+
+  .page-note {
+    max-width: 380px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    text-align: center;
+  }
+  .page-note b { color: var(--text-primary); }
+
+  /* ---- 手机外框 ---- */
+  .phone {
+    width: 390px;
+    height: 800px;
+    background: var(--background);
+    border-radius: 44px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.22);
+    border: 10px solid #111318;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* ---- 状态栏 ---- */
+  .statusbar {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 22px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .statusbar .icons { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+
+  /* ---- AppBar ---- */
+  .appbar {
+    height: 56px;
+    background: var(--primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 8px 0 16px;
+    gap: 8px;
+  }
+  .appbar .menu { font-size: 22px; width: 40px; height:40px; display:flex; align-items:center; justify-content:center; border-radius: 50%; cursor: pointer; }
+  .appbar .title { font-size: 18px; font-weight: 600; flex: 1; }
+  .appbar .disconnect {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 13px; padding: 6px 10px; border-radius: 8px; cursor: pointer;
+  }
+  .appbar .disconnect .off { color: #FF9E96; font-size: 16px; }
+
+  /* ---- 滚动内容 ---- */
+  .body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* ---- 已连接状态条（对齐 device_page 顶部 Row） ---- */
+  .connbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 2px;
+  }
+  .connbar .badge {
+    width: 40px; height: 40px; border-radius: var(--radius-chip);
+    background: var(--primary-container);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--primary); font-size: 20px;
+  }
+  .connbar .meta { flex: 1; min-width: 0; }
+  .connbar .meta .k { font-size: 13px; font-weight: 600; color: var(--secondary); }
+  .connbar .meta .v { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .connbar .wifi {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--primary);
+    border: 1px solid var(--primary); border-radius: 8px;
+    padding: 6px 10px; cursor: pointer;
+  }
+
+  /* ---- 手表状态摘要卡（Watch 特有） ---- */
+  .watch-summary {
+    background: linear-gradient(135deg, var(--watch-accent) 0%, #256355 100%);
+    border-radius: var(--radius-card);
+    padding: 16px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: 0 6px 16px rgba(46,125,107,.28);
+  }
+  .watch-summary .face {
+    width: 66px; height: 66px; border-radius: 20px;
+    background: rgba(255,255,255,.16);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,.25);
+  }
+  .watch-summary .face .time { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+  .watch-summary .face .date { font-size: 10px; opacity: .85; margin-top: 2px; }
+  .watch-summary .info { flex: 1; }
+  .watch-summary .info .row1 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .watch-summary .info .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .watch-summary .chip {
+    font-size: 11px; background: rgba(255,255,255,.18);
+    padding: 3px 9px; border-radius: 20px;
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  /* ---- 分区标题 ---- */
+  .section-label {
+    font-size: 13px; font-weight: 600; color: var(--text-secondary);
+    padding: 2px 2px 0;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* ---- 功能卡网格（对齐 device_page GridView.count 2列） ---- */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .card {
+    background: var(--surface);
+    border-radius: var(--radius-card);
+    border: 1px solid var(--outline);
+    padding: 18px 14px;
+    aspect-ratio: 1.25 / 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: transform .12s ease, box-shadow .12s ease;
+    position: relative;
+  }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,.08); }
+  .card .ic {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .card .ct { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+  .card .cs { font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px; line-height: 1.4; }
+  .card .arrow { position: absolute; right: 14px; top: 18px; color: var(--text-tertiary); font-size: 16px; }
+
+  /* 每张卡的强调色 */
+  .ic-face  { background: var(--watch-accent-soft); color: var(--watch-accent); }
+  .ic-notif { background: #E3F0FC; color: var(--primary); }
+  .ic-health{ background: #FDE7E6; color: var(--error); }
+  .ic-ota   { background: #E6F4EA; color: var(--secondary); }
+
+  /* ---- 底部说明 ---- */
+  .footnote { font-size: 10.5px; color: var(--text-tertiary); text-align: center; padding-top: 4px; }
+</style>
+</head>
+<body>
+
+  <div class="page-note">
+    <b>Watch 应用主页 · 静态预览</b><br>
+    对齐现有 eBadge <code>DevicePage</code> 布局：顶部已连接状态条 + 2 列功能卡网格。<br>
+    Watch 特有的「手表状态摘要卡」放在功能网格之上。请确认布局与四个模块的取舍。
+  </div>
+
+  <div class="phone">
+    <!-- 状态栏 -->
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="icons">📶 &nbsp; 🔋 82%</span>
+    </div>
+
+    <!-- AppBar：标题为已连接设备名，右侧断开（与 device_page 一致） -->
+    <div class="appbar">
+      <div class="menu">☰</div>
+      <div class="title">Watch-A17F</div>
+      <div class="disconnect"><span class="off">⛓️‍💥</span> 断开</div>
+    </div>
+
+    <div class="body">
+
+      <!-- 已连接状态条 -->
+      <div class="connbar">
+        <div class="badge">⌚</div>
+        <div class="meta">
+          <div class="k">已连接</div>
+          <div class="v">Watch-A17F · BLE</div>
+        </div>
+        <div class="wifi">📡 WiFi 配网</div>
+      </div>
+
+      <!-- 手表状态摘要卡 -->
+      <div class="watch-summary">
+        <div class="face">
+          <div class="time">9:41</div>
+          <div class="date">周六 7/25</div>
+        </div>
+        <div class="info">
+          <div class="row1">当前表盘 · 简约数字</div>
+          <div class="chips">
+            <span class="chip">🔋 电量 82%</span>
+            <span class="chip">💾 固件 v1.4.2</span>
+            <span class="chip">🔗 信号 强</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 功能区 -->
+      <div class="section-label">📱 设备功能</div>
+      <div class="grid">
+
+        <!-- 1. 表盘推送 -->
+        <div class="card">
+          <div class="ic ic-face">🎨</div>
+          <div>
+            <div class="ct">表盘推送</div>
+            <div class="cs">选择 / 自定义表盘并设为当前</div>
+          </div>
+          <div class="arrow">›</div>
+        </div>
+
+        <!-- 2. 通知转发 -->
+        <div class="card">
+          <div class="ic ic-notif">🔔</div>
+          <div>
+            <div class="ct">通知转发</div>
+            <div class="cs">配置手机通知同步到手表</div>
+          </div>
+          <div class="arrow">›</div>
+        </div>
+
+        <!-- 3. 运动 / 健康数据 -->
+        <div class="card">
+          <div class="ic ic-health">❤️</div>
+          <div>
+            <div class="ct">运动 / 健康</div>
+            <div class="cs">步数、心率、睡眠数据同步</div>
+          </div>
+          <div class="arrow">›</div>
+        </div>
+
+        <!-- 4. 固件 OTA 升级 -->
+        <div class="card">
+          <div class="ic ic-ota">⬆️</div>
+          <div>
+            <div class="ct">固件 OTA 升级</div>
+            <div class="cs">检查并推送手表固件更新</div>
+          </div>
+          <div class="arrow">›</div>
+        </div>
+
+      </div>
+
+      <div class="footnote">通信复用现有 BLE 协议栈（ble_manager / l1_engine）</div>
+
+    </div>
+  </div>
+
+  <div class="page-note" style="max-width:420px;">
+    可调整点：①摘要卡展示字段（电量/表盘/固件/信号）②四张卡的名称与图标 ③是否需要第 5 张卡（如「设备设置」）。<br>
+    确认后我再落地 Flutter 骨架。
+  </div>
+
+</body>
+</html>

@@ -12,6 +12,10 @@ import 'pages/chip_config/chip_config_page.dart';
 import 'pages/settings/settings_page.dart';
 import 'pages/settings/cache_management_page.dart';
 import 'pages/ota/ota_page.dart';
+import 'pages/watch/pages/watch_face_page.dart';
+import 'pages/watch/pages/watch_notification_page.dart';
+import 'pages/watch/pages/watch_health_page.dart';
+import 'pages/watch/pages/watch_ota_page.dart';
 
 class HoneyBoxApp extends StatelessWidget {
   const HoneyBoxApp({super.key});
@@ -78,6 +82,19 @@ class HoneyBoxApp extends StatelessWidget {
             break;
           case '/ota':
             page = const OtaPage();
+            break;
+          // Watch 功能子页 —— 设备无关的占位页，不消费 args。
+          case '/watch-face':
+            page = const WatchFacePage();
+            break;
+          case '/watch-notification':
+            page = const WatchNotificationPage();
+            break;
+          case '/watch-health':
+            page = const WatchHealthPage();
+            break;
+          case '/watch-ota':
+            page = const WatchOtaPage();
             break;
           default:
             page = const EBadgeAppRoot();

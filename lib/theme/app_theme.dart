@@ -21,6 +21,11 @@ class AppTheme {
   static const Color textSecondary = Color(0xFF5F6368);
   static const Color textTertiary = Color(0xFF9AA0A6);
 
+  // Watch 应用的专属 accent（青绿）——与 app_catalog 中 AppId.watch 的 accent
+  // 同值，用于 Watch 主页的状态摘要卡渐变。dark 为其加深版，作渐变终点。
+  static const Color watchAccent = Color(0xFF2E7D6B);
+  static const Color watchAccentDark = Color(0xFF256355);
+
   static const _lightColorScheme = ColorScheme.light(
     primary: primary,
     onPrimary: onPrimary,
