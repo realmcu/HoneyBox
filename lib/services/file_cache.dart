@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -119,7 +120,8 @@ class FileCache {
       }
       entries.sort((a, b) => b.time.compareTo(a.time));
       return entries;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileCache.list: $e');
       return <CacheEntry>[];
     }
   }
@@ -155,7 +157,8 @@ class FileCache {
       await file.writeAsBytes(bytes, flush: true);
       await _enforceLimit(keepName: name);
       return _decode(file);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileCache.add: $e');
       return null;
     }
   }
@@ -164,17 +167,9 @@ class FileCache {
   Future<void> delete(File file) async {
     try {
       if (await file.exists()) await file.delete();
-    } catch (_) {}
-  }
-
-  /// Delete every cached file.
-  Future<void> clear() async {
-    try {
-      final all = await list();
-      for (final e in all) {
-        await delete(e.file);
-      }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('FileCache.delete: $e');
+    }
   }
 
   /// Evict oldest entries until the total fits the current cap. Call after the
@@ -195,7 +190,21 @@ class FileCache {
         await delete(e.file);
         total -= e.size;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('FileCache._enforceLimit: $e');
+    }
+  }
+
+  /// Delete every cached file.
+  Future<void> clear() async {
+    try {
+      final all = await list();
+      for (final e in all) {
+        await delete(e.file);
+      }
+    } catch (e) {
+      debugPrint('FileCache.clear: $e');
+    }
   }
 
   // ── Filename codec ─────────────────────────────────────────────────────────
@@ -214,7 +223,8 @@ class FileCache {
     FileStat st;
     try {
       st = f.statSync();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileCache._decode: $e');
       return null;
     }
     final time = _parseStamp(parts[0]) ?? st.modified;
@@ -276,7 +286,8 @@ class FileCache {
         int.parse(t.substring(4, 6)),
         int.parse(ms),
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileCache._parseStamp: $e');
       return null;
     }
   }

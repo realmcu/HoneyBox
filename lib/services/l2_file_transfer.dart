@@ -6,28 +6,26 @@ import 'dart:typed_data';
 // CRC-32 (polynomial 0xEDB88320, reflected)
 // ---------------------------------------------------------------------------
 
+/// Precomputed CRC-32 lookup table (256 entries), built once at compile time.
+final _crc32Table = List<int>.generate(256, (int i) {
+  int crc = i;
+  for (int j = 0; j < 8; j++) {
+    if (crc & 1 != 0) {
+      crc = (crc >> 1) ^ 0xEDB88320;
+    } else {
+      crc = crc >> 1;
+    }
+  }
+  return crc;
+});
+
 /// Compute a table-based CRC-32 over [data] and return the unsigned 32-bit
 /// value.
 int crc32(Uint8List data) {
-  const int poly = 0xEDB88320;
-
-  // Build lookup table once.
-  final table = List<int>.generate(256, (int i) {
-    int crc = i;
-    for (int j = 0; j < 8; j++) {
-      if (crc & 1 != 0) {
-        crc = (crc >> 1) ^ poly;
-      } else {
-        crc = crc >> 1;
-      }
-    }
-    return crc;
-  });
-
   int crc = 0xFFFFFFFF;
   for (int i = 0; i < data.length; i++) {
     final index = (crc ^ data[i]) & 0xFF;
-    crc = (crc >> 8) ^ table[index];
+    crc = (crc >> 8) ^ _crc32Table[index];
   }
   return (crc ^ 0xFFFFFFFF) >>> 0; // force unsigned 32-bit
 }
@@ -277,13 +275,9 @@ class FileTransferSession {
   int _fileType = TYPE.raw;
   String _filename = '';
 
-  /// Optional injected timer provider. When null, a default dart:async-based
-  /// provider is used automatically.
-  final TimerProvider? _timerProvider;
-
-  /// Lazily-allocated default timer provider. Instance-level so each session
-  /// owns its own timer (avoids cross-session interference).
-  _DefaultTimerProvider? _defaultTimerProvider;
+  /// Injected timer provider for timeouts. Falls back to a default dart:async
+  /// provider when not injected.
+  final TimerProvider _timerProvider;
 
   // --------------------------------------------------------------------------
   // Callbacks
@@ -313,7 +307,7 @@ class FileTransferSession {
     this.onError,
     this.onLog,
     TimerProvider? timerProvider,
-  }) : _timerProvider = timerProvider;
+  }) : _timerProvider = timerProvider ?? _DefaultTimerProvider();
 
   // --------------------------------------------------------------------------
   // Properties
@@ -509,15 +503,11 @@ class FileTransferSession {
 
   void _startTimer(Duration duration, String message) {
     _clearTimer();
-    final provider =
-        _timerProvider ?? (_defaultTimerProvider ??= _DefaultTimerProvider());
-    provider.start(duration, () => _fail(message));
+    _timerProvider.start(duration, () => _fail(message));
   }
 
   void _clearTimer() {
-    final provider =
-        _timerProvider ?? (_defaultTimerProvider ??= _DefaultTimerProvider());
-    provider.cancel();
+    _timerProvider.cancel();
   }
 
   // --------------------------------------------------------------------------
