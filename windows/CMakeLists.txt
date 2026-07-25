@@ -61,6 +61,19 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# permission_handler_windows 0.2.1 adds legacy /await even though it already
+# compiles as C++20, where standard coroutines are enabled by default. MSVC
+# 14.50+ reports D9047 for that obsolete option.
+if(TARGET permission_handler_windows_plugin)
+  get_target_property(PHW_COMPILE_OPTIONS
+    permission_handler_windows_plugin COMPILE_OPTIONS)
+  if(PHW_COMPILE_OPTIONS)
+    list(REMOVE_ITEM PHW_COMPILE_OPTIONS "/await")
+    set_property(TARGET permission_handler_windows_plugin PROPERTY
+      COMPILE_OPTIONS "${PHW_COMPILE_OPTIONS}")
+  endif()
+endif()
+
 # flutter_blue_plus_winrt 0.0.20 lets synchronous WinRT exceptions escape its
 # method-channel callback. Generate a project-local patched translation unit so
 # a Bluetooth watcher failure is returned to Dart instead of terminating the
