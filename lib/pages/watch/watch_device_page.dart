@@ -116,13 +116,9 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
         title: '通知转发',
         route: '/watch-notification'),
     _ActionItem(
-        icon: Icons.favorite_outline,
-        title: '运动 / 健康',
-        route: '/watch-health'),
+        icon: Icons.favorite_outline, title: '运动 / 健康', route: '/watch-health'),
     _ActionItem(
-        icon: Icons.system_update_alt,
-        title: '固件 OTA 升级',
-        route: '/watch-ota'),
+        icon: Icons.system_update_alt, title: '固件 OTA 升级', route: '/watch-ota'),
   ];
 
   @override
@@ -172,14 +168,13 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('已连接',
-                              style: tt.titleSmall
-                                  ?.copyWith(color: cs.secondary)),
+                              style:
+                                  tt.titleSmall?.copyWith(color: cs.secondary)),
                           const SizedBox(height: 2),
                           Text(widget.deviceName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style:
-                                  tt.bodySmall?.copyWith(color: cs.outline)),
+                              style: tt.bodySmall?.copyWith(color: cs.outline)),
                         ],
                       ),
                     ),
@@ -257,8 +252,7 @@ class _WatchSummaryCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.16),
               borderRadius: BorderRadius.circular(20),
-              border:
-                  Border.all(color: Colors.white.withValues(alpha: 0.25)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
             ),
             child: const Icon(Icons.watch, color: Colors.white, size: 30),
           ),
