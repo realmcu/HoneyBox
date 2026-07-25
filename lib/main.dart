@@ -6,5 +6,5 @@ import 'app_info.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppInfo.init(); // runtime-accurate version for the update check/footer
-  runApp(const ProviderScope(child: EbadgeApp()));
+  runApp(const ProviderScope(child: HoneyBoxApp()));
 }

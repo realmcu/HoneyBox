@@ -13,8 +13,8 @@ import 'pages/settings/settings_page.dart';
 import 'pages/settings/cache_management_page.dart';
 import 'pages/ota/ota_page.dart';
 
-class EbadgeApp extends StatelessWidget {
-  const EbadgeApp({super.key});
+class HoneyBoxApp extends StatelessWidget {
+  const HoneyBoxApp({super.key});
 
   @override
   Widget build(BuildContext context) {

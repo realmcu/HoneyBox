@@ -11,8 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() {
-  testWidgets('EbadgeApp shows app launcher', (WidgetTester tester) async {
-    await tester.pumpWidget(const ProviderScope(child: EbadgeApp()));
+  testWidgets('HoneyBoxApp shows app launcher', (WidgetTester tester) async {
+    await tester.pumpWidget(const ProviderScope(child: HoneyBoxApp()));
     await tester.pump();
 
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
