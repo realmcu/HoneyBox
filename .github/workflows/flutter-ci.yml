@@ -3,11 +3,13 @@ name: HoneyBox CI
 on:
   push:
     branches: [master, main, develop]
+    tags: ['v*']
     paths-ignore:
       - '**.md'
       - 'assets/**'
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [analyze]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v4
@@ -69,12 +71,17 @@ jobs:
         run: flutter pub get
 
       - name: Build Android APK (debug)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: flutter build apk --debug
+
+      - name: Build Android APK (release)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: flutter build apk --release
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: honeybox-apk-debug
+          name: honeybox-android-apk
           path: build/app/outputs/flutter-apk/*.apk
           retention-days: 7
 
@@ -84,7 +91,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     needs: [analyze]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +119,6 @@ jobs:
     name: Dart Format Check
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v4
@@ -128,13 +134,17 @@ jobs:
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed lib/ test/
 
+      - name: Check release policy
+        shell: pwsh
+        run: ./test/ci/flutter_ci_workflow_test.ps1
+
   # ─── Job 5: Publish Release ───────────────────────────────────────
   release:
     name: Publish Release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [build-android, build-windows, lint]
-    if: github.event_name == 'push' && github.ref_name == 'master'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
@@ -143,17 +153,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate version tag
-        id: tag
-        run: |
-          DATE_TAG="v$(date -u '+%Y%m%d.%H%M%S')"
-          echo "tag=${DATE_TAG}" >> $GITHUB_OUTPUT
-          echo "Release: ${DATE_TAG}"
-
       - name: Download Android APK
         uses: actions/download-artifact@v4
         with:
-          name: honeybox-apk-debug
+          name: honeybox-android-apk
           path: release-artifacts/
 
       - name: Download Windows build
@@ -165,19 +168,17 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: "HoneyBox ${{ steps.tag.outputs.tag }}"
+          tag_name: ${{ github.ref_name }}
+          name: "HoneyBox ${{ github.ref_name }}"
           body: |
-            ## HoneyBox ${{ steps.tag.outputs.tag }}
+            ## HoneyBox ${{ github.ref_name }}
 
-            🚀 Auto-built from commit ${{ github.sha }}
+            Built from commit ${{ github.sha }}
 
             ### Downloads
-            - **Android APK** — `honeybox-apk-debug`
-            - **Windows x64** — `honeybox-windows-release`
-
-            > This is an automated build — may not be fully tested.
+            - **Android release APK** - `honeybox-android-apk`
+            - **Windows x64** - `honeybox-windows-release`
           files: |
             release-artifacts/**
-          prerelease: true
+          prerelease: false
           generate_release_notes: true
