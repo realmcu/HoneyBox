@@ -83,7 +83,7 @@ class HoneyBoxApp extends StatelessWidget {
           case '/ota':
             page = const OtaPage();
             break;
-          // Watch 功能子页 —— 设备无关的占位页，不消费 args。
+          // Watch feature pages. Health consumes the connected device details.
           case '/watch-face':
             page = const WatchFacePage();
             break;
@@ -91,7 +91,10 @@ class HoneyBoxApp extends StatelessWidget {
             page = const WatchNotificationPage();
             break;
           case '/watch-health':
-            page = const WatchHealthPage();
+            page = WatchHealthPage(
+              deviceName: args?['deviceName'] ?? 'Watch',
+              deviceId: args?['deviceId'] ?? '',
+            );
             break;
           case '/watch-ota':
             page = const WatchOtaPage();
