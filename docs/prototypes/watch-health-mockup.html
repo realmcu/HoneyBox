@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watch 运动 / 健康原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --primary: #0072bc;
+      --primary-soft: #d3e3fd;
+      --watch: #2e7d6b;
+      --watch-soft: #dceee9;
+      --success: #2f8f55;
+      --error: #d64545;
+      --warning: #d78316;
+      --surface: #fff;
+      --background: #f5f5f7;
+      --outline: #dadce0;
+      --text: #1f1f1f;
+      --muted: #5f6368;
+      --faint: #92979d;
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #e9edf0; color: var(--text); }
+    button { font: inherit; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(340px, 430px) minmax(270px, 330px);
+      gap: 28px;
+      align-items: start;
+      justify-content: center;
+      padding: 28px 18px;
+    }
+
+    .phone {
+      width: 100%;
+      height: min(860px, calc(100vh - 56px));
+      min-height: 680px;
+      overflow: hidden;
+      background: var(--background);
+      border: 1px solid #c9cfd3;
+      border-radius: 22px;
+      box-shadow: 0 18px 46px rgba(31, 31, 31, .15);
+    }
+
+    .status-bar {
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 16px 0;
+      background: var(--primary);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .app-bar {
+      height: 56px;
+      display: grid;
+      grid-template-columns: 48px 1fr 48px;
+      align-items: center;
+      padding: 0 8px;
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .app-title { text-align: center; font-size: 18px; font-weight: 600; }
+    .icon-button {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font-size: 24px;
+    }
+    .icon-button:hover { background: rgba(255, 255, 255, .12); }
+    .icon-button:focus-visible, button:focus-visible { outline: 3px solid rgba(0, 114, 188, .25); outline-offset: 2px; }
+
+    .scroll-area { height: calc(100% - 80px); overflow-y: auto; scrollbar-width: thin; }
+    .content { padding: 14px 16px 28px; }
+
+    .sync-strip {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid rgba(218, 220, 224, .75);
+    }
+
+    .device-mark {
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--watch-soft);
+      color: var(--watch);
+      font-size: 21px;
+    }
+    .sync-copy { min-width: 0; flex: 1; }
+    .device-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+    .sync-meta { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .sync-meta.error { color: var(--error); }
+
+    .sync-button {
+      height: 36px;
+      min-width: 82px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 12px;
+      border: 1px solid var(--primary);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--primary);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .sync-button:hover:not(:disabled) { background: #eef6fc; }
+    .sync-button:disabled { border-color: var(--outline); color: var(--faint); cursor: default; }
+    .spinner { width: 14px; height: 14px; border: 2px solid #a7d0e9; border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .section { margin-top: 20px; }
+    .section-heading { display: flex; align-items: end; justify-content: space-between; margin-bottom: 10px; }
+    .section-title { margin: 0; font-size: 15px; font-weight: 650; }
+    .section-note { color: var(--faint); font-size: 11px; }
+
+    .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .metric {
+      min-width: 0;
+      min-height: 104px;
+      padding: 13px;
+      border: 1px solid rgba(218, 220, 224, .72);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .metric-head { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .metric-icon { color: var(--watch); font-size: 17px; }
+    .metric-value { margin-top: 12px; font-size: 24px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .metric-unit { margin-left: 3px; color: var(--muted); font-size: 11px; font-weight: 500; }
+    .metric-detail { margin-top: 8px; color: var(--faint); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .metric.unsupported { background: #f0f1f2; }
+    .metric.unsupported .metric-icon, .metric.unsupported .metric-value { color: var(--faint); }
+
+    .trend-panel, .sleep-panel, .records-panel {
+      border: 1px solid rgba(218, 220, 224, .72);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    .trend-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 12px 6px; }
+    .trend-label { color: var(--muted); font-size: 11px; }
+    .segmented { display: grid; grid-template-columns: repeat(3, 42px); padding: 2px; border: 1px solid var(--outline); border-radius: 7px; background: #f2f3f4; }
+    .segment { height: 27px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
+    .segment.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); font-weight: 650; }
+
+    .chart-legend { display: flex; align-items: center; gap: 14px; padding: 3px 12px 0; color: var(--muted); font-size: 10px; }
+    .heart-average { margin-left: auto; color: var(--error); font-variant-numeric: tabular-nums; }
+    .legend-dot { display: inline-block; width: 7px; height: 7px; margin-right: 4px; border-radius: 2px; background: var(--watch); }
+    .legend-dot.heart { border-radius: 50%; background: var(--error); }
+    .chart { position: relative; height: 168px; margin: 5px 12px 12px; overflow: hidden; }
+    .grid-lines { position: absolute; inset: 8px 0 28px; display: grid; grid-template-rows: repeat(3, 1fr); }
+    .grid-lines span { border-top: 1px dashed #e4e6e8; }
+    .bars { position: absolute; inset: 10px 4px 27px; display: flex; align-items: end; justify-content: space-around; gap: 5px; }
+    .bar-column { height: 100%; min-width: 0; flex: 1; display: flex; align-items: end; justify-content: center; }
+    .bar { width: min(20px, 68%); min-height: 3px; border-radius: 3px 3px 0 0; background: #8bc5b6; transition: height 220ms ease; }
+    .heart-line { position: absolute; inset: 10px 18px 27px 4px; width: calc(100% - 22px); height: calc(100% - 37px); overflow: visible; pointer-events: none; }
+    .heart-path { fill: none; stroke: var(--error); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; opacity: .88; }
+    .heart-point { position: absolute; width: 6px; height: 6px; margin: -2px 0 0 -2px; border: 2px solid var(--error); border-radius: 50%; background: #fff; }
+    .heart-axis { position: absolute; top: 8px; right: 0; bottom: 28px; display: flex; flex-direction: column; justify-content: space-between; color: #b15b5b; font-size: 8px; font-variant-numeric: tabular-nums; }
+    .x-labels { position: absolute; left: 4px; right: 4px; bottom: 4px; display: flex; justify-content: space-around; color: var(--faint); font-size: 9px; }
+    .x-labels span { min-width: 0; flex: 1; overflow: hidden; text-align: center; white-space: nowrap; }
+
+    .chart-empty { position: absolute; inset: 0; z-index: 3; display: none; place-items: center; background: #fff; color: var(--muted); text-align: center; font-size: 12px; line-height: 1.6; }
+    .chart.empty .chart-empty { display: grid; }
+
+    .sleep-panel { padding: 14px; }
+    .sleep-summary { display: flex; align-items: baseline; justify-content: space-between; }
+    .sleep-duration { font-size: 23px; font-weight: 700; }
+    .sleep-duration small { color: var(--muted); font-size: 11px; font-weight: 500; }
+    .sleep-range { color: var(--muted); font-size: 10px; }
+    .sleep-track { display: flex; height: 11px; margin: 14px 0 10px; overflow: hidden; border-radius: 4px; background: #e7e9eb; }
+    .sleep-track span:nth-child(1) { background: #236a61; }
+    .sleep-track span:nth-child(2) { background: #5da79a; }
+    .sleep-track span:nth-child(3) { background: #94c8bf; }
+    .sleep-track span:nth-child(4) { background: #d6a24c; }
+    .sleep-legend { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px 12px; color: var(--muted); font-size: 10px; }
+    .sleep-legend strong { float: right; color: var(--text); font-weight: 600; }
+
+    .record { min-height: 54px; display: grid; grid-template-columns: 32px 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; border-bottom: 1px solid #eceeef; }
+    .record:last-child { border-bottom: 0; }
+    .record-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; background: var(--watch-soft); color: var(--watch); font-size: 15px; }
+    .record-title { font-size: 12px; font-weight: 600; }
+    .record-subtitle { margin-top: 3px; color: var(--faint); font-size: 10px; }
+    .record-value { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+    .toast { position: fixed; left: 50%; bottom: 24px; z-index: 10; max-width: calc(100vw - 32px); padding: 10px 15px; border-radius: 7px; background: #303134; color: #fff; opacity: 0; transform: translate(-50%, 14px); transition: .18s; pointer-events: none; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    .prototype-panel { padding: 20px; border: 1px solid #d2d6da; border-radius: 8px; background: #fff; box-shadow: 0 8px 28px rgba(31,31,31,.08); }
+    .prototype-panel h1 { margin: 0; font-size: 19px; }
+    .prototype-panel > p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+    .prototype-panel h2 { margin: 20px 0 9px; font-size: 12px; }
+    .state-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+    .state-control { min-height: 38px; border: 1px solid var(--outline); border-radius: 7px; background: #fff; color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 600; }
+    .state-control:hover { background: var(--background); }
+    .state-control.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+    .state-description { min-height: 54px; margin-top: 12px; padding: 10px 11px; border-left: 3px solid var(--watch); background: #f3f8f7; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .scope-list { margin: 9px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 11px; line-height: 1.9; }
+    .scope-list li::before { content: "✓"; margin-right: 7px; color: var(--success); font-weight: 700; }
+
+    @media (max-width: 780px) {
+      body { background: var(--background); }
+      .workspace { display: block; padding: 0; }
+      .phone { height: auto; min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+      .scroll-area { height: auto; overflow: visible; }
+      .prototype-panel { margin: 18px 12px; }
+    }
+
+    @media (max-width: 370px) {
+      .content { padding-left: 12px; padding-right: 12px; }
+      .sync-strip { gap: 8px; }
+      .sync-button { min-width: 72px; padding: 0 8px; }
+      .metric { padding: 11px; }
+      .metric-value { font-size: 21px; }
+      .segmented { grid-template-columns: repeat(3, 38px); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="workspace">
+    <section class="phone" aria-label="Watch 运动健康页面预览">
+      <div class="status-bar"><span>10:26</span><span>5G&nbsp;&nbsp;88%</span></div>
+      <header class="app-bar">
+        <button class="icon-button" type="button" title="返回" aria-label="返回">‹</button>
+        <div class="app-title">运动 / 健康</div>
+        <button id="topSync" class="icon-button" type="button" title="同步健康数据" aria-label="同步健康数据">↻</button>
+      </header>
+
+      <div class="scroll-area">
+        <div class="content">
+          <section class="sync-strip" aria-label="数据同步状态">
+            <div class="device-mark" aria-hidden="true">⌚</div>
+            <div class="sync-copy">
+              <div class="device-name">HoneyBox Watch <span id="battery">· 78%</span></div>
+              <div id="syncMeta" class="sync-meta">最近同步：今天 10:24</div>
+            </div>
+            <button id="syncButton" class="sync-button" type="button"><span aria-hidden="true">↻</span><span>同步</span></button>
+          </section>
+
+          <section class="section">
+            <div class="section-heading"><h2 class="section-title">今日概览</h2><span class="section-note">7月27日</span></div>
+            <div id="metrics" class="metrics">
+              <article class="metric" data-metric="steps"><div class="metric-head"><span class="metric-icon">●</span>步数</div><div class="metric-value"><span>8,426</span><small class="metric-unit">步</small></div><div class="metric-detail">目标 10,000 · 已完成 84%</div></article>
+              <article class="metric" data-metric="heart"><div class="metric-head"><span class="metric-icon">♥</span>心率</div><div class="metric-value"><span>72</span><small class="metric-unit">次/分</small></div><div class="metric-detail">今日范围 58–126</div></article>
+              <article class="metric" data-metric="sleep"><div class="metric-head"><span class="metric-icon">☾</span>睡眠</div><div class="metric-value"><span>7:18</span><small class="metric-unit">小时</small></div><div class="metric-detail">比近7日平均多 16 分钟</div></article>
+              <article class="metric" data-metric="active"><div class="metric-head"><span class="metric-icon">◆</span>活动时长</div><div class="metric-value"><span>48</span><small class="metric-unit">分钟</small></div><div class="metric-detail">中高强度活动 23 分钟</div></article>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-heading"><h2 class="section-title">趋势分析</h2><span id="trendSummary" class="section-note">今日累计 8,426 步</span></div>
+            <div class="trend-panel">
+              <div class="trend-toolbar"><span id="trendLabel" class="trend-label">今天 · 分时趋势</span><div class="segmented" role="group" aria-label="趋势周期"><button class="segment active" data-period="day" type="button">日</button><button class="segment" data-period="week" type="button">周</button><button class="segment" data-period="month" type="button">月</button></div></div>
+              <div class="chart-legend"><span><i class="legend-dot"></i>步数</span><span><i class="legend-dot heart"></i>心率趋势</span><span id="heartAverage" class="heart-average">平均 72 次/分</span></div>
+              <div id="chart" class="chart">
+                <div class="grid-lines"><span></span><span></span><span></span></div>
+                <div id="bars" class="bars"></div>
+                <svg id="heartLine" class="heart-line" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+                <div class="heart-axis" aria-hidden="true"><span>120</span><span>90</span><span>60</span></div>
+                <div id="xLabels" class="x-labels"></div>
+                <div id="chartEmpty" class="chart-empty">尚无趋势数据<br>同步手表后即可查看</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-heading"><h2 class="section-title">睡眠详情</h2><span class="section-note">昨晚</span></div>
+            <div id="sleepPanel" class="sleep-panel">
+              <div class="sleep-summary"><div class="sleep-duration">7 <small>小时</small> 18 <small>分钟</small></div><div class="sleep-range">23:18 – 06:52</div></div>
+              <div class="sleep-track" aria-label="睡眠阶段分布"><span style="width:22%"></span><span style="width:48%"></span><span style="width:23%"></span><span style="width:7%"></span></div>
+              <div class="sleep-legend"><span>深睡 <strong>1时36分</strong></span><span>浅睡 <strong>3时31分</strong></span><span>快速眼动 <strong>1时41分</strong></span><span>清醒 <strong>30分</strong></span></div>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-heading"><h2 class="section-title">最近记录</h2><span class="section-note">今天</span></div>
+            <div id="recordsPanel" class="records-panel">
+              <div class="record"><div class="record-icon">♥</div><div><div class="record-title">心率</div><div class="record-subtitle">10:18 · 静息状态</div></div><div class="record-value">72 次/分</div></div>
+              <div class="record"><div class="record-icon">◆</div><div><div class="record-title">活跃时段</div><div class="record-subtitle">08:42–09:05 · 快走</div></div><div class="record-value">23 分钟</div></div>
+              <div class="record"><div class="record-icon">●</div><div><div class="record-title">步数里程碑</div><div class="record-subtitle">08:56</div></div><div class="record-value">5,000 步</div></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <aside class="prototype-panel">
+      <h1>Watch 运动 / 健康</h1>
+      <p>首版只同步并查看手表数据。右侧状态用于确认真实数据缺失、失败和设备能力差异时的界面表达。</p>
+      <h2>数据状态</h2>
+      <div class="state-controls" role="group" aria-label="选择页面状态">
+        <button class="state-control active" data-state="normal" type="button">正常数据</button>
+        <button class="state-control" data-state="empty" type="button">未同步</button>
+        <button class="state-control" data-state="syncing" type="button">同步中</button>
+        <button class="state-control" data-state="error" type="button">同步失败</button>
+        <button class="state-control" data-state="unsupported" type="button">部分不支持</button>
+      </div>
+      <div id="stateDescription" class="state-description">数据来自最近一次成功同步，可切换日、周、月查看步数与心率趋势。</div>
+      <h2>首版范围</h2>
+      <ul class="scope-list"><li>步数与目标进度</li><li>当前心率与今日范围</li><li>睡眠阶段与总时长</li><li>活动时长与最近记录</li></ul>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const periods = {
+      day: { label: '今天 · 分时趋势', summary: '今日累计 8,426 步', labels: ['0时','4时','8时','12时','16时','20时'], steps: [2,5,48,72,56,31], heart: [56,54,78,72,83,68] },
+      week: { label: '7月21日 – 7月27日', summary: '本周日均 7,680 步', labels: ['一','二','三','四','五','六','日'], steps: [62,79,54,88,67,93,74], heart: [68,72,66,75,70,82,72] },
+      month: { label: '2026年7月', summary: '本月日均 7,324 步', labels: ['1日','6日','11日','16日','21日','26日'], steps: [55,71,64,82,76,68], heart: [69,73,68,77,71,72] }
+    };
+
+    const stateCopy = {
+      normal: '数据来自最近一次成功同步，可切换日、周、月查看步数与心率趋势。',
+      empty: '设备已连接，但还没有健康数据。指标与图表保持空白，等待首次同步。',
+      syncing: '正在从手表读取健康数据。同步期间保留上次数据，并禁止重复触发。',
+      error: '本次同步失败。保留上次成功数据和对应时间，用户可以直接重试。',
+      unsupported: '该手表支持步数和心率，但不提供睡眠及活动时长，界面明确标记“不支持”。'
+    };
+
+    const metricSamples = {
+      steps: ['8,426', '步', '目标 10,000 · 已完成 84%'],
+      heart: ['72', '次/分', '今日范围 58–126'],
+      sleep: ['7:18', '小时', '比近7日平均多 16 分钟'],
+      active: ['48', '分钟', '中高强度活动 23 分钟']
+    };
+
+    let currentState = 'normal';
+    let currentPeriod = 'day';
+    let syncTimer;
+    let toastTimer;
+
+    const syncButton = document.getElementById('syncButton');
+    const topSync = document.getElementById('topSync');
+    const syncMeta = document.getElementById('syncMeta');
+    const battery = document.getElementById('battery');
+    const chart = document.getElementById('chart');
+    const chartEmpty = document.getElementById('chartEmpty');
+    const sleepPanel = document.getElementById('sleepPanel');
+    const recordsPanel = document.getElementById('recordsPanel');
+    const toast = document.getElementById('toast');
+
+    function showToast(message) {
+      clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.add('show');
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function setMetric(name, value, unit, detail, unsupported = false) {
+      const metric = document.querySelector(`[data-metric="${name}"]`);
+      metric.classList.toggle('unsupported', unsupported);
+      metric.querySelector('.metric-value span').textContent = value;
+      metric.querySelector('.metric-unit').textContent = unit;
+      metric.querySelector('.metric-detail').textContent = detail;
+    }
+
+    function restoreMetrics() {
+      Object.entries(metricSamples).forEach(([name, values]) => setMetric(name, ...values));
+    }
+
+    function renderTrend(period) {
+      currentPeriod = period;
+      const data = periods[period];
+      document.getElementById('trendLabel').textContent = data.label;
+      document.getElementById('trendSummary').textContent = data.summary;
+      document.querySelectorAll('.segment').forEach(button => button.classList.toggle('active', button.dataset.period === period));
+
+      const bars = document.getElementById('bars');
+      const labels = document.getElementById('xLabels');
+      const line = document.getElementById('heartLine');
+      bars.replaceChildren();
+      labels.replaceChildren();
+      line.replaceChildren();
+
+      data.steps.forEach(height => {
+        const column = document.createElement('div');
+        column.className = 'bar-column';
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        bar.style.height = `${height}%`;
+        column.appendChild(bar);
+        bars.appendChild(column);
+      });
+      data.labels.forEach(text => {
+        const label = document.createElement('span');
+        label.textContent = text;
+        labels.appendChild(label);
+      });
+
+      const points = data.heart.map((value, index) => ({
+        x: index * (100 / (data.heart.length - 1)),
+        y: 100 - ((value - 50) / 80 * 100)
+      }));
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      path.setAttribute('class', 'heart-path');
+      path.setAttribute('points', points.map(point => `${point.x},${point.y}`).join(' '));
+      line.appendChild(path);
+      points.forEach(point => {
+        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('cx', point.x);
+        dot.setAttribute('cy', point.y);
+        dot.setAttribute('r', '1.5');
+        dot.setAttribute('fill', '#fff');
+        dot.setAttribute('stroke', 'var(--error)');
+        dot.setAttribute('stroke-width', '1.5');
+        dot.setAttribute('vector-effect', 'non-scaling-stroke');
+        line.appendChild(dot);
+      });
+      const average = Math.round(data.heart.reduce((sum, value) => sum + value, 0) / data.heart.length);
+      document.getElementById('heartAverage').textContent = `平均 ${average} 次/分`;
+    }
+
+    function setViewState(name, notify = true) {
+      clearTimeout(syncTimer);
+      currentState = name;
+      restoreMetrics();
+      chart.classList.remove('empty');
+      sleepPanel.style.opacity = '1';
+      recordsPanel.style.opacity = '1';
+      syncMeta.className = 'sync-meta';
+      battery.textContent = '· 78%';
+      topSync.disabled = false;
+      syncButton.disabled = false;
+      syncButton.innerHTML = '<span aria-hidden="true">↻</span><span>同步</span>';
+      chartEmpty.innerHTML = '尚无趋势数据<br>同步手表后即可查看';
+
+      if (name === 'normal') {
+        syncMeta.textContent = '最近同步：今天 10:24';
+      } else if (name === 'empty') {
+        Object.keys(metricSamples).forEach(key => setMetric(key, '--', '', '同步后显示数据'));
+        syncMeta.textContent = '尚未同步健康数据';
+        chart.classList.add('empty');
+        sleepPanel.style.opacity = '.42';
+        recordsPanel.style.opacity = '.42';
+      } else if (name === 'syncing') {
+        syncMeta.textContent = '正在同步健康数据…';
+        syncButton.disabled = true;
+        topSync.disabled = true;
+        syncButton.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>同步中</span>';
+      } else if (name === 'error') {
+        syncMeta.textContent = '同步失败 · 数据更新于今天 10:24';
+        syncMeta.classList.add('error');
+        syncButton.innerHTML = '<span aria-hidden="true">↻</span><span>重试</span>';
+      } else if (name === 'unsupported') {
+        syncMeta.textContent = '最近同步：今天 10:24 · 部分数据不支持';
+        setMetric('sleep', '不支持', '', '当前设备不提供睡眠数据', true);
+        setMetric('active', '不支持', '', '当前设备不提供活动时长', true);
+        sleepPanel.style.opacity = '.42';
+      }
+
+      document.getElementById('stateDescription').textContent = stateCopy[name];
+      document.querySelectorAll('.state-control').forEach(button => button.classList.toggle('active', button.dataset.state === name));
+      if (notify) showToast({normal:'数据已同步', empty:'已切换到未同步状态', syncing:'正在同步手表数据', error:'同步失败，请重试', unsupported:'部分指标暂不支持'}[name]);
+    }
+
+    function startSync() {
+      if (currentState === 'syncing') return;
+      setViewState('syncing');
+      syncTimer = setTimeout(() => {
+        setViewState('normal', false);
+        syncMeta.textContent = '最近同步：刚刚';
+        showToast('健康数据同步完成');
+      }, 1400);
+    }
+
+    syncButton.addEventListener('click', startSync);
+    topSync.addEventListener('click', startSync);
+    document.querySelectorAll('.segment').forEach(button => button.addEventListener('click', () => renderTrend(button.dataset.period)));
+    document.querySelectorAll('.state-control').forEach(button => button.addEventListener('click', () => setViewState(button.dataset.state)));
+    renderTrend('day');
+  </script>
+</body>
+</html>
