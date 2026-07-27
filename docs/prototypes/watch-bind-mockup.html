@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watch 手动绑定原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --primary: #0072bc;
+      --primary-soft: #d3e3fd;
+      --success: #34a853;
+      --error: #ea4335;
+      --watch: #2e7d6b;
+      --watch-dark: #256355;
+      --surface: #ffffff;
+      --background: #f5f5f7;
+      --outline: #dadce0;
+      --text: #1f1f1f;
+      --text-secondary: #5f6368;
+      --text-tertiary: #9aa0a6;
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background: #e9edf0;
+      color: var(--text);
+    }
+
+    button { font: inherit; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(320px, 390px) minmax(260px, 340px);
+      gap: 28px;
+      align-items: start;
+      justify-content: center;
+      padding: 32px 20px;
+    }
+
+    .phone {
+      width: 100%;
+      min-height: 760px;
+      overflow: hidden;
+      background: var(--background);
+      border: 1px solid #c8cdd1;
+      border-radius: 24px;
+      box-shadow: 0 18px 48px rgba(31, 31, 31, 0.16);
+    }
+
+    .status-bar {
+      height: 24px;
+      padding: 5px 16px 0;
+      background: var(--primary);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .app-bar {
+      height: 56px;
+      padding: 0 10px;
+      display: grid;
+      grid-template-columns: 68px 1fr 68px;
+      align-items: center;
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .app-title {
+      min-width: 0;
+      overflow: hidden;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .bar-button {
+      height: 40px;
+      padding: 0 6px;
+      border: 0;
+      color: #fff;
+      background: transparent;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .bar-button.menu {
+      width: 40px;
+      padding: 0;
+      font-size: 25px;
+      text-align: left;
+    }
+
+    .bar-button.disconnect {
+      color: #fff;
+      text-align: right;
+    }
+
+    .content { padding: 8px 16px 18px; }
+
+    .connection-row {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 4px 0 12px;
+    }
+
+    .device-icon {
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    .watch-glyph {
+      position: relative;
+      width: 17px;
+      height: 22px;
+      border: 2px solid currentColor;
+      border-radius: 5px;
+    }
+
+    .watch-glyph::before,
+    .watch-glyph::after {
+      content: "";
+      position: absolute;
+      left: 3px;
+      width: 7px;
+      height: 5px;
+      border: 2px solid currentColor;
+      border-left: 0;
+      border-right: 0;
+    }
+
+    .watch-glyph::before { top: -7px; }
+    .watch-glyph::after { bottom: -7px; }
+
+    .connection-copy { min-width: 0; flex: 1; }
+
+    .connection-title {
+      margin-bottom: 2px;
+      color: var(--success);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .connection-name {
+      overflow: hidden;
+      color: var(--text-tertiary);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bind-button {
+      min-width: 102px;
+      height: 36px;
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 12px;
+      border: 1px solid var(--primary);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--primary);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+    }
+
+    .bind-button:hover:not(:disabled) { background: rgba(0, 114, 188, 0.08); }
+    .bind-button:focus-visible { outline: 3px solid rgba(0, 114, 188, 0.24); outline-offset: 2px; }
+    .bind-button:disabled { cursor: default; }
+    .bind-button.success { border-color: var(--success); background: #e6f4ea; color: #237b3a; }
+    .bind-button.failure { border-color: var(--error); color: var(--error); }
+    .bind-button.unavailable { border-color: var(--outline); background: #f0f0f3; color: var(--text-tertiary); }
+
+    .spinner {
+      width: 15px;
+      height: 15px;
+      border: 2px solid rgba(0, 114, 188, 0.25);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 700ms linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .summary {
+      min-height: 132px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, var(--watch), var(--watch-dark));
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(46, 125, 107, 0.25);
+    }
+
+    .summary-icon {
+      width: 66px;
+      height: 66px;
+      flex: 0 0 66px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.16);
+      color: #fff;
+      transform: scale(1.25);
+    }
+
+    .summary-content { min-width: 0; }
+    .summary-title { margin-bottom: 9px; font-size: 16px; font-weight: 600; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+    .chip {
+      padding: 4px 8px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.18);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .action-card {
+      aspect-ratio: 1.25;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 10px;
+      padding: 16px;
+      border: 1px solid rgba(218, 220, 224, 0.55);
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 2px 7px rgba(31, 31, 31, 0.04);
+    }
+
+    .action-icon {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: var(--primary-soft);
+      color: var(--primary);
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .action-title { font-size: 14px; font-weight: 600; }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 28px;
+      z-index: 10;
+      max-width: calc(100vw - 32px);
+      padding: 11px 16px;
+      border-radius: 8px;
+      background: #303134;
+      color: #fff;
+      box-shadow: 0 5px 18px rgba(0, 0, 0, 0.25);
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 16px);
+      transition: opacity 180ms ease, transform 180ms ease;
+      font-size: 13px;
+    }
+
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    .prototype-panel {
+      padding: 20px;
+      border: 1px solid #d2d6da;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 8px 28px rgba(31, 31, 31, 0.08);
+    }
+
+    .prototype-panel h1 { margin: 0 0 8px; font-size: 20px; letter-spacing: 0; }
+    .prototype-panel p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+    .prototype-panel h2 { margin: 22px 0 10px; font-size: 13px; }
+
+    .state-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .state-control {
+      min-height: 40px;
+      border: 1px solid var(--outline);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .state-control:hover { background: var(--background); }
+    .state-control.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+
+    .protocol-box {
+      margin-top: 18px;
+      padding: 12px;
+      border-left: 3px solid var(--watch);
+      background: #f4f8f7;
+      color: var(--text-secondary);
+      font-family: Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 760px) {
+      .workspace { grid-template-columns: minmax(300px, 390px); padding: 16px 12px 28px; }
+      .phone { min-height: 720px; border-radius: 18px; }
+      .prototype-panel { order: -1; }
+    }
+
+    @media (max-width: 370px) {
+      .connection-row { gap: 8px; }
+      .bind-button { min-width: 92px; padding: 0 8px; font-size: 12px; }
+      .summary { gap: 12px; padding: 14px; }
+      .summary-icon { width: 56px; height: 56px; flex-basis: 56px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="workspace">
+    <section class="phone" aria-label="Watch 页面预览">
+      <div class="status-bar"><span>10:26</span><span>5G&nbsp;&nbsp;88%</span></div>
+      <header class="app-bar">
+        <button class="bar-button menu" type="button" aria-label="打开菜单">&#9776;</button>
+        <div class="app-title">HoneyBox Watch</div>
+        <button class="bar-button disconnect" type="button">断开</button>
+      </header>
+
+      <div class="content">
+        <section class="connection-row">
+          <div class="device-icon" aria-hidden="true"><span class="watch-glyph"></span></div>
+          <div class="connection-copy">
+            <div class="connection-title">已连接</div>
+            <div class="connection-name">HoneyBox Watch</div>
+          </div>
+          <button id="bindButton" class="bind-button" type="button">
+            <span id="bindIcon" aria-hidden="true">&#128279;</span>
+            <span id="bindLabel">绑定设备</span>
+          </button>
+        </section>
+
+        <section class="summary">
+          <div class="summary-icon" aria-hidden="true"><span class="watch-glyph"></span></div>
+          <div class="summary-content">
+            <div class="summary-title">当前表盘 · —</div>
+            <div class="chips">
+              <span class="chip">电量 —</span>
+              <span class="chip">固件 —</span>
+              <span class="chip">BLE 已连接</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="actions" aria-label="Watch 功能">
+          <div class="action-card"><div class="action-icon">◉</div><div class="action-title">表盘推送</div></div>
+          <div class="action-card"><div class="action-icon">!</div><div class="action-title">通知转发</div></div>
+          <div class="action-card"><div class="action-icon">♥</div><div class="action-title">运动 / 健康</div></div>
+          <div class="action-card"><div class="action-icon">↑</div><div class="action-title">固件 OTA 升级</div></div>
+        </section>
+      </div>
+    </section>
+
+    <aside class="prototype-panel">
+      <h1>Watch 手动绑定</h1>
+      <p>绑定入口替换顶部连接状态栏中的“WiFi 配网”。点击页面里的“绑定设备”会模拟发送随机 32 字节 User ID，并在 1.5 秒后返回成功。</p>
+
+      <h2>状态预览</h2>
+      <div class="state-controls" role="group" aria-label="选择绑定状态">
+        <button class="state-control active" data-state="idle" type="button">待绑定</button>
+        <button class="state-control" data-state="binding" type="button">绑定中</button>
+        <button class="state-control" data-state="success" type="button">绑定成功</button>
+        <button class="state-control" data-state="failure" type="button">绑定失败</button>
+        <button class="state-control" data-state="unavailable" type="button">通道不可用</button>
+      </div>
+
+      <div class="protocol-box">
+        Bind Request<br>
+        03 00 01 00 20 &lt;32-byte user_id&gt;<br><br>
+        Success Response<br>
+        03 00 02 00 01 00
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const states = {
+      idle: { label: '绑定设备', icon: '&#128279;', disabled: false, className: '', toast: '' },
+      binding: { label: '绑定中...', icon: '<span class="spinner"></span>', disabled: true, className: '', toast: '正在发送绑定命令' },
+      success: { label: '已绑定', icon: '&#10003;', disabled: true, className: 'success', toast: '设备绑定成功' },
+      failure: { label: '重新绑定', icon: '&#8635;', disabled: false, className: 'failure', toast: '绑定失败，请重试' },
+      unavailable: { label: '无法绑定', icon: '&#8856;', disabled: true, className: 'unavailable', toast: 'L2 命令通道暂不可用' }
+    };
+
+    const bindButton = document.getElementById('bindButton');
+    const bindIcon = document.getElementById('bindIcon');
+    const bindLabel = document.getElementById('bindLabel');
+    const toast = document.getElementById('toast');
+    const controls = [...document.querySelectorAll('.state-control')];
+    let currentState = 'idle';
+    let bindTimer;
+    let toastTimer;
+
+    function showToast(message) {
+      clearTimeout(toastTimer);
+      if (!message) {
+        toast.classList.remove('show');
+        return;
+      }
+      toast.textContent = message;
+      toast.classList.add('show');
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function setState(name, notify = true) {
+      clearTimeout(bindTimer);
+      const state = states[name];
+      currentState = name;
+      bindButton.className = `bind-button ${state.className}`.trim();
+      bindButton.disabled = state.disabled;
+      bindIcon.innerHTML = state.icon;
+      bindLabel.textContent = state.label;
+      controls.forEach(control => control.classList.toggle('active', control.dataset.state === name));
+      if (notify) showToast(state.toast);
+    }
+
+    bindButton.addEventListener('click', () => {
+      if (currentState !== 'idle' && currentState !== 'failure') return;
+      setState('binding');
+      bindTimer = setTimeout(() => setState('success'), 1500);
+    });
+
+    controls.forEach(control => control.addEventListener('click', () => setState(control.dataset.state)));
+  </script>
+</body>
+</html>
