@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
+import '../../providers/watch_bind_provider.dart';
 import '../../theme/app_theme.dart';
 import '../shared/app_drawer.dart';
 import '../device/widgets/action_card.dart';
@@ -125,6 +126,14 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final bindState = ref.watch(watchBindProvider);
+
+    ref.listen<WatchBindState>(watchBindProvider, (previous, next) {
+      if (next.message == null || next.message == previous?.message) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(next.message!)));
+    });
 
     return Scaffold(
       drawer: const AppDrawer(),
@@ -179,12 +188,12 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
                       ),
                     ),
                     const SizedBox(width: 12),
-                    OutlinedButton.icon(
-                      onPressed: () => _open('/wifi'),
-                      icon: const Icon(Icons.wifi_tethering, size: 18),
-                      label: const Text('WiFi 配网'),
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
+                    SizedBox(
+                      width: 112,
+                      child: _WatchBindButton(
+                        state: bindState,
+                        onPressed: () =>
+                            ref.read(watchBindProvider.notifier).bind(),
                       ),
                     ),
                   ],
@@ -212,6 +221,66 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _WatchBindButton extends StatelessWidget {
+  final WatchBindState state;
+  final VoidCallback onPressed;
+
+  const _WatchBindButton({required this.state, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isBinding = state.phase == WatchBindPhase.binding;
+    final isSuccess = state.phase == WatchBindPhase.success;
+    final isFailure = state.phase == WatchBindPhase.failure;
+    final isUnavailable = state.phase == WatchBindPhase.unavailable;
+
+    final label = switch (state.phase) {
+      WatchBindPhase.idle => '绑定设备',
+      WatchBindPhase.binding => '绑定中...',
+      WatchBindPhase.success => '已绑定',
+      WatchBindPhase.failure => '重新绑定',
+      WatchBindPhase.unavailable => '无法绑定',
+    };
+    final foregroundColor = isSuccess
+        ? cs.secondary
+        : isFailure
+            ? cs.error
+            : null;
+
+    return OutlinedButton.icon(
+      onPressed: isBinding || isSuccess || isUnavailable ? null : onPressed,
+      icon: isBinding
+          ? SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cs.primary,
+              ),
+            )
+          : Icon(
+              isSuccess
+                  ? Icons.check
+                  : isFailure
+                      ? Icons.refresh
+                      : isUnavailable
+                          ? Icons.block
+                          : Icons.link,
+              size: 18,
+            ),
+      label: Text(label, maxLines: 1),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: foregroundColor,
+        side:
+            foregroundColor == null ? null : BorderSide(color: foregroundColor),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        visualDensity: VisualDensity.compact,
       ),
     );
   }
