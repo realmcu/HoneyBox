@@ -88,7 +88,7 @@ class NotificationListener : NotificationListenerService() {
             val flat =
                 android.provider.Settings.Secure.getString(
                     androidAppContext?.contentResolver,
-                    android.provider.Settings.Secure.ENABLED_NOTIFICATION_LISTENERS
+                    "enabled_notification_listeners"
                 ) ?: ""
             return flat.contains(cn.flattenToString())
         }
