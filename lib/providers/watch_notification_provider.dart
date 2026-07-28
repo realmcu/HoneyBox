@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 enum NotificationGroup { essential, social, work, other, extra }
+
 enum NotificationPrivacy { appOnly, titleAndContact, fullContent }
 
 class NotificationSource {
@@ -17,14 +18,22 @@ class NotificationSource {
   final bool enabled;
 
   const NotificationSource({
-    required this.id, required this.name, required this.icon,
-    required this.color, required this.subtitle, required this.group,
+    required this.id,
+    required this.name,
+    required this.icon,
+    required this.color,
+    required this.subtitle,
+    required this.group,
     this.enabled = true,
   });
 
   NotificationSource copyWith({bool? enabled}) => NotificationSource(
-        id: id, name: name, icon: icon, color: color,
-        subtitle: subtitle, group: group,
+        id: id,
+        name: name,
+        icon: icon,
+        color: color,
+        subtitle: subtitle,
+        group: group,
         enabled: enabled ?? this.enabled,
       );
 }
@@ -36,8 +45,10 @@ class CapturedNotification {
   final DateTime timestamp;
 
   const CapturedNotification({
-    required this.appName, required this.title,
-    required this.message, required this.timestamp,
+    required this.appName,
+    required this.title,
+    required this.message,
+    required this.timestamp,
   });
 }
 
@@ -66,10 +77,12 @@ class WatchNotificationState {
 
   WatchNotificationState copyWith({
     List<NotificationSource>? sources,
-    bool? masterEnabled, bool? permissionGranted,
+    bool? masterEnabled,
+    bool? permissionGranted,
     NotificationPrivacy? privacy,
     bool? quietEnabled,
-    TimeOfDay? quietStart, TimeOfDay? quietEnd,
+    TimeOfDay? quietStart,
+    TimeOfDay? quietEnd,
     CapturedNotification? lastNotification,
     bool? isInQuietPeriod,
   }) =>
@@ -88,91 +101,228 @@ class WatchNotificationState {
 
 const List<NotificationSource> kDefaultSources = [
   // 电话与短信
-  NotificationSource(id: 'call', group: NotificationGroup.essential,
-    name: '\u6765\u7535', icon: '\u{1F4DE}', color: 0xFF23845B,
-    subtitle: '\u663E\u793A\u8054\u7CFB\u4EBA\u6216\u7535\u8BDD\u53F7\u7801', enabled: true),
-  NotificationSource(id: 'missed', group: NotificationGroup.essential,
-    name: '\u672A\u63A5\u6765\u7535', icon: '\u{1F4F0}', color: 0xFFD45445,
-    subtitle: '\u901A\u8BDD\u7ED3\u675F\u540E\u63D0\u9192', enabled: true),
-  NotificationSource(id: 'sms', group: NotificationGroup.essential,
-    name: '\u77ED\u4FE1', icon: '\u{1F4AC}', color: 0xFF2D8B57,
-    subtitle: '\u8054\u7CFB\u4EBA\u3001\u6807\u9898\u4E0E\u5185\u5BB9', enabled: true),
+  NotificationSource(
+      id: 'call',
+      group: NotificationGroup.essential,
+      name: '\u6765\u7535',
+      icon: '\u{1F4DE}',
+      color: 0xFF23845B,
+      subtitle: '\u663E\u793A\u8054\u7CFB\u4EBA\u6216\u7535\u8BDD\u53F7\u7801',
+      enabled: true),
+  NotificationSource(
+      id: 'missed',
+      group: NotificationGroup.essential,
+      name: '\u672A\u63A5\u6765\u7535',
+      icon: '\u{1F4F0}',
+      color: 0xFFD45445,
+      subtitle: '\u901A\u8BDD\u7ED3\u675F\u540E\u63D0\u9192',
+      enabled: true),
+  NotificationSource(
+      id: 'sms',
+      group: NotificationGroup.essential,
+      name: '\u77ED\u4FE1',
+      icon: '\u{1F4AC}',
+      color: 0xFF2D8B57,
+      subtitle: '\u8054\u7CFB\u4EBA\u3001\u6807\u9898\u4E0E\u5185\u5BB9',
+      enabled: true),
   // 社交通讯
-  NotificationSource(id: 'wechat', group: NotificationGroup.social,
-    name: '\u5FAE\u4FE1', icon: '\u5FAE', color: 0xFF27A844,
-    subtitle: '\u804A\u5929\u4E0E\u7FA4\u6D88\u606F', enabled: true),
-  NotificationSource(id: 'qq', group: NotificationGroup.social,
-    name: 'QQ', icon: 'Q', color: 0xFF178BD1,
-    subtitle: '\u597D\u53CB\u4E0E\u7FA4\u6D88\u606F', enabled: false),
-  NotificationSource(id: 'whatsapp', group: NotificationGroup.social,
-    name: 'WhatsApp', icon: 'W', color: 0xFF25D366,
-    subtitle: '\u804A\u5929\u4E0E\u7FA4\u7EC4\u6D88\u606F', enabled: false),
-  NotificationSource(id: 'telegram', group: NotificationGroup.social,
-    name: 'Telegram', icon: 'T', color: 0xFF29A0D9,
-    subtitle: '\u9891\u9053\u4E0E\u79C1\u804A\u6D88\u606F', enabled: false),
-  NotificationSource(id: 'weibo', group: NotificationGroup.social,
-    name: '\u5FAE\u535A', icon: '\u535A', color: 0xFFE6162D,
-    subtitle: '\u5173\u6CE8\u52A8\u6001\u4E0E\u70ED\u641C\u6D88\u606F', enabled: false),
-  NotificationSource(id: 'xiaohongshu', group: NotificationGroup.social,
-    name: '\u5C0F\u7EA2\u4E66', icon: '\u7EA2', color: 0xFFFE2C55,
-    subtitle: '\u7B14\u8BB0\u3001\u8BC4\u8BBA\u4E0E\u70B9\u8D5E\u63D0\u9192', enabled: false),
+  NotificationSource(
+      id: 'wechat',
+      group: NotificationGroup.social,
+      name: '\u5FAE\u4FE1',
+      icon: '\u5FAE',
+      color: 0xFF27A844,
+      subtitle: '\u804A\u5929\u4E0E\u7FA4\u6D88\u606F',
+      enabled: true),
+  NotificationSource(
+      id: 'qq',
+      group: NotificationGroup.social,
+      name: 'QQ',
+      icon: 'Q',
+      color: 0xFF178BD1,
+      subtitle: '\u597D\u53CB\u4E0E\u7FA4\u6D88\u606F',
+      enabled: false),
+  NotificationSource(
+      id: 'whatsapp',
+      group: NotificationGroup.social,
+      name: 'WhatsApp',
+      icon: 'W',
+      color: 0xFF25D366,
+      subtitle: '\u804A\u5929\u4E0E\u7FA4\u7EC4\u6D88\u606F',
+      enabled: false),
+  NotificationSource(
+      id: 'telegram',
+      group: NotificationGroup.social,
+      name: 'Telegram',
+      icon: 'T',
+      color: 0xFF29A0D9,
+      subtitle: '\u9891\u9053\u4E0E\u79C1\u804A\u6D88\u606F',
+      enabled: false),
+  NotificationSource(
+      id: 'weibo',
+      group: NotificationGroup.social,
+      name: '\u5FAE\u535A',
+      icon: '\u535A',
+      color: 0xFFE6162D,
+      subtitle: '\u5173\u6CE8\u52A8\u6001\u4E0E\u70ED\u641C\u6D88\u606F',
+      enabled: false),
+  NotificationSource(
+      id: 'xiaohongshu',
+      group: NotificationGroup.social,
+      name: '\u5C0F\u7EA2\u4E66',
+      icon: '\u7EA2',
+      color: 0xFFFE2C55,
+      subtitle: '\u7B14\u8BB0\u3001\u8BC4\u8BBA\u4E0E\u70B9\u8D5E\u63D0\u9192',
+      enabled: false),
   // 工作协作
-  NotificationSource(id: 'feishu', group: NotificationGroup.work,
-    name: '\u98DE\u4E66', icon: '\u98DE', color: 0xFF3370FF,
-    subtitle: '\u6D88\u606F\u3001\u4F1A\u8BAE\u4E0E\u65E5\u7A0B', enabled: true),
-  NotificationSource(id: 'wecom', group: NotificationGroup.work,
-    name: '\u4F01\u4E1A\u5FAE\u4FE1', icon: '\u4F01', color: 0xFF2F78DD,
-    subtitle: '\u5DE5\u4F5C\u6D88\u606F\u4E0E\u4F1A\u8BAE', enabled: false),
-  NotificationSource(id: 'dingtalk', group: NotificationGroup.work,
-    name: '\u9489\u9489', icon: '\u9489', color: 0xFF1687F8,
-    subtitle: '\u5DE5\u4F5C\u901A\u77E5\u4E0E\u5BA1\u6279', enabled: false),
-  NotificationSource(id: 'meeting', group: NotificationGroup.work,
-    name: '\u817E\u8BAF\u4F1A\u8BAE', icon: '\u4F1A', color: 0xFF2B6FF7,
-    subtitle: '\u4F1A\u8BAE\u5F00\u59CB\u4E0E\u9080\u8BF7', enabled: true),
+  NotificationSource(
+      id: 'feishu',
+      group: NotificationGroup.work,
+      name: '\u98DE\u4E66',
+      icon: '\u98DE',
+      color: 0xFF3370FF,
+      subtitle: '\u6D88\u606F\u3001\u4F1A\u8BAE\u4E0E\u65E5\u7A0B',
+      enabled: true),
+  NotificationSource(
+      id: 'wecom',
+      group: NotificationGroup.work,
+      name: '\u4F01\u4E1A\u5FAE\u4FE1',
+      icon: '\u4F01',
+      color: 0xFF2F78DD,
+      subtitle: '\u5DE5\u4F5C\u6D88\u606F\u4E0E\u4F1A\u8BAE',
+      enabled: false),
+  NotificationSource(
+      id: 'dingtalk',
+      group: NotificationGroup.work,
+      name: '\u9489\u9489',
+      icon: '\u9489',
+      color: 0xFF1687F8,
+      subtitle: '\u5DE5\u4F5C\u901A\u77E5\u4E0E\u5BA1\u6279',
+      enabled: false),
+  NotificationSource(
+      id: 'meeting',
+      group: NotificationGroup.work,
+      name: '\u817E\u8BAF\u4F1A\u8BAE',
+      icon: '\u4F1A',
+      color: 0xFF2B6FF7,
+      subtitle: '\u4F1A\u8BAE\u5F00\u59CB\u4E0E\u9080\u8BF7',
+      enabled: true),
   // 其他常用
-  NotificationSource(id: 'mail', group: NotificationGroup.other,
-    name: '\u90AE\u4EF6', icon: '\u90AE', color: 0xFFD04B3E,
-    subtitle: '\u7CFB\u7EDF\u9ED8\u8BA4\u90AE\u4EF6\u5E94\u7528', enabled: false),
-  NotificationSource(id: 'calendar', group: NotificationGroup.other,
-    name: '\u65E5\u5386', icon: '\u5386', color: 0xFFE06B3C,
-    subtitle: '\u65E5\u7A0B\u5373\u5C06\u5F00\u59CB', enabled: true),
-  NotificationSource(id: 'delivery', group: NotificationGroup.other,
-    name: '\u5FEB\u9012\u4E0E\u5916\u5356', icon: '\u9012', color: 0xFFE59A20,
-    subtitle: '\u914D\u9001\u8FDB\u5EA6\u4E0E\u53D6\u4EF6\u63D0\u9192', enabled: false),
-  NotificationSource(id: 'alipay', group: NotificationGroup.other,
-    name: '\u652F\u4ED8\u5B9D', icon: '\u652F', color: 0xFF1677FF,
-    subtitle: '\u6536\u4ED8\u6B3E\u3001\u670D\u52A1\u4E0E\u4EA4\u6613\u901A\u77E5', enabled: false),
-  NotificationSource(id: 'douyin', group: NotificationGroup.other,
-    name: '\u6296\u97F3', icon: '\u6296', color: 0xFF111111,
-    subtitle: '\u76F4\u64AD\u5F00\u64AD\u3001\u4E92\u52A8\u4E0E\u63A8\u8350\u6D88\u606F', enabled: false),
-  NotificationSource(id: 'system', group: NotificationGroup.other,
-    name: '\u7CFB\u7EDF\u901A\u77E5', icon: '\u7CFB', color: 0xFF687078,
-    subtitle: '\u7535\u91CF\u3001\u66F4\u65B0\u4E0E\u5B89\u5168\u63D0\u9192', enabled: false),
+  NotificationSource(
+      id: 'mail',
+      group: NotificationGroup.other,
+      name: '\u90AE\u4EF6',
+      icon: '\u90AE',
+      color: 0xFFD04B3E,
+      subtitle: '\u7CFB\u7EDF\u9ED8\u8BA4\u90AE\u4EF6\u5E94\u7528',
+      enabled: false),
+  NotificationSource(
+      id: 'calendar',
+      group: NotificationGroup.other,
+      name: '\u65E5\u5386',
+      icon: '\u5386',
+      color: 0xFFE06B3C,
+      subtitle: '\u65E5\u7A0B\u5373\u5C06\u5F00\u59CB',
+      enabled: true),
+  NotificationSource(
+      id: 'delivery',
+      group: NotificationGroup.other,
+      name: '\u5FEB\u9012\u4E0E\u5916\u5356',
+      icon: '\u9012',
+      color: 0xFFE59A20,
+      subtitle: '\u914D\u9001\u8FDB\u5EA6\u4E0E\u53D6\u4EF6\u63D0\u9192',
+      enabled: false),
+  NotificationSource(
+      id: 'alipay',
+      group: NotificationGroup.other,
+      name: '\u652F\u4ED8\u5B9D',
+      icon: '\u652F',
+      color: 0xFF1677FF,
+      subtitle:
+          '\u6536\u4ED8\u6B3E\u3001\u670D\u52A1\u4E0E\u4EA4\u6613\u901A\u77E5',
+      enabled: false),
+  NotificationSource(
+      id: 'douyin',
+      group: NotificationGroup.other,
+      name: '\u6296\u97F3',
+      icon: '\u6296',
+      color: 0xFF111111,
+      subtitle:
+          '\u76F4\u64AD\u5F00\u64AD\u3001\u4E92\u52A8\u4E0E\u63A8\u8350\u6D88\u606F',
+      enabled: false),
+  NotificationSource(
+      id: 'system',
+      group: NotificationGroup.other,
+      name: '\u7CFB\u7EDF\u901A\u77E5',
+      icon: '\u7CFB',
+      color: 0xFF687078,
+      subtitle: '\u7535\u91CF\u3001\u66F4\u65B0\u4E0E\u5B89\u5168\u63D0\u9192',
+      enabled: false),
   // 额外应用
-  NotificationSource(id: 'taobao', group: NotificationGroup.extra,
-    name: '淘宝', icon: '淘', color: 0xFFFF5A1F,
-    subtitle: '订单与物流通知', enabled: false),
-  NotificationSource(id: 'jd', group: NotificationGroup.extra,
-    name: '京东', icon: '京', color: 0xFFE1251B,
-    subtitle: '订单与物流通知', enabled: false),
-  NotificationSource(id: 'meituan', group: NotificationGroup.extra,
-    name: '美团', icon: '美', color: 0xFFF6B900,
-    subtitle: '外卖与到店提醒', enabled: false),
-  NotificationSource(id: 'eleme', group: NotificationGroup.extra,
-    name: '饿了么', icon: '饿', color: 0xFF3073E6,
-    subtitle: '订单配送与优惠提醒', enabled: false),
-  NotificationSource(id: 'maps', group: NotificationGroup.extra,
-    name: '地图导航', icon: '导', color: 0xFF318B65,
-    subtitle: '导航与出行提醒', enabled: false),
-  NotificationSource(id: 'bilibili', group: NotificationGroup.extra,
-    name: '哔哩哔哩', icon: 'B', color: 0xFFFB7299,
-    subtitle: '关注更新与直播开播', enabled: false),
-  NotificationSource(id: 'dianping', group: NotificationGroup.extra,
-    name: '大众点评', icon: '点', color: 0xFFFD6B1F,
-    subtitle: '评价回复与到店提醒', enabled: false),
-  NotificationSource(id: 'kuaishou', group: NotificationGroup.extra,
-    name: '快手', icon: '快', color: 0xFFFF4906,
-    subtitle: '直播开播与互动提醒', enabled: false),
+  NotificationSource(
+      id: 'taobao',
+      group: NotificationGroup.extra,
+      name: '淘宝',
+      icon: '淘',
+      color: 0xFFFF5A1F,
+      subtitle: '订单与物流通知',
+      enabled: false),
+  NotificationSource(
+      id: 'jd',
+      group: NotificationGroup.extra,
+      name: '京东',
+      icon: '京',
+      color: 0xFFE1251B,
+      subtitle: '订单与物流通知',
+      enabled: false),
+  NotificationSource(
+      id: 'meituan',
+      group: NotificationGroup.extra,
+      name: '美团',
+      icon: '美',
+      color: 0xFFF6B900,
+      subtitle: '外卖与到店提醒',
+      enabled: false),
+  NotificationSource(
+      id: 'eleme',
+      group: NotificationGroup.extra,
+      name: '饿了么',
+      icon: '饿',
+      color: 0xFF3073E6,
+      subtitle: '订单配送与优惠提醒',
+      enabled: false),
+  NotificationSource(
+      id: 'maps',
+      group: NotificationGroup.extra,
+      name: '地图导航',
+      icon: '导',
+      color: 0xFF318B65,
+      subtitle: '导航与出行提醒',
+      enabled: false),
+  NotificationSource(
+      id: 'bilibili',
+      group: NotificationGroup.extra,
+      name: '哔哩哔哩',
+      icon: 'B',
+      color: 0xFFFB7299,
+      subtitle: '关注更新与直播开播',
+      enabled: false),
+  NotificationSource(
+      id: 'dianping',
+      group: NotificationGroup.extra,
+      name: '大众点评',
+      icon: '点',
+      color: 0xFFFD6B1F,
+      subtitle: '评价回复与到店提醒',
+      enabled: false),
+  NotificationSource(
+      id: 'kuaishou',
+      group: NotificationGroup.extra,
+      name: '快手',
+      icon: '快',
+      color: 0xFFFF4906,
+      subtitle: '直播开播与互动提醒',
+      enabled: false),
 ];
 
 const _kNotificationChannel = 'honeybox/notification_listener';
@@ -212,7 +362,8 @@ class NotificationBridge {
           title: data['title'] as String? ?? '',
           message: data['message'] as String? ?? '',
           timestamp: DateTime.fromMillisecondsSinceEpoch(
-            (data['timestamp'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+            (data['timestamp'] as num?)?.toInt() ??
+                DateTime.now().millisecondsSinceEpoch,
           ),
         );
         notifier.onNotificationCaptured(captured);
@@ -229,16 +380,16 @@ class NotificationBridge {
   }
 }
 
-WatchNotificationState _defaultState() => WatchNotificationState(
-  sources: kDefaultSources,
-  masterEnabled: true,
-  permissionGranted: false,
-  privacy: NotificationPrivacy.titleAndContact,
-  quietEnabled: false,
-  quietStart: const TimeOfDay(hour: 22, minute: 30),
-  quietEnd: const TimeOfDay(hour: 7, minute: 30),
-  isInQuietPeriod: false,
-);
+WatchNotificationState _defaultState() => const WatchNotificationState(
+      sources: kDefaultSources,
+      masterEnabled: true,
+      permissionGranted: false,
+      privacy: NotificationPrivacy.titleAndContact,
+      quietEnabled: false,
+      quietStart: TimeOfDay(hour: 22, minute: 30),
+      quietEnd: TimeOfDay(hour: 7, minute: 30),
+      isInQuietPeriod: false,
+    );
 
 class WatchNotificationNotifier extends StateNotifier<WatchNotificationState> {
   WatchNotificationNotifier() : super(_defaultState()) {
@@ -283,8 +434,8 @@ class WatchNotificationNotifier extends StateNotifier<WatchNotificationState> {
 
   void toggleQuiet() {
     final next = !state.quietEnabled;
-    state = state.copyWith(quietEnabled: next,
-      isInQuietPeriod: next ? _isQuietPeriod() : false);
+    state = state.copyWith(
+        quietEnabled: next, isInQuietPeriod: next ? _isQuietPeriod() : false);
     _scheduleQuietCheck();
   }
 
@@ -307,12 +458,13 @@ class WatchNotificationNotifier extends StateNotifier<WatchNotificationState> {
   bool _isQuietPeriod() {
     if (!state.quietEnabled) return false;
     final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day,
-      state.quietStart.hour, state.quietStart.minute);
-    final end = DateTime(now.year, now.month, now.day,
-      state.quietEnd.hour, state.quietEnd.minute);
+    final start = DateTime(now.year, now.month, now.day, state.quietStart.hour,
+        state.quietStart.minute);
+    final end = DateTime(now.year, now.month, now.day, state.quietEnd.hour,
+        state.quietEnd.minute);
     if (end.isBefore(start)) {
-      return now.isAfter(start) || now.isBefore(end.add(const Duration(days: 1)));
+      return now.isAfter(start) ||
+          now.isBefore(end.add(const Duration(days: 1)));
     }
     return now.isAfter(start) && now.isBefore(end);
   }
@@ -338,7 +490,7 @@ class WatchNotificationNotifier extends StateNotifier<WatchNotificationState> {
   }
 }
 
-final watchNotificationProvider =
-    StateNotifierProvider.autoDispose<WatchNotificationNotifier, WatchNotificationState>(
+final watchNotificationProvider = StateNotifierProvider.autoDispose<
+    WatchNotificationNotifier, WatchNotificationState>(
   (ref) => WatchNotificationNotifier(),
 );

@@ -7,23 +7,91 @@ class WatchNotificationPage extends ConsumerStatefulWidget {
   const WatchNotificationPage({super.key});
 
   @override
-  ConsumerState<WatchNotificationPage> createState() => _WatchNotificationPageState();
+  ConsumerState<WatchNotificationPage> createState() =>
+      _WatchNotificationPageState();
 }
 
 class _WatchNotificationPageState extends ConsumerState<WatchNotificationPage> {
   String _selectedSample = 'wechat';
 
   static const Map<String, Map<String, dynamic>> _samples = {
-    'wechat': {'name': '\u5fae\u4fe1', 'icon': '\u5fae', 'color': 0xFF27A844, 'title': '\u9879\u76ee\u8ba8\u8bba\u7fa4', 'message': '\u660e\u5929\u4e0a\u5348\u5341\u70b9\u4e00\u8d77\u786e\u8ba4\u65b0\u7248\u672c\u3002'},
-    'call': {'name': '\u7535\u8bdd', 'icon': '\u7535', 'color': 0xFF23845B, 'title': '\u738b\u5c0f\u661f', 'message': '\u6765\u7535  138 **** 6208'},
-    'sms': {'name': '\u77ed\u4fe1', 'icon': '\u77ed', 'color': 0xFF2D8B57, 'title': '\u5feb\u9012\u670d\u52a1', 'message': '\u60a8\u7684\u5feb\u4ef6\u5df2\u9001\u8fbe\u4e30\u5de2\uff0c\u8bf7\u53ca\u65f6\u53d6\u4ef6\u3002'},
-    'feishu': {'name': '\u98de\u4e66', 'icon': '\u98de', 'color': 0xFF3370FF, 'title': '\u4ea7\u54c1\u7814\u53d1\u7fa4', 'message': '\u5468\u4f1a\u8d44\u6599\u5df2\u7ecf\u66f4\u65b0\uff0c\u8bf7\u67e5\u6536\u3002'},
-    'whatsapp': {'name': 'WhatsApp', 'icon': 'W', 'color': 0xFF25D366, 'title': '\u4ea7\u54c1\u8bbe\u8ba1\u7ec4', 'message': 'Design review at 3pm in the boardroom.'},
-    'telegram': {'name': 'Telegram', 'icon': 'T', 'color': 0xFF29A0D9, 'title': 'DevOps \u544a\u8b66', 'message': 'Production: memory usage > 85%, please check.'},
-    'weibo': {'name': '\u5fae\u535a', 'icon': '\u535a', 'color': 0xFFE6162D, 'title': '\u70ed\u95e8\u8bdd\u9898', 'message': '\u4eca\u65e5\u70ed\u641c\uff1a\u65b0\u80fd\u6e90\u8f66\u8865\u8d34\u653f\u7b56\u8c03\u6574\uff0c\u70b9\u51fb\u67e5\u770b\u8be6\u60c5\u3002'},
-    'douyin': {'name': '\u6296\u97f3', 'icon': '\u6296', 'color': 0xFF111111, 'title': '\u4f60\u5173\u6ce8\u7684 @\u7f8e\u98df\u5bb6\u8001\u738b', 'message': '\u65b0\u4f5c\u54c1\uff1a\u8857\u8fb9\u725b\u8089\u9762\u7684\u7075\u9b42\u5403\u6cd5'},
-    'alipay': {'name': '\u652f\u4ed8\u5b9d', 'icon': '\u652f', 'color': 0xFF1677FF, 'title': '\u5230\u8d26\u63d0\u9192', 'message': '\u670b\u53cb\u8f6c\u8d26 200.00 \u5143\u5df2\u5230\u8d26\u4f59\u989d\u3002'},
-    'mail': {'name': '\u90ae\u4ef6', 'icon': '\u90ae', 'color': 0xFFD04B3E, 'title': '\u9879\u76ee\u5468\u62a5', 'message': '2026\u5e74Q3 \u4ea7\u54c1\u8def\u7ebf\u56fe\u5df2\u66f4\u65b0\uff0c\u8bf7\u67e5\u6536\u9644\u4ef6\u3002'},
+    'wechat': {
+      'name': '\u5fae\u4fe1',
+      'icon': '\u5fae',
+      'color': 0xFF27A844,
+      'title': '\u9879\u76ee\u8ba8\u8bba\u7fa4',
+      'message':
+          '\u660e\u5929\u4e0a\u5348\u5341\u70b9\u4e00\u8d77\u786e\u8ba4\u65b0\u7248\u672c\u3002'
+    },
+    'call': {
+      'name': '\u7535\u8bdd',
+      'icon': '\u7535',
+      'color': 0xFF23845B,
+      'title': '\u738b\u5c0f\u661f',
+      'message': '\u6765\u7535  138 **** 6208'
+    },
+    'sms': {
+      'name': '\u77ed\u4fe1',
+      'icon': '\u77ed',
+      'color': 0xFF2D8B57,
+      'title': '\u5feb\u9012\u670d\u52a1',
+      'message':
+          '\u60a8\u7684\u5feb\u4ef6\u5df2\u9001\u8fbe\u4e30\u5de2\uff0c\u8bf7\u53ca\u65f6\u53d6\u4ef6\u3002'
+    },
+    'feishu': {
+      'name': '\u98de\u4e66',
+      'icon': '\u98de',
+      'color': 0xFF3370FF,
+      'title': '\u4ea7\u54c1\u7814\u53d1\u7fa4',
+      'message':
+          '\u5468\u4f1a\u8d44\u6599\u5df2\u7ecf\u66f4\u65b0\uff0c\u8bf7\u67e5\u6536\u3002'
+    },
+    'whatsapp': {
+      'name': 'WhatsApp',
+      'icon': 'W',
+      'color': 0xFF25D366,
+      'title': '\u4ea7\u54c1\u8bbe\u8ba1\u7ec4',
+      'message': 'Design review at 3pm in the boardroom.'
+    },
+    'telegram': {
+      'name': 'Telegram',
+      'icon': 'T',
+      'color': 0xFF29A0D9,
+      'title': 'DevOps \u544a\u8b66',
+      'message': 'Production: memory usage > 85%, please check.'
+    },
+    'weibo': {
+      'name': '\u5fae\u535a',
+      'icon': '\u535a',
+      'color': 0xFFE6162D,
+      'title': '\u70ed\u95e8\u8bdd\u9898',
+      'message':
+          '\u4eca\u65e5\u70ed\u641c\uff1a\u65b0\u80fd\u6e90\u8f66\u8865\u8d34\u653f\u7b56\u8c03\u6574\uff0c\u70b9\u51fb\u67e5\u770b\u8be6\u60c5\u3002'
+    },
+    'douyin': {
+      'name': '\u6296\u97f3',
+      'icon': '\u6296',
+      'color': 0xFF111111,
+      'title': '\u4f60\u5173\u6ce8\u7684 @\u7f8e\u98df\u5bb6\u8001\u738b',
+      'message':
+          '\u65b0\u4f5c\u54c1\uff1a\u8857\u8fb9\u725b\u8089\u9762\u7684\u7075\u9b42\u5403\u6cd5'
+    },
+    'alipay': {
+      'name': '\u652f\u4ed8\u5b9d',
+      'icon': '\u652f',
+      'color': 0xFF1677FF,
+      'title': '\u5230\u8d26\u63d0\u9192',
+      'message':
+          '\u670b\u53cb\u8f6c\u8d26 200.00 \u5143\u5df2\u5230\u8d26\u4f59\u989d\u3002'
+    },
+    'mail': {
+      'name': '\u90ae\u4ef6',
+      'icon': '\u90ae',
+      'color': 0xFFD04B3E,
+      'title': '\u9879\u76ee\u5468\u62a5',
+      'message':
+          '2026\u5e74Q3 \u4ea7\u54c1\u8def\u7ebf\u56fe\u5df2\u66f4\u65b0\uff0c\u8bf7\u67e5\u6536\u9644\u4ef6\u3002'
+    },
   };
 
   @override
@@ -38,7 +106,10 @@ class _WatchNotificationPageState extends ConsumerState<WatchNotificationPage> {
       sourcesByGroup[s.group]!.add(s);
     }
     final extraCount = state.sources
-        .where((s) => (s.group == NotificationGroup.other || s.group == NotificationGroup.extra) && s.enabled)
+        .where((s) =>
+            (s.group == NotificationGroup.other ||
+                s.group == NotificationGroup.extra) &&
+            s.enabled)
         .length;
 
     return Scaffold(
@@ -123,8 +194,6 @@ class _WatchNotificationPageState extends ConsumerState<WatchNotificationPage> {
   }
 }
 
-
-
 class _ServiceStrip extends StatelessWidget {
   final bool masterEnabled;
   final bool permissionGranted;
@@ -180,7 +249,8 @@ class _ServiceStrip extends StatelessWidget {
               children: [
                 const Text('\u901a\u77e5\u8f6c\u53d1',
                     style: TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                         color: Color(0xFF202124))),
                 const SizedBox(height: 2),
                 Text(stateText,
@@ -188,7 +258,9 @@ class _ServiceStrip extends StatelessWidget {
               ],
             ),
           ),
-          _Switch(value: masterEnabled, onChanged: permissionGranted ? onToggle : null),
+          _Switch(
+              value: masterEnabled,
+              onChanged: permissionGranted ? onToggle : null),
         ],
       ),
     );
@@ -213,7 +285,9 @@ class _Switch extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             color: value
                 ? const Color(0xFF2E7D6B)
-                : (onChanged == null ? const Color(0xFFCCD1D5) : const Color(0xFFAEB4B9)),
+                : (onChanged == null
+                    ? const Color(0xFFCCD1D5)
+                    : const Color(0xFFAEB4B9)),
           ),
           padding: const EdgeInsets.all(3),
           child: AnimatedAlign(
@@ -253,14 +327,15 @@ class _PermissionBanner extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Text('\u26A0',
+              Text('\u26A0',
                   style: TextStyle(color: Color(0xFFB96806), fontSize: 17)),
-              const SizedBox(width: 9),
-              const Text('\u9700\u8981\u901a\u77e5\u4f7f\u7528\u6743',
+              SizedBox(width: 9),
+              Text('\u9700\u8981\u901a\u77e5\u4f7f\u7528\u6743',
                   style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                       color: Color(0xFF202124))),
             ],
           ),
@@ -281,8 +356,8 @@ class _PermissionBanner extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(7)),
-                textStyle: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600),
+                textStyle:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
               ),
               child: const Text('\u5f00\u542f\u901a\u77e5\u4f7f\u7528\u6743'),
             ),
@@ -319,12 +394,13 @@ class _SourceGroup extends StatelessWidget {
             children: [
               Text(title,
                   style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                       color: Color(0xFF202124))),
               const Spacer(),
               Text(note,
-                  style: const TextStyle(
-                      fontSize: 10, color: Color(0xFF8A9096))),
+                  style:
+                      const TextStyle(fontSize: 10, color: Color(0xFF8A9096))),
             ],
           ),
         ),
@@ -372,8 +448,9 @@ class _SourceRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
       decoration: BoxDecoration(
-        border: isLast ? null : const Border(
-            bottom: BorderSide(color: Color(0xFFECEEEF))),
+        border: isLast
+            ? null
+            : const Border(bottom: BorderSide(color: Color(0xFFECEEEF))),
       ),
       child: Row(
         children: [
@@ -401,12 +478,14 @@ class _SourceRow extends StatelessWidget {
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: const Color(0xFF202124).withValues(alpha: opacity))),
+                        color: const Color(0xFF202124)
+                            .withValues(alpha: opacity))),
                 const SizedBox(height: 2),
                 Text(source.subtitle,
                     style: TextStyle(
                         fontSize: 10,
-                        color: const Color(0xFF8A9096).withValues(alpha: opacity))),
+                        color: const Color(0xFF8A9096)
+                            .withValues(alpha: opacity))),
               ],
             ),
           ),
@@ -452,8 +531,7 @@ class _MoreAppsButton extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                         color: Color(0xFF0072BC))),
                 Text('\u203a',
-                    style: TextStyle(
-                        fontSize: 18, color: Color(0xFF0072BC))),
+                    style: TextStyle(fontSize: 18, color: Color(0xFF0072BC))),
               ],
             ),
           ),
@@ -503,8 +581,7 @@ class _MoreAppsButton extends StatelessWidget {
                         child: Center(
                           child: Text('\u6ca1\u6709\u66f4\u591a\u5e94\u7528',
                               style: TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF60656B))),
+                                  fontSize: 12, color: Color(0xFF60656B))),
                         ),
                       )
                     else
@@ -547,9 +624,12 @@ class _PrivacyPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hint = switch (privacy) {
-      NotificationPrivacy.appOnly => '\u624b\u8868\u4ec5\u663e\u793a\u5e94\u7528\u540d\u79f0\uff0c\u4e0d\u663e\u793a\u8054\u7cfb\u4eba\u3001\u6807\u9898\u548c\u6d88\u606f\u6b63\u6587\u3002',
-      NotificationPrivacy.titleAndContact => '\u624b\u8868\u663e\u793a\u5e94\u7528\u540d\u79f0\u3001\u6807\u9898\u4e0e\u8054\u7cfb\u4eba\uff0c\u4e0d\u663e\u793a\u6d88\u606f\u6b63\u6587\u3002',
-      NotificationPrivacy.fullContent => '\u624b\u8868\u663e\u793a\u5e94\u7528\u540d\u79f0\u3001\u6807\u9898\u3001\u8054\u7cfb\u4eba\u548c\u6d88\u606f\u6b63\u6587\u3002',
+      NotificationPrivacy.appOnly =>
+        '\u624b\u8868\u4ec5\u663e\u793a\u5e94\u7528\u540d\u79f0\uff0c\u4e0d\u663e\u793a\u8054\u7cfb\u4eba\u3001\u6807\u9898\u548c\u6d88\u606f\u6b63\u6587\u3002',
+      NotificationPrivacy.titleAndContact =>
+        '\u624b\u8868\u663e\u793a\u5e94\u7528\u540d\u79f0\u3001\u6807\u9898\u4e0e\u8054\u7cfb\u4eba\uff0c\u4e0d\u663e\u793a\u6d88\u606f\u6b63\u6587\u3002',
+      NotificationPrivacy.fullContent =>
+        '\u624b\u8868\u663e\u793a\u5e94\u7528\u540d\u79f0\u3001\u6807\u9898\u3001\u8054\u7cfb\u4eba\u548c\u6d88\u606f\u6b63\u6587\u3002',
     };
 
     return Container(
@@ -596,8 +676,7 @@ class _PrivacyPanel extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(hint,
-              style: const TextStyle(
-                  fontSize: 10, color: Color(0xFF60656B))),
+              style: const TextStyle(fontSize: 10, color: Color(0xFF60656B))),
         ],
       ),
     );
@@ -716,8 +795,8 @@ class _QuietPanel extends StatelessWidget {
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8),
                     child: Text('\u81f3',
-                        style: TextStyle(
-                            fontSize: 11, color: Color(0xFF8A9096))),
+                        style:
+                            TextStyle(fontSize: 11, color: Color(0xFF8A9096))),
                   ),
                   Expanded(
                     child: _TimeButton(
@@ -762,8 +841,7 @@ class _TimeButton extends StatelessWidget {
         child: Center(
           child: Text(
             time.format(context),
-            style: const TextStyle(
-                fontSize: 13, color: Color(0xFF202124)),
+            style: const TextStyle(fontSize: 13, color: Color(0xFF202124)),
           ),
         ),
       ),
@@ -853,14 +931,11 @@ class _SampleTab extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             border: Border.all(
-              color: selected
-                  ? const Color(0xFF2E7D6B)
-                  : const Color(0xFFDADFE2),
+              color:
+                  selected ? const Color(0xFF2E7D6B) : const Color(0xFFDADFE2),
             ),
             borderRadius: BorderRadius.circular(16),
-            color: selected
-                ? const Color(0xFFE2F0EC)
-                : Colors.white,
+            color: selected ? const Color(0xFFE2F0EC) : Colors.white,
           ),
           child: Center(
             child: Text(
@@ -902,7 +977,7 @@ class _WatchPreview extends StatelessWidget {
     final message = switch (privacy) {
       NotificationPrivacy.appOnly => '\u6253\u5f00\u624b\u673a\u67e5\u770b',
       NotificationPrivacy.titleAndContact =>
-          '\u901a\u77e5\u5185\u5bb9\u5df2\u9690\u85cf',
+        '\u901a\u77e5\u5185\u5bb9\u5df2\u9690\u85cf',
       NotificationPrivacy.fullContent => sample['message'] as String,
     };
 
@@ -913,7 +988,8 @@ class _WatchPreview extends StatelessWidget {
         borderRadius: BorderRadius.circular(34),
         color: const Color(0xFF1E2225),
         boxShadow: const [
-          BoxShadow(color: Color(0x2B191E21), blurRadius: 20, offset: Offset(0, 6)),
+          BoxShadow(
+              color: Color(0x2B191E21), blurRadius: 20, offset: Offset(0, 6)),
         ],
       ),
       child: Container(
@@ -927,8 +1003,7 @@ class _WatchPreview extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text('\u901a\u77e5\u5df2\u6682\u505c',
-                      style: TextStyle(
-                          color: Color(0xFFC2C9CD), fontSize: 12)),
+                      style: TextStyle(color: Color(0xFFC2C9CD), fontSize: 12)),
                   SizedBox(height: 4),
                 ],
               )
@@ -938,7 +1013,8 @@ class _WatchPreview extends StatelessWidget {
                   Row(
                     children: [
                       Container(
-                        width: 24, height: 24,
+                        width: 24,
+                        height: 24,
                         decoration: BoxDecoration(
                           color: Color(sample['color'] as int),
                           borderRadius: BorderRadius.circular(6),
@@ -965,8 +1041,8 @@ class _WatchPreview extends StatelessWidget {
                         ),
                       ),
                       const Text('\u521a\u521a',
-                          style: TextStyle(
-                              color: Color(0xFFAEB7BD), fontSize: 9)),
+                          style:
+                              TextStyle(color: Color(0xFFAEB7BD), fontSize: 9)),
                     ],
                   ),
                   const SizedBox(height: 17),
@@ -987,9 +1063,9 @@ class _WatchPreview extends StatelessWidget {
                         color: Color(0xFFC3CBD0), fontSize: 11, height: 1.55),
                   ),
                   const SizedBox(height: 12),
-                  const Text('\u62ac\u8155\u67e5\u770b \u00b7 \u5411\u4e0a\u6ed1\u52a8\u5ffd\u7565',
-                      style: TextStyle(
-                          color: Color(0xFF7F8A91), fontSize: 9)),
+                  const Text(
+                      '\u62ac\u8155\u67e5\u770b \u00b7 \u5411\u4e0a\u6ed1\u52a8\u5ffd\u7565',
+                      style: TextStyle(color: Color(0xFF7F8A91), fontSize: 9)),
                 ],
               ),
       ),
