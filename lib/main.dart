@@ -8,3 +8,5 @@ Future<void> main() async {
   await AppInfo.init(); // runtime-accurate version for the update check/footer
   runApp(const ProviderScope(child: HoneyBoxApp()));
 }
+
+// ci: trigger rerun
