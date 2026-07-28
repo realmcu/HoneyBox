@@ -21,18 +21,23 @@ void main() {
     await notifications.close();
   });
 
-  Widget buildPage() {
+  Widget buildPage({
+    int? Function(Uint8List)? send,
+    DateTime Function()? clock,
+  }) {
     return ProviderScope(
       overrides: [
         watchBindProvider.overrideWith((ref) {
           return WatchBindNotifier(
             commandAvailable: () => true,
-            sendCommand: (frame) {
-              sent.add(Uint8List.fromList(frame));
-              return 1;
-            },
+            sendCommand: send ??
+                (frame) {
+                  sent.add(Uint8List.fromList(frame));
+                  return 1;
+                },
             notifications: notifications.stream,
             userId: Uint8List(32),
+            clock: clock ?? () => DateTime(2024, 7, 27, 15, 42, 36),
           );
         }),
       ],
@@ -73,6 +78,44 @@ void main() {
     await tester.pump();
 
     expect(find.text('已绑定'), findsOneWidget);
-    expect(find.text('设备绑定成功'), findsOneWidget);
+    expect(find.text('设备绑定成功，时间已同步'), findsOneWidget);
+    expect(sent, hasLength(2));
+    expect(find.text('重试同步'), findsNothing);
+  });
+
+  testWidgets('keeps bound state and retries only time synchronization',
+      (tester) async {
+    var calls = 0;
+    var now = DateTime(2024, 7, 27, 15, 42, 36);
+    await tester.pumpWidget(buildPage(
+      clock: () => now,
+      send: (frame) {
+        sent.add(Uint8List.fromList(frame));
+        calls++;
+        return calls == 2 ? null : 1;
+      },
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('绑定设备'));
+    await tester.pump();
+    notifications.add(
+      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
+    );
+    await tester.pump();
+
+    expect(find.text('已绑定'), findsOneWidget);
+    expect(find.text('设备绑定成功，时间同步失败'), findsOneWidget);
+    expect(find.text('重试同步'), findsOneWidget);
+    expect(sent, hasLength(2));
+
+    now = DateTime(2024, 7, 27, 15, 43, 1);
+    await tester.tap(find.text('重试同步'));
+    await tester.pump();
+
+    expect(sent, hasLength(3));
+    expect(sent.where((frame) => frame.first == 0x03), hasLength(1));
+    expect(find.text('重试同步'), findsNothing);
+    expect(find.text('设备绑定成功，时间已同步'), findsOneWidget);
   });
 }

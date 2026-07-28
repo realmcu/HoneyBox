@@ -190,10 +190,30 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
                     const SizedBox(width: 12),
                     SizedBox(
                       width: 112,
-                      child: _WatchBindButton(
-                        state: bindState,
-                        onPressed: () =>
-                            ref.read(watchBindProvider.notifier).bind(),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _WatchBindButton(
+                            state: bindState,
+                            onPressed: () =>
+                                ref.read(watchBindProvider.notifier).bind(),
+                          ),
+                          if (bindState.timeSyncPhase ==
+                              WatchTimeSyncPhase.failed)
+                            TextButton.icon(
+                              onPressed: () => ref
+                                  .read(watchBindProvider.notifier)
+                                  .retryTimeSync(),
+                              icon: const Icon(Icons.sync, size: 16),
+                              label: const Text('重试同步'),
+                              style: TextButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],

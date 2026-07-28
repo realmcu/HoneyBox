@@ -4,19 +4,28 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/watch_bind_protocol.dart';
+import '../services/watch_time_protocol.dart';
 import 'ble_provider.dart';
 
 enum WatchBindPhase { idle, binding, success, failure, unavailable }
 
+enum WatchTimeSyncPhase { notStarted, syncing, synced, failed }
+
 class WatchBindState {
   final WatchBindPhase phase;
+  final WatchTimeSyncPhase timeSyncPhase;
   final String? message;
 
-  const WatchBindState(this.phase, {this.message});
+  const WatchBindState(
+    this.phase, {
+    this.timeSyncPhase = WatchTimeSyncPhase.notStarted,
+    this.message,
+  });
 }
 
 typedef WatchCommandAvailable = bool Function();
 typedef WatchSendCommand = int? Function(Uint8List frame);
+typedef WatchClock = DateTime Function();
 
 class WatchBindNotifier extends StateNotifier<WatchBindState> {
   WatchBindNotifier({
@@ -25,9 +34,11 @@ class WatchBindNotifier extends StateNotifier<WatchBindState> {
     required Stream<Uint8List> notifications,
     required Uint8List userId,
     this.timeout = const Duration(seconds: 8),
+    WatchClock clock = DateTime.now,
   })  : _commandAvailable = commandAvailable,
         _sendCommand = sendCommand,
         _userId = Uint8List.fromList(userId),
+        _clock = clock,
         super(WatchBindState(
           commandAvailable() ? WatchBindPhase.idle : WatchBindPhase.unavailable,
         )) {
@@ -37,6 +48,7 @@ class WatchBindNotifier extends StateNotifier<WatchBindState> {
   final WatchCommandAvailable _commandAvailable;
   final WatchSendCommand _sendCommand;
   final Uint8List _userId;
+  final WatchClock _clock;
   final Duration timeout;
 
   StreamSubscription<Uint8List>? _notificationSubscription;
@@ -90,15 +102,66 @@ class WatchBindNotifier extends StateNotifier<WatchBindState> {
 
     _responseTimer?.cancel();
     _responseTimer = null;
-    state = result == WatchBindResult.success
-        ? const WatchBindState(
-            WatchBindPhase.success,
-            message: '设备绑定成功',
-          )
-        : const WatchBindState(
-            WatchBindPhase.failure,
-            message: '设备绑定失败',
-          );
+    if (result == WatchBindResult.failed) {
+      state = const WatchBindState(
+        WatchBindPhase.failure,
+        message: '设备绑定失败',
+      );
+      return;
+    }
+
+    state = const WatchBindState(
+      WatchBindPhase.success,
+      timeSyncPhase: WatchTimeSyncPhase.syncing,
+    );
+    _syncTime();
+  }
+
+  void retryTimeSync() {
+    if (state.phase != WatchBindPhase.success ||
+        state.timeSyncPhase != WatchTimeSyncPhase.failed) {
+      return;
+    }
+    _syncTime();
+  }
+
+  void _syncTime() {
+    if (!_commandAvailable()) {
+      _setTimeSyncFailed();
+      return;
+    }
+
+    state = const WatchBindState(
+      WatchBindPhase.success,
+      timeSyncPhase: WatchTimeSyncPhase.syncing,
+    );
+
+    int? sequence;
+    try {
+      final frame = WatchTimeProtocol.buildSetTime(_clock());
+      sequence = _sendCommand(frame);
+    } catch (error) {
+      debugPrint('Watch time sync: send failed: $error');
+    }
+
+    if (sequence == null) {
+      _setTimeSyncFailed();
+      return;
+    }
+
+    state = const WatchBindState(
+      WatchBindPhase.success,
+      timeSyncPhase: WatchTimeSyncPhase.synced,
+      message: '设备绑定成功，时间已同步',
+    );
+  }
+
+  void _setTimeSyncFailed() {
+    state = const WatchBindState(
+      WatchBindPhase.success,
+      timeSyncPhase: WatchTimeSyncPhase.failed,
+      message: '设备绑定成功，时间同步失败',
+    );
   }
 
   @override
