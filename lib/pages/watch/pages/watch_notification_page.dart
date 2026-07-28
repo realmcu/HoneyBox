@@ -18,6 +18,12 @@ class _WatchNotificationPageState extends ConsumerState<WatchNotificationPage> {
     'call': {'name': '\u7535\u8bdd', 'icon': '\u7535', 'color': 0xFF23845B, 'title': '\u738b\u5c0f\u661f', 'message': '\u6765\u7535  138 **** 6208'},
     'sms': {'name': '\u77ed\u4fe1', 'icon': '\u77ed', 'color': 0xFF2D8B57, 'title': '\u5feb\u9012\u670d\u52a1', 'message': '\u60a8\u7684\u5feb\u4ef6\u5df2\u9001\u8fbe\u4e30\u5de2\uff0c\u8bf7\u53ca\u65f6\u53d6\u4ef6\u3002'},
     'feishu': {'name': '\u98de\u4e66', 'icon': '\u98de', 'color': 0xFF3370FF, 'title': '\u4ea7\u54c1\u7814\u53d1\u7fa4', 'message': '\u5468\u4f1a\u8d44\u6599\u5df2\u7ecf\u66f4\u65b0\uff0c\u8bf7\u67e5\u6536\u3002'},
+    'whatsapp': {'name': 'WhatsApp', 'icon': 'W', 'color': 0xFF25D366, 'title': '\u4ea7\u54c1\u8bbe\u8ba1\u7ec4', 'message': 'Design review at 3pm in the boardroom.'},
+    'telegram': {'name': 'Telegram', 'icon': 'T', 'color': 0xFF29A0D9, 'title': 'DevOps \u544a\u8b66', 'message': 'Production: memory usage > 85%, please check.'},
+    'weibo': {'name': '\u5fae\u535a', 'icon': '\u535a', 'color': 0xFFE6162D, 'title': '\u70ed\u95e8\u8bdd\u9898', 'message': '\u4eca\u65e5\u70ed\u641c\uff1a\u65b0\u80fd\u6e90\u8f66\u8865\u8d34\u653f\u7b56\u8c03\u6574\uff0c\u70b9\u51fb\u67e5\u770b\u8be6\u60c5\u3002'},
+    'douyin': {'name': '\u6296\u97f3', 'icon': '\u6296', 'color': 0xFF111111, 'title': '\u4f60\u5173\u6ce8\u7684 @\u7f8e\u98df\u5bb6\u8001\u738b', 'message': '\u65b0\u4f5c\u54c1\uff1a\u8857\u8fb9\u725b\u8089\u9762\u7684\u7075\u9b42\u5403\u6cd5'},
+    'alipay': {'name': '\u652f\u4ed8\u5b9d', 'icon': '\u652f', 'color': 0xFF1677FF, 'title': '\u5230\u8d26\u63d0\u9192', 'message': '\u670b\u53cb\u8f6c\u8d26 200.00 \u5143\u5df2\u5230\u8d26\u4f59\u989d\u3002'},
+    'mail': {'name': '\u90ae\u4ef6', 'icon': '\u90ae', 'color': 0xFFD04B3E, 'title': '\u9879\u76ee\u5468\u62a5', 'message': '2026\u5e74Q3 \u4ea7\u54c1\u8def\u7ebf\u56fe\u5df2\u66f4\u65b0\uff0c\u8bf7\u67e5\u6536\u9644\u4ef6\u3002'},
   };
 
   @override
