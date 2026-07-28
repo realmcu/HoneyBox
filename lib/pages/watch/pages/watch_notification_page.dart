@@ -292,7 +292,7 @@ class _Switch extends StatelessWidget {
         child: Switch(
           value: value,
           onChanged: onChanged == null ? null : (_) => onChanged!(),
-          activeColor: AppTheme.watchAccent,
+          activeThumbColor: AppTheme.watchAccent,
           inactiveThumbColor: Colors.white,
           inactiveTrackColor: onChanged == null
               ? const Color(0xFFCCD1D5)
