@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 /// BLE protocol for forwarding phone notifications to the watch.
@@ -50,12 +51,13 @@ class WatchNotificationProtocol {
   }
 
   /// Encode a text field as [len_byte][utf8...].
+  /// Uses proper UTF-8 encoding (not Dart's internal UTF-16 codeUnits).
   static Uint8List _encodeField(String text) {
     if (text.isEmpty) return Uint8List.fromList([0x00]);
-    final utf8 = Uint8List.fromList(text.codeUnits);
-    final result = Uint8List(1 + utf8.length);
-    result[0] = utf8.length < 256 ? utf8.length : 0xFF;
-    final clamped = utf8.length > 255 ? utf8.sublist(0, 255) : utf8;
+    final bytes = utf8.encode(text);
+    final clamped = bytes.length > 255 ? bytes.sublist(0, 255) : bytes;
+    final result = Uint8List(1 + clamped.length);
+    result[0] = clamped.length;
     result.setRange(1, 1 + clamped.length, clamped);
     return result;
   }

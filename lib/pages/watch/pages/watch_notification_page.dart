@@ -11,87 +11,93 @@ class WatchNotificationPage extends ConsumerStatefulWidget {
       _WatchNotificationPageState();
 }
 
+class _NotificationPageSample {
+  final String name, icon, title, message;
+  final int color;
+
+  const _NotificationPageSample({
+    required this.name,
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.message,
+  });
+}
+
 class _WatchNotificationPageState extends ConsumerState<WatchNotificationPage> {
   String _selectedSample = 'wechat';
 
-  static const Map<String, Map<String, dynamic>> _samples = {
-    'wechat': {
-      'name': '\u5fae\u4fe1',
-      'icon': '\u5fae',
-      'color': 0xFF27A844,
-      'title': '\u9879\u76ee\u8ba8\u8bba\u7fa4',
-      'message':
-          '\u660e\u5929\u4e0a\u5348\u5341\u70b9\u4e00\u8d77\u786e\u8ba4\u65b0\u7248\u672c\u3002'
-    },
-    'call': {
-      'name': '\u7535\u8bdd',
-      'icon': '\u7535',
-      'color': 0xFF23845B,
-      'title': '\u738b\u5c0f\u661f',
-      'message': '\u6765\u7535  138 **** 6208'
-    },
-    'sms': {
-      'name': '\u77ed\u4fe1',
-      'icon': '\u77ed',
-      'color': 0xFF2D8B57,
-      'title': '\u5feb\u9012\u670d\u52a1',
-      'message':
-          '\u60a8\u7684\u5feb\u4ef6\u5df2\u9001\u8fbe\u4e30\u5de2\uff0c\u8bf7\u53ca\u65f6\u53d6\u4ef6\u3002'
-    },
-    'feishu': {
-      'name': '\u98de\u4e66',
-      'icon': '\u98de',
-      'color': 0xFF3370FF,
-      'title': '\u4ea7\u54c1\u7814\u53d1\u7fa4',
-      'message':
-          '\u5468\u4f1a\u8d44\u6599\u5df2\u7ecf\u66f4\u65b0\uff0c\u8bf7\u67e5\u6536\u3002'
-    },
-    'whatsapp': {
-      'name': 'WhatsApp',
-      'icon': 'W',
-      'color': 0xFF25D366,
-      'title': '\u4ea7\u54c1\u8bbe\u8ba1\u7ec4',
-      'message': 'Design review at 3pm in the boardroom.'
-    },
-    'telegram': {
-      'name': 'Telegram',
-      'icon': 'T',
-      'color': 0xFF29A0D9,
-      'title': 'DevOps \u544a\u8b66',
-      'message': 'Production: memory usage > 85%, please check.'
-    },
-    'weibo': {
-      'name': '\u5fae\u535a',
-      'icon': '\u535a',
-      'color': 0xFFE6162D,
-      'title': '\u70ed\u95e8\u8bdd\u9898',
-      'message':
-          '\u4eca\u65e5\u70ed\u641c\uff1a\u65b0\u80fd\u6e90\u8f66\u8865\u8d34\u653f\u7b56\u8c03\u6574\uff0c\u70b9\u51fb\u67e5\u770b\u8be6\u60c5\u3002'
-    },
-    'douyin': {
-      'name': '\u6296\u97f3',
-      'icon': '\u6296',
-      'color': 0xFF111111,
-      'title': '\u4f60\u5173\u6ce8\u7684 @\u7f8e\u98df\u5bb6\u8001\u738b',
-      'message':
-          '\u65b0\u4f5c\u54c1\uff1a\u8857\u8fb9\u725b\u8089\u9762\u7684\u7075\u9b42\u5403\u6cd5'
-    },
-    'alipay': {
-      'name': '\u652f\u4ed8\u5b9d',
-      'icon': '\u652f',
-      'color': 0xFF1677FF,
-      'title': '\u5230\u8d26\u63d0\u9192',
-      'message':
-          '\u670b\u53cb\u8f6c\u8d26 200.00 \u5143\u5df2\u5230\u8d26\u4f59\u989d\u3002'
-    },
-    'mail': {
-      'name': '\u90ae\u4ef6',
-      'icon': '\u90ae',
-      'color': 0xFFD04B3E,
-      'title': '\u9879\u76ee\u5468\u62a5',
-      'message':
-          '2026\u5e74Q3 \u4ea7\u54c1\u8def\u7ebf\u56fe\u5df2\u66f4\u65b0\uff0c\u8bf7\u67e5\u6536\u9644\u4ef6\u3002'
-    },
+  static const Map<String, _NotificationPageSample> _samples = {
+    'wechat': _NotificationPageSample(
+      name: '微信',
+      icon: '微',
+      color: 0xFF27A844,
+      title: '项目讨论群',
+      message: '明天上午十点一起确认新版本。',
+    ),
+    'call': _NotificationPageSample(
+      name: '电话',
+      icon: '电',
+      color: 0xFF23845B,
+      title: '王金星',
+      message: '来电  138 **** 6208',
+    ),
+    'sms': _NotificationPageSample(
+      name: '短信',
+      icon: '短',
+      color: 0xFF2D8B57,
+      title: '快递服务',
+      message: '您的快件已送达丰巢，请及时取件。',
+    ),
+    'feishu': _NotificationPageSample(
+      name: '飞书',
+      icon: '飞',
+      color: 0xFF3370FF,
+      title: '产品研发群',
+      message: '周会资料已经更新，请查收。',
+    ),
+    'whatsapp': _NotificationPageSample(
+      name: 'WhatsApp',
+      icon: 'W',
+      color: 0xFF25D366,
+      title: '产品设计组',
+      message: 'Design review at 3pm in the boardroom.',
+    ),
+    'telegram': _NotificationPageSample(
+      name: 'Telegram',
+      icon: 'T',
+      color: 0xFF29A0D9,
+      title: 'DevOps 警告',
+      message: 'Production: memory usage > 85%, please check.',
+    ),
+    'weibo': _NotificationPageSample(
+      name: '微博',
+      icon: '博',
+      color: 0xFFE6162D,
+      title: '热门话题',
+      message: '今日热搜：新能源车补贴政策调整，点击查看详情。',
+    ),
+    'douyin': _NotificationPageSample(
+      name: '抖音',
+      icon: '抖',
+      color: 0xFF111111,
+      title: '你关注的 @美食家老王',
+      message: '新作品：街边牛肉面的灵魂吃法',
+    ),
+    'alipay': _NotificationPageSample(
+      name: '支付宝',
+      icon: '支',
+      color: 0xFF1677FF,
+      title: '到账提醒',
+      message: '朋友转账 200.00 元已到账余额。',
+    ),
+    'mail': _NotificationPageSample(
+      name: '邮件',
+      icon: '邮',
+      color: 0xFFD04B3E,
+      title: '项目周报',
+      message: '2026年Q3 产品路线图已经更新，请查收附件。',
+    ),
   };
 
   @override
@@ -267,6 +273,8 @@ class _ServiceStrip extends StatelessWidget {
   }
 }
 
+/// Styled switch that wraps Flutter's native [Switch] for accessibility
+/// (semantics, keyboard navigation, platform adaptation).
 class _Switch extends StatelessWidget {
   final bool value;
   final VoidCallback? onChanged;
@@ -275,34 +283,20 @@ class _Switch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 48,
-      height: 28,
-      child: GestureDetector(
-        onTap: onChanged,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: value
-                ? const Color(0xFF2E7D6B)
-                : (onChanged == null
-                    ? const Color(0xFFCCD1D5)
-                    : const Color(0xFFAEB4B9)),
-          ),
-          padding: const EdgeInsets.all(3),
-          child: AnimatedAlign(
-            duration: const Duration(milliseconds: 160),
-            alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(
-              width: 22,
-              height: 22,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 3)],
-              ),
-            ),
-          ),
+    return Semantics(
+      toggled: value,
+      enabled: onChanged != null,
+      child: SizedBox(
+        width: 48,
+        height: 28,
+        child: Switch(
+          value: value,
+          onChanged: onChanged == null ? null : (_) => onChanged!(),
+          activeColor: AppTheme.watchAccent,
+          inactiveThumbColor: Colors.white,
+          inactiveTrackColor: onChanged == null
+              ? const Color(0xFFCCD1D5)
+              : const Color(0xFFAEB4B9),
         ),
       ),
     );
@@ -888,7 +882,7 @@ class _PreviewPanel extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               children: _WatchNotificationPageState._samples.entries
                   .map((e) => _SampleTab(
-                        label: e.value['name'] as String,
+                        label: e.value.name,
                         selected: e.key == selectedSample,
                         onTap: () => onSampleChanged(e.key),
                       ))
@@ -956,7 +950,7 @@ class _SampleTab extends StatelessWidget {
 }
 
 class _WatchPreview extends StatelessWidget {
-  final Map<String, dynamic> sample;
+  final _NotificationPageSample sample;
   final bool paused;
   final String pausedReason;
   final NotificationPrivacy privacy;
@@ -972,13 +966,13 @@ class _WatchPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = switch (privacy) {
       NotificationPrivacy.appOnly => '\u65b0\u901a\u77e5',
-      _ => sample['title'] as String,
+      _ => sample.title,
     };
     final message = switch (privacy) {
       NotificationPrivacy.appOnly => '\u6253\u5f00\u624b\u673a\u67e5\u770b',
       NotificationPrivacy.titleAndContact =>
         '\u901a\u77e5\u5185\u5bb9\u5df2\u9690\u85cf',
-      NotificationPrivacy.fullContent => sample['message'] as String,
+      NotificationPrivacy.fullContent => sample.message,
     };
 
     return Container(
@@ -1016,12 +1010,12 @@ class _WatchPreview extends StatelessWidget {
                         width: 24,
                         height: 24,
                         decoration: BoxDecoration(
-                          color: Color(sample['color'] as int),
+                          color: Color(sample.color),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Center(
                           child: Text(
-                            sample['icon'] as String,
+                            sample.icon,
                             style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 9,
@@ -1032,7 +1026,7 @@ class _WatchPreview extends StatelessWidget {
                       const SizedBox(width: 7),
                       Expanded(
                         child: Text(
-                          sample['name'] as String,
+                          sample.name,
                           style: const TextStyle(
                               color: Color(0xFFAEB7BD),
                               fontSize: 10,
