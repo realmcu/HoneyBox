@@ -44,7 +44,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        NotificationListener.registerChannels(flutterEngine)
+        NotificationListener.registerChannels(flutterEngine, applicationContext)
 
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         textureRegistry = flutterEngine.renderer

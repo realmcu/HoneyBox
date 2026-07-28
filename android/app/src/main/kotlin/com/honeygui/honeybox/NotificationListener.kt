@@ -28,13 +28,13 @@ class NotificationListener : NotificationListenerService() {
         // Event sink for forwarding notifications to Dart.
         private var eventSink: EventChannel.EventSink? = null
 
-        // Application context obtained from FlutterEngine (not the service instance).
+        // Application context (passed from MainActivity).
         private var appContext: android.content.Context? = null
 
         /// Called from [MainActivity.configureFlutterEngine] to register
         /// the channels used by the notification service.
-        fun registerChannels(flutterEngine: FlutterEngine) {
-            appContext = flutterEngine.androidContext
+        fun registerChannels(flutterEngine: FlutterEngine, context: android.content.Context) {
+            appContext = context
             val messenger = flutterEngine.dartExecutor.binaryMessenger
 
             MethodChannel(messenger, "honeybox/notification_listener").setMethodCallHandler { call, result ->
