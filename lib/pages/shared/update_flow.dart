@@ -8,7 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../app_info.dart';
 import '../../services/update_service.dart';
 
-/// Runs the full "检查更新" flow off [context]: query Gitee → compare versions →
+/// Runs the full "检查更新" flow off [context]: query GitHub → compare versions →
 /// (if newer) confirm, download with a progress dialog, then hand the APK to
 /// the system installer. Manages its own dialogs and snackbars, so the caller
 /// only needs to supply a live [context].

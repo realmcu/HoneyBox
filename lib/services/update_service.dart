@@ -38,18 +38,18 @@ class UpdateInfo {
   });
 }
 
-/// Checks the project's **public** Gitee repository for a newer release APK and
-/// downloads it. The repo is public, so the release API is read anonymously —
+/// Checks the project's **public** GitHub repository for a newer release APK and
+/// downloads it. The repo is public, so the Releases API is read anonymously —
 /// no access token is embedded in the shipped app.
 class UpdateService {
   UpdateService._();
 
   static const String _owner = 'realmcu';
-  static const String _repo = 'hmi-android-apk';
+  static const String _repo = 'HoneyBox';
 
-  /// Gitee OpenAPI v5 — latest release of the repo.
+  /// GitHub Releases API — latest release of the repo.
   static const String _latestReleaseApi =
-      'https://gitee.com/api/v5/repos/$_owner/$_repo/releases/latest';
+      'https://api.github.com/repos/$_owner/$_repo/releases/latest';
 
   /// Queries the latest release and compares it with [currentVersion].
   /// Throws on network / parse errors so the caller can surface them.
@@ -61,7 +61,7 @@ class UpdateService {
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final resp = await req.close();
       if (resp.statusCode != 200) {
-        throw HttpException('Gitee 返回状态码 ${resp.statusCode}');
+        throw HttpException('GitHub 返回状态码 ${resp.statusCode}');
       }
       final body = await resp.transform(utf8.decoder).join();
       final json = jsonDecode(body) as Map<String, dynamic>;
