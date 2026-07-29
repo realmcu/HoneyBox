@@ -75,7 +75,7 @@ class UpdateService {
         if (asset is! Map) continue;
         final name = (asset['name'] as String? ?? '').toLowerCase();
         final url = asset['browser_download_url'] as String? ?? '';
-        if (name.endsWith('.apk') && url.isNotEmpty) {
+        if (name == 'honeybox.apk' && url.isNotEmpty) {
           apkUrl = url;
           break;
         }
