@@ -72,6 +72,9 @@ class _StreamPageState extends ConsumerState<StreamPage>
   /// crop factor; the pill overlay is shown briefly while pinching.
   static const double _kMinZoom = 1.0;
   static const double _kMaxZoom = 4.0; // matches the settings-sheet crop range
+  /// iPhone-style discrete zoom presets shown as a pill at the preview bottom.
+  /// Range stops short of [_kMaxZoom] so pinch still has headroom past 3×.
+  static const List<double> _kZoomSteps = [1.0, 2.0, 3.0];
   double _zoom = 1.0;
   double _zoomStart = 1.0;
   bool _showZoom = false;
@@ -984,9 +987,18 @@ class _StreamPageState extends ConsumerState<StreamPage>
                     Positioned(
                       left: 0,
                       right: 0,
-                      bottom: 16,
+                      bottom: 60,
                       child: Center(child: _buildZoomPill()),
                     ),
+                  // Discrete zoom-step pill, iPhone-camera style. Always
+                  // visible at the bottom-center of the preview; the
+                  // transient numeric pill floats above it while pinching.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 16,
+                    child: Center(child: _buildZoomSteps()),
+                  ),
                 ],
               ),
             );
@@ -1068,6 +1080,64 @@ class _StreamPageState extends ConsumerState<StreamPage>
             fontWeight: FontWeight.w700,
           ),
         ),
+      ),
+    );
+  }
+
+  /// Tap one of the discrete zoom-step buttons: jump [_zoom] to that step,
+  /// push it to the native layer, persist for next launch, and briefly show
+  /// the numeric readout pill so the change is confirmed.
+  void _onZoomStepTap(double step) {
+    final z = step.clamp(_kMinZoom, _kMaxZoom).toDouble();
+    _zoomTimer?.cancel();
+    setState(() {
+      _zoom = z;
+      _showZoom = true;
+    });
+    _encoder.setZoom(z);
+    _config = _config.copyWith(cropZoom: z);
+    EncoderConfigStore.save(_config);
+    _zoomTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _showZoom = false);
+    });
+  }
+
+  /// iPhone-camera-style discrete zoom pill — one small circle per preset in
+  /// [_kZoomSteps]. The circle closest to the current [_zoom] is filled with
+  /// the accent yellow (like the selected 1× lens on iOS); others are
+  /// semi-transparent black chips.
+  Widget _buildZoomSteps() {
+    // "Selected" = the step nearest to the current zoom (within a small
+    // tolerance so floating-point drift after pinch doesn't leave every step
+    // unselected). Ties go to the smaller step.
+    int selectedIdx = -1;
+    double bestDelta = 0.05;
+    for (var i = 0; i < _kZoomSteps.length; i++) {
+      final d = (_zoom - _kZoomSteps[i]).abs();
+      if (d < bestDelta) {
+        bestDelta = d;
+        selectedIdx = i;
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < _kZoomSteps.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            _ZoomStepButton(
+              step: _kZoomSteps[i],
+              selected: i == selectedIdx,
+              onTap: () => _onZoomStepTap(_kZoomSteps[i]),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1256,6 +1326,53 @@ class _FocusReticle extends StatelessWidget {
         decoration: BoxDecoration(
           border: Border.all(color: _kAccent, width: 1.5),
           borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+    );
+  }
+}
+
+/// One step in the iPhone-style discrete zoom pill. Selected = accent-yellow
+/// filled circle with a smaller black `1×` label; unselected = compact chip
+/// with the label expressed as `1` (no ×) so the row stays visually tight,
+/// matching the iOS Camera lens picker.
+class _ZoomStepButton extends StatelessWidget {
+  final double step;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ZoomStepButton({
+    required this.step,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Integer steps show as "1" / "2" / "3"; keep a decimal for other values
+    // (future-proofing if a 0.5× lens is ever added).
+    final label = step == step.roundToDouble()
+        ? step.toInt().toString()
+        : step.toStringAsFixed(1);
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        width: selected ? 34 : 28,
+        height: selected ? 34 : 28,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: selected ? _kAccent : Colors.white.withValues(alpha: 0.14),
+        ),
+        child: Text(
+          selected ? '$label×' : label,
+          style: TextStyle(
+            color: selected ? Colors.black : Colors.white,
+            fontSize: selected ? 12 : 13,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
