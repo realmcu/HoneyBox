@@ -51,8 +51,8 @@ void main() {
     });
     session.send(TYPE.raw, Uint8List.fromList([1, 2, 3, 4]), 'a.bin');
 
-    session.onL2Frame(
-        buildL2Frame(BleCmdFileTransferKey.beginRsp, Uint8List.fromList([0x00, 0x08, 0x00])));
+    session.onL2Frame(buildL2Frame(BleCmdFileTransferKey.beginRsp,
+        Uint8List.fromList([0x00, 0x08, 0x00])));
 
     expect(session.chunkSize, 2048);
     expect(session.state, L2State.transferring);
@@ -70,8 +70,8 @@ void main() {
     );
     session.send(TYPE.raw, Uint8List.fromList([1]), 'a.bin');
 
-    session.onL2Frame(
-        buildL2Frame(BleCmdFileTransferKey.beginRsp, Uint8List.fromList([0x01, 0x08, 0x00])));
+    session.onL2Frame(buildL2Frame(BleCmdFileTransferKey.beginRsp,
+        Uint8List.fromList([0x01, 0x08, 0x00])));
 
     expect(error, contains('设备忙'));
     expect(parseL2Frame(sent.last)!.key, BleCmdFileTransferKey.abort);
@@ -89,8 +89,8 @@ void main() {
       onProgress: (sentBytes, total) => progress.add(sentBytes),
     );
     session.send(TYPE.raw, Uint8List.fromList([1, 2, 3]), 'a.bin');
-    session.onL2Frame(
-        buildL2Frame(BleCmdFileTransferKey.beginRsp, Uint8List.fromList([0x00, 0x08, 0x00])));
+    session.onL2Frame(buildL2Frame(BleCmdFileTransferKey.beginRsp,
+        Uint8List.fromList([0x00, 0x08, 0x00])));
 
     expect(progress, isEmpty);
     session.onL1Ack(1, true);
@@ -111,8 +111,8 @@ void main() {
       timerProvider: timer,
     );
     session.send(TYPE.raw, Uint8List.fromList([1, 2, 3]), 'a.bin');
-    session.onL2Frame(
-        buildL2Frame(BleCmdFileTransferKey.beginRsp, Uint8List.fromList([0x00, 0x08, 0x00])));
+    session.onL2Frame(buildL2Frame(BleCmdFileTransferKey.beginRsp,
+        Uint8List.fromList([0x00, 0x08, 0x00])));
 
     timer.fire();
 
