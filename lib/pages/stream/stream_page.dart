@@ -59,6 +59,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
   /// [dispose] so the page doesn't hold pixel data after being torn down.
   Uint8List? _lastShot;
   bool _capturing = false;
+
   /// Camera-style shutter flash overlay opacity — pulsed briefly on capture as
   /// visual feedback that a photo was taken. Driven by [_flashCapture].
   double _flashOpacity = 0;

@@ -138,9 +138,11 @@ jobs:
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed lib/ test/
 
-      - name: Check release policy
+      - name: Check CI policies
         shell: pwsh
-        run: ./test/ci/flutter_ci_workflow_test.ps1
+        run: |
+          ./test/ci/flutter_ci_workflow_test.ps1
+          ./test/ci/android_repository_order_test.ps1
 
   # ─── Job 5: Publish Release ───────────────────────────────────────
   release:
