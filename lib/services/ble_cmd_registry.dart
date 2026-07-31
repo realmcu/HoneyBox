@@ -35,7 +35,8 @@ class BleCmd {
   // ── CMD 字节 ────────────────────────────────────────────────────────
   static const int watchTime = 0x02; // command
   static const int watchBind = 0x03; // command
-  static const int watchNotification = 0x05; // command
+  static const int watchNotification = 0x04; // command
+  static const int watchHealth = 0x05; // command
   static const int wifiProv = 0x0D; // command
   static const int stream = 0x0E; // stream (!!)
   static const int fileTransfer = 0x10; // command
@@ -63,6 +64,23 @@ abstract class BleCmdWatchNotificationKey {
   static const int pushNotification = 0x01; // App → Dev
   // 0x02 (app filter list) / 0x03 (master enable) 已在协议 spec 保留但未实现 —
   // 尚无 builder,故本表也不列。
+}
+
+/// Watch sport / health data (CMD 0x05) sub-command keys.
+abstract class BleCmdWatchHealthKey {
+  static const int requestData = 0x01; // App -> Dev
+  static const int sportData = 0x02; // Dev -> App
+  static const int sleepData = 0x03; // Dev -> App
+  static const int more = 0x04; // Dev -> App
+  static const int sleepSettings = 0x05; // Dev -> App
+  static const int realtime = 0x06; // App -> Dev
+  static const int syncStart = 0x07; // Dev -> App
+  static const int syncEnd = 0x08; // Dev -> App
+  static const int todaySport = 0x09;
+  static const int latestSport = 0x0A;
+  static const int calibrate = 0x0B;
+  static const int calibrateResponse = 0x0C;
+  static const int heartRateData = 0x0D; // Dev -> App
 }
 
 /// WiFi provisioning (CMD 0x0D) sub-command keys.
