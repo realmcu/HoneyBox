@@ -39,6 +39,7 @@ class BleCmd {
   static const int watchHealth = 0x05; // command
   static const int wifiProv = 0x0D; // command
   static const int stream = 0x0E; // stream (!!)
+  static const int remoteControl = 0x0F; // command
   static const int fileTransfer = 0x10; // command
 
   /// 该 CMD 跑在哪条 GATT 特征上。除 [stream] 外全部走命令通道。
@@ -109,4 +110,32 @@ abstract class BleCmdFileTransferKey {
   static const int endReq = 0x05; // App → Dev
   static const int endRsp = 0x06; // Dev → App
   static const int abort = 0x07; // 双向
+}
+
+/// Remote control (CMD 0x0F) sub-command keys.
+///
+/// 见 `docs/superpowers/specs/2026-07-30-remote-control-protocol-design.md`。
+/// 全部 key 一次冻结,即使 P0 只实现 capture / setZoom / stateReport / ctrlResult /
+/// lastShotReady 五个 —— 冻结的目的是让协议字节层稳定,后续加实现不用改中心表。
+abstract class BleCmdRemoteControlKey {
+  // Control 请求(0x01–0x0F,两端都能发,但 app 本地变化不发这些)
+  static const int capture = 0x01;
+  static const int recordStart = 0x02;
+  static const int recordStop = 0x03;
+  static const int setZoom = 0x04;
+  static const int focusPoint = 0x05;
+  static const int setEv = 0x06;
+  static const int setFlash = 0x07;
+  static const int setTimer = 0x08;
+  static const int setMode = 0x09;
+  static const int flipCamera = 0x0A;
+
+  // State 通知(0x10–0x1F,只由 app 发)
+  static const int stateReport = 0x10;
+  static const int ctrlResult = 0x11;
+  static const int lastShotReady = 0x12;
+
+  // Preview 拉取(0x20–0x2F,P0 一律 UNSUPPORTED)
+  static const int previewReq = 0x20;
+  static const int previewAck = 0x21;
 }

@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../providers/ble_provider.dart';
+import '../../providers/remote_control_provider.dart';
 import '../../providers/wifi_provider.dart';
 import '../../services/config_store.dart';
 import '../../services/encoder.dart';
+import '../../services/remote_control_session.dart';
 import '../../services/stream_protocol.dart';
 import '../../services/stream_transport.dart';
 import '../../services/wifi_transport.dart';
@@ -93,6 +95,11 @@ class _StreamPageState extends ConsumerState<StreamPage>
   bool _pinching = false; // ≥2 fingers down this gesture → zoom, not EV
   Timer? _zoomTimer;
 
+  /// The 0x0F control session for this connection (BLE only P0). Only used
+  /// to route inbound CAPTURE / SET_ZOOM into the same code paths used by the
+  /// local shutter / pinch, and to push STATE_REPORT after local changes.
+  RemoteControlSession? _remoteSession;
+
   /// Actual (camera-supported) size the native layer encoded at, reported on
   /// `started`. May differ from the requested resolution after snapping.
   int _actualW = 0;
@@ -159,6 +166,13 @@ class _StreamPageState extends ConsumerState<StreamPage>
           _error = null;
           _ev = _ev.clamp(info.evMin, info.evMax);
         });
+        _remoteSession?.reportSnapshot(
+          recording: false,
+          facing: _facingFront ? 1 : 0,
+          zoom: _zoom,
+          hasLastShot: _lastShot != null,
+          lastShotId: 0,
+        );
       }
       ..onStats = (stats) {
         if (!mounted) return;
@@ -224,6 +238,16 @@ class _StreamPageState extends ConsumerState<StreamPage>
 
     _encoder.listen();
     _bootstrapCamera();
+
+    // 挂 0x0F remote-control handler。CAPTURE 复用 _takePicture 的同一路径,
+    // SET_ZOOM 走同一个 clamp + _persistConfig 路径,让本地 pinch 与远程指令看
+    // 到同一份状态。
+    final session = ref.read(remoteControlSessionProvider);
+    _remoteSession = session;
+    session.registerHandlers(
+      capture: _handleRemoteCapture,
+      zoom: _handleRemoteZoom,
+    );
   }
 
   Future<void> _bootstrapCamera() async {
@@ -281,6 +305,8 @@ class _StreamPageState extends ConsumerState<StreamPage>
     _teardownSession();
     _encoder.dispose();
     _lastShot = null;
+    _remoteSession?.registerHandlers(capture: null, zoom: null);
+    _remoteSession = null;
     super.dispose();
   }
 
@@ -294,6 +320,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
       // Push to the live preview and persist for next time.
       _encoder.setConfig(updated);
       _persistConfig(updated);
+      _remoteSession?.reportZoom(_zoom);
     }
   }
 
@@ -585,6 +612,8 @@ class _StreamPageState extends ConsumerState<StreamPage>
       _decodedTextureId = -1;
     });
     await _encoder.openCamera(_config, facingFront: _facingFront);
+    _remoteSession?.reportFacing(_facingFront ? 1 : 0);
+    _remoteSession?.reportZoom(_kMinZoom);
   }
 
   /// A complete tap focuses (and meters) at [pos] within a [w]×[h] preview.
@@ -668,6 +697,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
       // zoom is a per-session choice, not a saved preference.
       _config = _config.copyWith(cropZoom: _zoom);
       _persistConfig(_config);
+      _remoteSession?.reportZoom(_zoom);
       _zoomTimer?.cancel();
       _zoomTimer = Timer(const Duration(milliseconds: 1200), () {
         if (mounted) setState(() => _showZoom = false);
@@ -1135,6 +1165,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
     _encoder.setZoom(z);
     _config = _config.copyWith(cropZoom: z);
     _persistConfig(_config);
+    _remoteSession?.reportZoom(z);
     _zoomTimer = Timer(const Duration(milliseconds: 900), () {
       if (mounted) setState(() => _showZoom = false);
     });
@@ -1322,6 +1353,40 @@ class _StreamPageState extends ConsumerState<StreamPage>
               ),
       ),
     );
+  }
+
+  /// Remote CAPTURE (device → app): mirror the shutter long-press path,
+  /// return the freshly allocated shot id on success.
+  Future<int?> _handleRemoteCapture() async {
+    final session = _remoteSession;
+    if (session == null || !mounted) return null;
+    final id = session.allocateShotId();
+    // 先跑本地拍照(包含 flash + _lastShot 更新),再让 session 发 STATE_REPORT。
+    await _takePicture();
+    if (!mounted || _lastShot == null) return null;
+    session.reportCaptureDone(id);
+    return id;
+  }
+
+  /// Remote SET_ZOOM (device → app): reuse the preset-button code path,
+  /// return false if the value falls outside the clamp range.
+  Future<bool> _handleRemoteZoom(double zoom) async {
+    if (!mounted) return false;
+    if (zoom < _kMinZoom - 0.001 || zoom > _kMaxZoom + 0.001) return false;
+    final clamped = zoom.clamp(_kMinZoom, _kMaxZoom).toDouble();
+    _zoomTimer?.cancel();
+    setState(() {
+      _zoom = clamped;
+      _showZoom = true;
+    });
+    _encoder.setZoom(clamped);
+    _config = _config.copyWith(cropZoom: clamped);
+    _persistConfig(_config);
+    _zoomTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _showZoom = false);
+    });
+    _remoteSession?.reportZoom(clamped);
+    return true;
   }
 
   /// Take a single JPEG snapshot of the current GL frame and stash it in
