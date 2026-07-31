@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// Outcome of an update check against the project's Gitee release page.
+/// Outcome of an update check against the project's GitHub release page.
 class UpdateInfo {
   /// Latest release version, leading `v` stripped (e.g. `0.8.0`).
   final String latestVersion;
@@ -16,7 +16,7 @@ class UpdateInfo {
   /// Direct download URL of the latest release's `.apk` asset (empty if none).
   final String apkUrl;
 
-  /// The release notes (`body`) as shown on Gitee.
+  /// The release notes (`body`) as shown on GitHub.
   final String releaseNotes;
 
   /// True when [latestVersion] is newer than [currentVersion] and an APK asset
