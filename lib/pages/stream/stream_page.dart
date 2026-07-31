@@ -53,6 +53,17 @@ class _StreamPageState extends ConsumerState<StreamPage>
   String? _error;
   bool _facingFront = false;
 
+  /// Latest captured JPEG bytes (single-slot demo cache). Populated by
+  /// [_takePicture] — invoked via a hidden long-press on the shutter, and in
+  /// future by a `0x0F CAPTURE` sub-command from the paired device. Released in
+  /// [dispose] so the page doesn't hold pixel data after being torn down.
+  Uint8List? _lastShot;
+  bool _capturing = false;
+  /// Camera-style shutter flash overlay opacity — pulsed briefly on capture as
+  /// visual feedback that a photo was taken. Driven by [_flashCapture].
+  double _flashOpacity = 0;
+  Timer? _flashTimer;
+
   /// Latest native diagnostic line (swap/crop/matrix). Hidden unless [_showDiag]
   /// is toggled on; shown as a non-intrusive overlay at the top of the preview.
   String? _diag;
@@ -73,8 +84,8 @@ class _StreamPageState extends ConsumerState<StreamPage>
   static const double _kMinZoom = 1.0;
   static const double _kMaxZoom = 4.0; // matches the settings-sheet crop range
   /// iPhone-style discrete zoom presets shown as a pill at the preview bottom.
-  /// Range stops short of [_kMaxZoom] so pinch still has headroom past 3×.
-  static const List<double> _kZoomSteps = [1.0, 2.0, 3.0];
+  /// Range stops short of [_kMaxZoom] so pinch still has headroom past 2×.
+  static const List<double> _kZoomSteps = [1.0, 2.0];
   double _zoom = 1.0;
   double _zoomStart = 1.0;
   bool _showZoom = false;
@@ -215,12 +226,14 @@ class _StreamPageState extends ConsumerState<StreamPage>
   }
 
   Future<void> _bootstrapCamera() async {
-    // Restore the last-used encoding parameters.
+    // Restore the last-used encoding parameters, but always reset zoom to 1×
+    // on entry — digital zoom is a per-session choice, not a preference. Users
+    // start every screen fresh at full field of view.
     final saved = await EncoderConfigStore.load();
     if (mounted) {
       setState(() {
-        _config = saved;
-        _zoom = saved.cropZoom.clamp(_kMinZoom, _kMaxZoom);
+        _config = saved.copyWith(cropZoom: _kMinZoom);
+        _zoom = _kMinZoom;
       });
     }
 
@@ -262,9 +275,11 @@ class _StreamPageState extends ConsumerState<StreamPage>
     WidgetsBinding.instance.removeObserver(this);
     _focusTimer?.cancel();
     _zoomTimer?.cancel();
+    _flashTimer?.cancel();
     _stopInfoTimer();
     _teardownSession();
     _encoder.dispose();
+    _lastShot = null;
     super.dispose();
   }
 
@@ -277,8 +292,16 @@ class _StreamPageState extends ConsumerState<StreamPage>
       });
       // Push to the live preview and persist for next time.
       _encoder.setConfig(updated);
-      EncoderConfigStore.save(updated);
+      _persistConfig(updated);
     }
+  }
+
+  /// Persist encoder config without leaking the current digital-zoom factor —
+  /// zoom is intentionally NOT remembered across page entries (see
+  /// [_bootstrapCamera]). All three save sites (settings sheet, pinch end,
+  /// discrete-step tap) funnel through here.
+  void _persistConfig(EncoderConfig cfg) {
+    EncoderConfigStore.save(cfg.copyWith(cropZoom: _kMinZoom));
   }
 
   /// The stream-protocol codec for a format (all three are now streamable).
@@ -639,9 +662,11 @@ class _StreamPageState extends ConsumerState<StreamPage>
 
   void _onScaleEnd(ScaleEndDetails d) {
     if (_pinching) {
-      // Persist the settled zoom so it survives navigation / reopen.
+      // Mirror the settled zoom into [_config] so live setConfig round-trips
+      // see it; [_persistConfig] scrubs it back to 1× before persisting since
+      // zoom is a per-session choice, not a saved preference.
       _config = _config.copyWith(cropZoom: _zoom);
-      EncoderConfigStore.save(_config);
+      _persistConfig(_config);
       _zoomTimer?.cancel();
       _zoomTimer = Timer(const Duration(milliseconds: 1200), () {
         if (mounted) setState(() => _showZoom = false);
@@ -981,13 +1006,25 @@ class _StreamPageState extends ConsumerState<StreamPage>
               child: Stack(
                 children: [
                   Positioned.fill(child: Texture(textureId: info.textureId)),
+                  // Shutter flash overlay — camera-style visual feedback on
+                  // capture. IgnorePointer so it never eats touches.
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: _flashOpacity,
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOut,
+                        child: const ColoredBox(color: Colors.white),
+                      ),
+                    ),
+                  ),
                   if ((_focusVisible || _showEv) && _focusPoint != null)
                     ..._buildFocusOverlay(info, cw),
                   if (_showZoom)
                     Positioned(
                       left: 0,
                       right: 0,
-                      bottom: 60,
+                      top: 16,
                       child: Center(child: _buildZoomPill()),
                     ),
                   // Discrete zoom-step pill, iPhone-camera style. Always
@@ -1096,7 +1133,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
     });
     _encoder.setZoom(z);
     _config = _config.copyWith(cropZoom: z);
-    EncoderConfigStore.save(_config);
+    _persistConfig(_config);
     _zoomTimer = Timer(const Duration(milliseconds: 900), () {
       if (mounted) setState(() => _showZoom = false);
     });
@@ -1175,10 +1212,17 @@ class _StreamPageState extends ConsumerState<StreamPage>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _circleButton(
-                Icons.flip_camera_ios_outlined,
-                onTap: _flipCamera,
-                enabled: !_encoding,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _circleButton(
+                    Icons.flip_camera_ios_outlined,
+                    onTap: _flipCamera,
+                    enabled: !_encoding,
+                  ),
+                  const SizedBox(width: 12),
+                  _buildThumbnail(),
+                ],
               ),
               _buildShutter(),
               _circleButton(
@@ -1194,12 +1238,15 @@ class _StreamPageState extends ConsumerState<StreamPage>
   }
 
   /// iOS-style record button: white ring with a white circle that morphs into a
-  /// red rounded square while encoding.
+  /// red rounded square while encoding. A hidden long-press (~800ms) triggers a
+  /// single-shot JPEG capture — future 0x0F `CAPTURE` sub-commands from the
+  /// device share the same [_takePicture] code path.
   Widget _buildShutter() {
     final ready = _camera != null;
     final ring = ready ? Colors.white : Colors.white38;
     return GestureDetector(
       onTap: ready ? _toggleProjection : null,
+      onLongPress: ready ? _takePicture : null,
       child: Container(
         width: 74,
         height: 74,
@@ -1241,6 +1288,85 @@ class _StreamPageState extends ConsumerState<StreamPage>
           size: 24,
           color: enabled ? Colors.white : Colors.white38,
         ),
+      ),
+    );
+  }
+
+  /// iPhone-camera-style thumbnail button next to the flip control. Shows the
+  /// most recent [_lastShot] JPEG, or a dimmed placeholder when nothing has
+  /// been captured yet. Tapping opens the full-screen preview.
+  Widget _buildThumbnail() {
+    final shot = _lastShot;
+    final enabled = shot != null;
+    return GestureDetector(
+      onTap: enabled ? _openLastShotPreview : null,
+      child: Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          color: Colors.white.withValues(alpha: 0.12),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: enabled ? 0.6 : 0.2),
+            width: 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: shot != null
+            ? Image.memory(shot, fit: BoxFit.cover, gaplessPlayback: true)
+            : const Icon(
+                Icons.photo_outlined,
+                size: 22,
+                color: Colors.white38,
+              ),
+      ),
+    );
+  }
+
+  /// Take a single JPEG snapshot of the current GL frame and stash it in
+  /// [_lastShot]. Shared entry point for the shutter long-press (dev entry)
+  /// and — later — the 0x0F `CAPTURE` sub-command dispatched from the device.
+  Future<void> _takePicture() async {
+    if (_capturing) return;
+    setState(() => _capturing = true);
+    _flashCapture();
+    try {
+      final bytes = await _encoder.takePicture();
+      if (!mounted) return;
+      if (bytes != null && bytes.isNotEmpty) {
+        setState(() => _lastShot = bytes);
+      } else {
+        setState(() => _error = '拍照失败');
+      }
+    } finally {
+      if (mounted) setState(() => _capturing = false);
+    }
+  }
+
+  /// Camera-style shutter flash: snap the overlay to full-opacity white, then
+  /// let [AnimatedOpacity] fade it back out. Timer resets any in-flight fade
+  /// so back-to-back captures still flash cleanly.
+  void _flashCapture() {
+    _flashTimer?.cancel();
+    setState(() => _flashOpacity = 1.0);
+    // First tick after the frame renders the opaque overlay, then trigger the
+    // fade — without the delay the AnimatedOpacity's transition target would
+    // change in the same build and the tween wouldn't run.
+    _flashTimer = Timer(const Duration(milliseconds: 60), () {
+      if (!mounted) return;
+      setState(() => _flashOpacity = 0);
+    });
+  }
+
+  void _openLastShotPreview() {
+    final shot = _lastShot;
+    if (shot == null) return;
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black,
+        transitionDuration: const Duration(milliseconds: 180),
+        pageBuilder: (_, __, ___) => _LastShotViewer(bytes: shot),
       ),
     );
   }
@@ -1373,6 +1499,58 @@ class _ZoomStepButton extends StatelessWidget {
             fontSize: selected ? 12 : 13,
             fontWeight: FontWeight.w700,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen preview for the most recent [_lastShot] — iPhone-camera style:
+/// black background, centered image with pinch/pan via [InteractiveViewer],
+/// close button in the top-right.
+class _LastShotViewer extends StatelessWidget {
+  const _LastShotViewer({required this.bytes});
+
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                minScale: 1.0,
+                maxScale: 5.0,
+                child: Center(
+                  child: Image.memory(
+                    bytes,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 12,
+              right: 12,
+              child: Material(
+                color: Colors.white.withValues(alpha: 0.15),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => Navigator.of(context).pop(),
+                  child: const SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Icon(Icons.close, color: Colors.white, size: 22),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
