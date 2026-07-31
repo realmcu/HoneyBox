@@ -227,5 +227,6 @@ jobs:
             -d "target_commitish=master" \
             | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')"
           curl -fsS -X POST \
-            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files?access_token=${GITEE_TOKEN}" \
+            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files" \
+            -F "access_token=${GITEE_TOKEN}" \
             -F "file=@${APK}"
