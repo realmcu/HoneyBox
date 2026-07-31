@@ -21,6 +21,19 @@
   `GITEE_TOKEN` 的 secret（Gitee 个人访问令牌，需 `projects` 与 push 代码权限），
   供 CI 双发到 Gitee 使用。⚠️ 令牌切勿写入代码/提交/日志。
 
+  **关于 token 安全存储与日志脱敏：**
+
+  - **加密存储**：secret 添加到 GitHub 仓库后以加密方式存储，网页上不再显示原文，
+    只能覆盖或删除，无法查看。
+  - **自动脱敏**：workflow 通过 `${{ secrets.GITEE_TOKEN }}` 引用。GitHub Actions
+    对 secret 值有自动脱敏机制，凡出现在运行日志中的 token 原文一律被替换为 `***`，
+    不会在日志里泄露。
+  - **已规避常见泄露点**：本 CI 不使用 `set -x`；curl 传输加 `-s` 静默模式；token
+    通过 `-F` 表单字段传给 Gitee API，而非拼入 URL query——避免 token 进入 Gitee
+    侧服务器的访问日志。
+  - **最小权限 + 短有效期**：建议给该 token 仅授予建 Release、上传附件、push 代码所
+    需的最小权限，并设置较短的有效期，以降低万一泄露时的影响范围。
+
 ## 1. 修改版本号（两处，务必一致）
 
 | 文件 | 字段 | 说明 |
