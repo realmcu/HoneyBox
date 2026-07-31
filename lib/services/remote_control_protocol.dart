@@ -38,7 +38,8 @@ class RemoteControlProtocol {
   static const int tagFacing = 0x03; // u8: 0=back, 1=front
   static const int tagZoom = 0x04; // u16BE fixed-point ×100 (1.00 → 100)
   static const int tagHasLastShot = 0x0F; // u8 bool
-  static const int tagLastShotId = 0x10; // u16BE (与 spec §5.2.4 LAST_SHOT_READY 同源)
+  static const int tagLastShotId =
+      0x10; // u16BE (与 spec §5.2.4 LAST_SHOT_READY 同源)
 
   // ── Frame builder ───────────────────────────────────────────────────────
   static Uint8List buildFrame(int key, Uint8List value) {

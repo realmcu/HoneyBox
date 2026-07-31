@@ -11,7 +11,8 @@ void main() {
         BleCmd.remoteControl,
         0x00,
         BleCmdRemoteControlKey.capture,
-        0x00, 0x00,
+        0x00,
+        0x00,
       ]);
 
       final parsed = RemoteControlProtocol.parse(frame);
@@ -80,8 +81,8 @@ void main() {
     });
 
     test('buildSetZoom throws for negative or > 655.35 values', () {
-      expect(() => RemoteControlProtocol.buildSetZoom(-0.01),
-          throwsArgumentError);
+      expect(
+          () => RemoteControlProtocol.buildSetZoom(-0.01), throwsArgumentError);
       expect(() => RemoteControlProtocol.buildSetZoom(655.36),
           throwsArgumentError);
     });
@@ -120,7 +121,9 @@ void main() {
 
     test('parseCtrlResult returns null for < 3 bytes', () {
       expect(RemoteControlProtocol.parseCtrlResult(Uint8List(0)), isNull);
-      expect(RemoteControlProtocol.parseCtrlResult(Uint8List.fromList([0x01, 0x02])),
+      expect(
+          RemoteControlProtocol.parseCtrlResult(
+              Uint8List.fromList([0x01, 0x02])),
           isNull);
     });
   });
@@ -197,7 +200,8 @@ void main() {
       final parsed = RemoteControlProtocol.parseStateReport(
         RemoteControlProtocol.parse(
           RemoteControlProtocol.buildStateReport(original),
-        )!.value,
+        )!
+            .value,
       );
       expect(parsed?.recording, true);
       expect(parsed?.facing, 1);
@@ -218,7 +222,8 @@ void main() {
     });
 
     test('parseStateReport returns null when a TLV length overshoots', () {
-      final payload = Uint8List.fromList([0x03, 0x05, 0x00, 0x64]); // len=5 lies
+      final payload =
+          Uint8List.fromList([0x03, 0x05, 0x00, 0x64]); // len=5 lies
       expect(RemoteControlProtocol.parseStateReport(payload), isNull);
     });
   });

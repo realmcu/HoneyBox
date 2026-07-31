@@ -53,7 +53,8 @@ void main() {
       expect(result.status, RemoteControlProtocol.resultUnsupported);
     });
 
-    test('CAPTURE with a handler → STATE_REPORT + LAST_SHOT_READY, no CTRL_RESULT',
+    test(
+        'CAPTURE with a handler → STATE_REPORT + LAST_SHOT_READY, no CTRL_RESULT',
         () async {
       session.registerHandlers(
         capture: () async {
@@ -135,7 +136,12 @@ void main() {
 
       // 手工发一个 vlen=1 的 SET_ZOOM
       notifs.add(Uint8List.fromList([
-        0x0F, 0x00, BleCmdRemoteControlKey.setZoom, 0x00, 0x01, 0xAA,
+        0x0F,
+        0x00,
+        BleCmdRemoteControlKey.setZoom,
+        0x00,
+        0x01,
+        0xAA,
       ]));
       await Future<void>.delayed(Duration.zero);
 
@@ -173,7 +179,8 @@ void main() {
         rec.sent.clear();
         notifs.add(Uint8List.fromList([0x0F, 0x00, key, 0x00, 0x00]));
         await Future<void>.delayed(Duration.zero);
-        expect(rec.sent, hasLength(1), reason: 'key=0x${key.toRadixString(16)}');
+        expect(rec.sent, hasLength(1),
+            reason: 'key=0x${key.toRadixString(16)}');
         final ack = RemoteControlProtocol.parseCtrlResult(
           RemoteControlProtocol.parse(rec.sent.single)!.value,
         )!;
@@ -221,7 +228,8 @@ void main() {
       expect(state.zoom, isNull);
     });
 
-    test('report methods no-op when commandAvailable() returns false', () async {
+    test('report methods no-op when commandAvailable() returns false',
+        () async {
       final offlineRec = _Recorder();
       final offline = RemoteControlSession(
         commandAvailable: () => false,
