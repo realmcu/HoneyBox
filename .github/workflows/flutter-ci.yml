@@ -188,3 +188,44 @@ jobs:
             release-artifacts/**
           prerelease: false
           generate_release_notes: true
+
+      - name: Locate APK
+        id: apk
+        run: |
+          set -euo pipefail
+          apk="$(find release-artifacts -name 'HoneyBox.apk' -type f | head -n1)"
+          if [ -z "$apk" ]; then
+            echo "HoneyBox.apk not found under release-artifacts" >&2
+            exit 1
+          fi
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$apk" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Push tag and code to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git push "https://oauth2:${GITEE_TOKEN}@gitee.com/realmcu/HoneyBox.git" \
+            "HEAD:refs/heads/master" "${GITHUB_REF_NAME}"
+
+      - name: Publish Gitee Release
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          SHA256: ${{ steps.apk.outputs.sha256 }}
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          set -euo pipefail
+          body="HoneyBox ${TAG}"$'\n\n'"SHA-256: ${SHA256}"
+          rid="$(curl -fsS -X POST \
+            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases" \
+            -d "access_token=${GITEE_TOKEN}" \
+            --data-urlencode "tag_name=${TAG}" \
+            --data-urlencode "name=HoneyBox ${TAG}" \
+            --data-urlencode "body=${body}" \
+            -d "target_commitish=master" \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')"
+          curl -fsS -X POST \
+            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files?access_token=${GITEE_TOKEN}" \
+            -F "file=@${APK}"
