@@ -148,7 +148,7 @@ jobs:
   release:
     name: Publish Release
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     needs: [build-android, build-windows, lint]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -218,7 +218,9 @@ jobs:
         run: |
           set -euo pipefail
           body="HoneyBox ${TAG}"$'\n\n'"SHA-256: ${SHA256}"
-          rid="$(curl -fsS -X POST \
+
+          # 创建 Gitee release 条目（此调用轻量、很快）
+          rid="$(curl -fsS --max-time 60 -X POST \
             "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases" \
             --data-urlencode "access_token=${GITEE_TOKEN}" \
             --data-urlencode "tag_name=${TAG}" \
@@ -226,13 +228,33 @@ jobs:
             --data-urlencode "body=${body}" \
             -d "target_commitish=master" \
             | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')"
-          if ! curl -fsS -X POST \
-            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files" \
-            -F "access_token=${GITEE_TOKEN}" \
-            -F "file=@${APK}"; then
-            echo "attach_files failed; rolling back release ${rid}" >&2
-            curl -fsS -X DELETE \
+
+          # 上传 APK 附件：海外 runner 跨境上行到 Gitee 易挂起，这里加超时+重试，
+          # 避免像旧版那样无限卡死直到 job 超时被 kill（curl 无 --max-time 是根因）。
+          # --max-time 600 给单次上传 10 分钟上限；失败则重试，共尝试 4 次。
+          # --show-error 让失败时打印真实原因（HTTP 码/网络错误），不再静默。
+          uploaded=0
+          for attempt in 1 2 3 4; do
+            echo "== attach_files 第 ${attempt} 次尝试（62MB 跨境上传）=="
+            if curl -fS --show-error \
+              --connect-timeout 30 --max-time 600 \
+              --retry 0 \
+              -X POST \
+              "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files" \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "file=@${APK}"; then
+              uploaded=1
+              echo "== attach_files 成功 =="
+              break
+            fi
+            echo "== 第 ${attempt} 次上传失败/超时，10s 后重试 ==" >&2
+            sleep 10
+          done
+
+          if [ "$uploaded" -ne 1 ]; then
+            echo "attach_files 4 次均失败；回滚删除 release ${rid}" >&2
+            curl -fsS --max-time 60 -X DELETE \
               "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}?access_token=${GITEE_TOKEN}" \
-              || echo "rollback delete also failed; delete release ${rid} manually" >&2
+              || echo "回滚删除也失败；请手动删除 release ${rid}" >&2
             exit 1
           fi
