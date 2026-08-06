@@ -4,6 +4,11 @@ HoneyBox 是一款基于 Flutter 开发的内部设备调试工具，面向电�
 
 > 本项目仅用于研发和调试，不作为商业产品发布。
 
+## 仓库说明
+
+- **GitHub（开发仓库）**：[realmcu/HoneyBox](https://github.com/realmcu/HoneyBox)。项目的代码开发、Issue、Pull Request 和版本发布均以 GitHub 为准。
+- **Gitee（镜像仓库）**：[realmcu/HoneyBox](https://gitee.com/realmcu/HoneyBox)。Gitee 仅作为镜像仓库，主要用于方便国内用户下载 APK，不作为项目开发和代码贡献入口。
+
 ## 主要功能
 
 ### 设备连接
@@ -163,6 +168,18 @@ build/windows/x64/runner/Release/HoneyBox.exe
 ```
 
 运行 Windows 程序时，应保留 Release 目录中的 DLL、`data` 等配套文件，不能只复制 EXE。
+
+## GitHub CI
+
+GitHub Actions 工作流位于 `.github/workflows/flutter-ci.yml`，自动执行代码检查、测试、构建和发布：
+
+1. **Pull Request 检查**：向 `master` 或 `main` 提交 Pull Request 时，运行 Dart 格式检查、CI 规则检查、`flutter analyze` 和 `flutter test`。
+2. **分支构建**：向 `master`、`main` 或 `develop` 推送非文档、非资源文件改动时，在检查通过后构建 Android Debug APK 和 Windows x64 Release，并将产物保留 7 天。
+3. **手动构建**：可在 GitHub Actions 页面手动触发相同的检查及 Android、Windows 构建流程。
+4. **版本发布**：推送 `v*` 格式的标签（例如 `v1.2.0`）后，CI 构建 Android Release APK 和 Windows x64 Release，创建 GitHub Release 并上传构建产物。
+5. **同步国内镜像**：版本发布成功后，CI 将代码与标签同步到 Gitee，并创建 Gitee Release、上传 APK 及记录 APK 的 SHA-256。Gitee 在此流程中仅承担镜像和国内下载用途。
+
+开发与发布流程以 GitHub CI 的执行结果为准；Gitee 镜像由发布流程自动更新，不接受直接开发提交。
 
 ## Windows BLE 稳定性补丁
 
