@@ -10,6 +10,11 @@ on:
   pull_request:
     branches: [master, main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing vX.Y.Z tag to rebuild and repair releases (leave empty for a normal manual build)'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,6 +29,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -55,6 +62,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -71,13 +80,13 @@ jobs:
         run: flutter pub get
 
       - name: Build Android APK (debug)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event.inputs.release_tag == '' }}
         run: |
           flutter build apk --debug
           cp build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/HoneyBox-debug.apk
 
       - name: Build Android APK (release)
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != '' }}
         run: |
           flutter build apk --release
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/HoneyBox.apk
@@ -99,6 +108,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -126,6 +137,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -148,16 +161,33 @@ jobs:
   release:
     name: Publish Release
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 150
     needs: [build-android, build-windows, lint]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+
+      - name: Validate release tag
+        id: release_ref
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          release_sha="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          test "$(git rev-parse HEAD)" = "${release_sha}"
+          echo "sha=${release_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Download Android APK
         uses: actions/download-artifact@v4
@@ -174,12 +204,12 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "HoneyBox ${{ github.ref_name }}"
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "HoneyBox ${{ env.RELEASE_TAG }}"
           body: |
-            ## HoneyBox ${{ github.ref_name }}
+            ## HoneyBox ${{ env.RELEASE_TAG }}
 
-            Built from commit ${{ github.sha }}
+            Built from commit ${{ steps.release_ref.outputs.sha }}
 
             ### Downloads
             - **Android release APK** - `honeybox-android-apk`
@@ -207,12 +237,13 @@ jobs:
         run: |
           set -euo pipefail
           git push --force "https://oauth2:${GITEE_TOKEN}@gitee.com/realmcu/HoneyBox.git" \
-            "HEAD:refs/heads/master" "${GITHUB_REF_NAME}"
+            "refs/remotes/origin/master:refs/heads/master" \
+            "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
       - name: Publish Gitee Release
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
           SHA256: ${{ steps.apk.outputs.sha256 }}
           APK: ${{ steps.apk.outputs.path }}
         run: |
@@ -229,30 +260,17 @@ jobs:
             -d "target_commitish=master" \
             | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')"
 
-          # 上传 APK 附件：海外 runner 跨境上行到 Gitee 易挂起，这里加超时+重试，
-          # 避免像旧版那样无限卡死直到 job 超时被 kill（curl 无 --max-time 是根因）。
-          # --max-time 600 给单次上传 10 分钟上限；失败则重试，共尝试 4 次。
-          # --show-error 让失败时打印真实原因（HTTP 码/网络错误），不再静默。
-          uploaded=0
-          for attempt in 1 2 3 4; do
-            echo "== attach_files 第 ${attempt} 次尝试（62MB 跨境上传）=="
-            if curl -fS --show-error \
-              --connect-timeout 30 --max-time 600 \
-              --retry 0 \
-              -X POST \
-              "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files" \
-              -F "access_token=${GITEE_TOKEN}" \
-              -F "file=@${APK}"; then
-              uploaded=1
-              echo "== attach_files 成功 =="
-              break
-            fi
-            echo "== 第 ${attempt} 次上传失败/超时，10s 后重试 ==" >&2
-            sleep 10
-          done
-
-          if [ "$uploaded" -ne 1 ]; then
-            echo "attach_files 4 次均失败；回滚删除 release ${rid}" >&2
+          # GitHub hosted runner 到 Gitee 的实测上行约 12-14 KB/s，62 MB APK
+          # 需要约 80 分钟。短超时重试会每次从零开始，永远无法传完，因此允许
+          # 一次最长两小时的连续上传，并由 job 的 150 分钟上限兜底。
+          if ! curl -fS --show-error \
+            --connect-timeout 30 --max-time 7200 \
+            --retry 0 \
+            -X POST \
+            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files" \
+            -F "access_token=${GITEE_TOKEN}" \
+            -F "file=@${APK}"; then
+            echo "attach_files 上传失败；回滚删除 release ${rid}" >&2
             curl -fsS --max-time 60 -X DELETE \
               "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}?access_token=${GITEE_TOKEN}" \
               || echo "回滚删除也失败；请手动删除 release ${rid}" >&2
