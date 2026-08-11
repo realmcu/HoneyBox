@@ -32,7 +32,7 @@ Assert-NotContains 'for attempt in 1 2 3 4' `
     'Gitee APK upload must not restart slow transfers from zero.'
 Assert-Contains 'releases/tags/\$\{TAG\}' `
     'Gitee publishing must look up an existing release before creating one.'
-Assert-Contains 'data is None.*missing' `
+Assert-Contains 'missing.*data is None.*found' `
     'Gitee publishing must treat an HTTP 200 null response as a missing release.'
 Assert-Contains 'apk_exists=.*HoneyBox\.apk' `
     'Gitee publishing must skip an APK that is already available.'

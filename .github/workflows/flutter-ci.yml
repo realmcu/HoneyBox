@@ -255,8 +255,12 @@ jobs:
 
           status="$(curl -sS --max-time 60 -o "$response_file" -w '%{http_code}' \
             "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/tags/${TAG}?access_token=${GITEE_TOKEN}")"
-
+          lookup=error
           if [ "$status" = 200 ]; then
+            lookup="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print("missing" if data is None else "found")' "$response_file")"
+          fi
+
+          if [ "$status" = 200 ] && [ "$lookup" = found ]; then
             rid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["id"])' "$response_file")"
             apk_exists="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(str(any(asset.get("name") == "HoneyBox.apk" for asset in data.get("assets", []))).lower())' "$response_file")"
             if [ "$apk_exists" = true ]; then
@@ -264,7 +268,7 @@ jobs:
               exit 0
             fi
             echo "Reusing Gitee release ${TAG} (${rid}) and uploading its missing APK."
-          elif [ "$status" = 404 ]; then
+          elif { [ "$status" = 404 ] || { [ "$status" = 200 ] && [ "$lookup" = missing ]; }; }; then
             status="$(curl -sS --max-time 60 -o "$response_file" -w '%{http_code}' -X POST \
               "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases" \
               --data-urlencode "access_token=${GITEE_TOKEN}" \
