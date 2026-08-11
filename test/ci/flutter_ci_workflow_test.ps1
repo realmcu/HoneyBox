@@ -30,6 +30,14 @@ Assert-Contains '--max-time\s+7200' `
     'Gitee APK upload must allow one continuous two-hour transfer.'
 Assert-NotContains 'for attempt in 1 2 3 4' `
     'Gitee APK upload must not restart slow transfers from zero.'
+Assert-Contains 'releases/tags/\$\{TAG\}' `
+    'Gitee publishing must look up an existing release before creating one.'
+Assert-Contains "assets.*name.*HoneyBox\\.apk" `
+    'Gitee publishing must skip an APK that is already available.'
+Assert-Contains "release_created.*=.*false" `
+    'Gitee publishing must track whether the release was created by this run.'
+Assert-Contains 'if \[ "\$release_created" = true \]' `
+    'Gitee publishing must only roll back a release created by this run.'
 Assert-Contains 'refs/remotes/origin/master:refs/heads/master' `
     'Repair runs must keep Gitee master aligned with GitHub master.'
 Assert-NotContains 'HEAD:refs/heads/master' `
