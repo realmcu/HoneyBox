@@ -142,7 +142,24 @@ flutter build apk --release
 build/app/outputs/apk/release/HoneyBox-release.apk
 ```
 
-当前 Release 构建使用 debug 签名，仅适合内部调试和安装测试，不适合正式发布。
+Release 必须使用正式签名，不会回退到 debug 签名。Android 的本机密钥与签名配置写入已忽略的 `android/local.properties`：
+
+```properties
+AMAP_DEBUG_KEY=高德控制台中为Debug签名申请的Key
+AMAP_RELEASE_KEY=高德控制台中为Release签名申请的Key
+RELEASE_STORE_FILE=D:/secure/path/honeybox-release.jks
+RELEASE_STORE_PASSWORD=本机真实密码
+RELEASE_KEY_ALIAS=honeybox
+RELEASE_KEY_PASSWORD=本机真实密码
+```
+
+不要把真实 Key、密码或 keystore 提交到 Git；`*.keystore` 和 `*.jks` 已被忽略。高德 Android Key 按 **Key + 最终包名 + 实际签名 SHA1** 校验：
+
+1. 在[高德开放平台控制台](https://console.amap.com/)分别创建/配置 Debug 与 Release 的 Android Key，包名均填写 `com.honeygui.honeybox`。
+2. Debug Key 绑定本机 debug 证书 SHA1；本机已知值为 `88:77:8B:76:1C:6E:AE:5A:20:E8:EC:B2:10:63:8A:A6:73:87:28:F4`。Release Key 绑定团队正式 keystore 的实际 SHA1，不能填写 Debug SHA1。
+3. 查看各变体签名信息：`cd android; .\gradlew.bat signingReport`。也可运行 `& "$env:JAVA_HOME\bin\keytool.exe" -list -v -keystore D:\secure\honeybox-release.jks -alias honeybox` 获取 Release SHA1。
+4. 构建 Debug：`flutter build apk --debug`；构建 Release：`flutter build apk --release`。缺少对应 AMap Key，或 Release 缺少任一签名项时，构建会明确失败。
+5. 验证产物签名：`$bt = Get-ChildItem "$env:LOCALAPPDATA\Android\Sdk\build-tools" -Directory | Sort-Object Name -Descending | Select-Object -First 1; & "$($bt.FullName)\apksigner.bat" verify --print-certs build\app\outputs\apk\release\HoneyBox-release.apk`。输出的 SHA-1 必须与高德控制台 Release Key 绑定值一致。
 
 ### Windows EXE
 
@@ -180,6 +197,8 @@ GitHub Actions 工作流位于 `.github/workflows/flutter-ci.yml`，自动执行
 5. **同步国内镜像**：版本发布成功后，CI 将代码与标签同步到 Gitee，并创建 Gitee Release、上传 APK 及记录 APK 的 SHA-256。Gitee 在此流程中仅承担镜像和国内下载用途。
 
 开发与发布流程以 GitHub CI 的执行结果为准；Gitee 镜像由发布流程自动更新，不接受直接开发提交。
+
+CI 构建 Android 包需要高德 Key 与 release 签名凭据，这些内容不入库，由 GitHub Secrets 在构建前注入。所需 Secret 清单与配置步骤见 [docs/ci_release_signing.md](docs/ci_release_signing.md)。未配置时打标签会导致 release 构建失败。
 
 ## Windows BLE 稳定性补丁
 

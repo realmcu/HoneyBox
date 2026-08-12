@@ -21,6 +21,12 @@ const String _rxUuid = 'FFC2';
 const String _streamTxUuid = 'FFC4';
 const String _streamRxUuid = 'FFC5';
 
+// Navigation Projection Service: control (FFD1/FFD2, with L1) + data (FFD3/FFD4, raw L2).
+const String _naviCtrlTxUuid = 'FFD1';
+const String _naviCtrlRxUuid = 'FFD2';
+const String _naviDataTxUuid = 'FFD3';
+const String _naviDataRxUuid = 'FFD4';
+
 // ---------------------------------------------------------------------------
 // Connection state
 // ---------------------------------------------------------------------------
@@ -89,6 +95,30 @@ class BleManager {
     return cs < 1 ? 1 : cs;
   }
 
+  /// Whether the device exposes the Navigation Projection Service (FFD1-FFD4).
+  bool get naviProjAvailable =>
+      _naviCtrlTxChar != null &&
+      _naviCtrlRxChar != null &&
+      _naviDataTxChar != null &&
+      _naviDataRxChar != null;
+
+  /// Raw L2 messages received on the navi data notify (FFD4).
+  Stream<Uint8List> get naviDataNotifications =>
+      _naviDataNotifyController.stream;
+
+  /// Bytes of JPEG frame data per NAVI_FRAME write = `(MTU − 3) − 13`.
+  int get naviDataChunkSize {
+    final cs = (_mtu - 3) - 13;
+    return cs < 1 ? 1 : cs;
+  }
+
+  /// The navi control channel L1 engine (FFD1/FFD2). Non-null when
+  /// [naviProjAvailable] is true.
+  L1Engine? get naviL1 => _naviL1;
+
+  /// L2 frames from the navi control channel (FFD2 → L1 de-framing).
+  Stream<Uint8List> get naviCtrlNotifications => _naviCtrlL2Controller.stream;
+
   // --------------------------------------------------------------------------
   // BLE objects
   // --------------------------------------------------------------------------
@@ -99,6 +129,15 @@ class BleManager {
   BluetoothCharacteristic? _streamTxChar; // FFC4 - stream write
   BluetoothCharacteristic? _streamRxChar; // FFC5 - stream notify
   StreamSubscription<List<int>>? _streamNotificationSub;
+
+  // Navigation Projection Service
+  BluetoothCharacteristic? _naviCtrlTxChar; // FFD1 - write (L1 chunks)
+  BluetoothCharacteristic? _naviCtrlRxChar; // FFD2 - notify (L1 chunks)
+  BluetoothCharacteristic? _naviDataTxChar; // FFD3 - writeWithoutResponse
+  BluetoothCharacteristic? _naviDataRxChar; // FFD4 - notify
+  StreamSubscription<List<int>>? _naviCtrlRxSub;
+  StreamSubscription<List<int>>? _naviDataRxSub;
+
   int _mtu = 23;
 
   /// Broadcasts raw L2 messages received on the Stream Service (FFC5).
@@ -106,6 +145,12 @@ class BleManager {
 
   /// Broadcasts inbound L2 command-channel frames (FFC2 → L1 → L2 payload).
   final _commandNotifyController = StreamController<Uint8List>.broadcast();
+
+  /// Broadcasts raw L2 messages received on the navi data channel (FFD4).
+  final _naviDataNotifyController = StreamController<Uint8List>.broadcast();
+
+  /// Broadcasts L2 frames from the navi control channel (FFD2 → L1 → L2 payload).
+  final _naviCtrlL2Controller = StreamController<Uint8List>.broadcast();
 
   StreamSubscription<List<int>>? _notificationSub;
   StreamSubscription<BluetoothConnectionState>? _connectionStateSub;
@@ -119,9 +164,12 @@ class BleManager {
   L1Engine? _l1;
   FileTransferSession? _session;
 
+  /// Separate L1 engine for the navi control channel (FFD1/FFD2).
+  L1Engine? _naviL1;
+
   /// Serial write queue of (characteristic, bytes). GATT writes can't run
-  /// concurrently on one connection, so L1 (FFC1) and stream (FFC4) writes
-  /// share this single queue.
+  /// concurrently on one connection, so L1 (FFC1, FFD1), stream (FFC4), and
+  /// navi data (FFD3) writes share this single queue.
   final List<(BluetoothCharacteristic, Uint8List)> _writeQueue = [];
   bool _writing = false;
 
@@ -157,6 +205,8 @@ class BleManager {
     _stateController.close();
     _streamNotifyController.close();
     _commandNotifyController.close();
+    _naviDataNotifyController.close();
+    _naviCtrlL2Controller.close();
   }
 
   // --------------------------------------------------------------------------
@@ -312,6 +362,27 @@ class BleManager {
               (c.properties.notify || c.properties.indicate)) {
             _streamRxChar = c;
           }
+          // Navigation Projection Service characteristics.
+          if (uuid.contains(_naviCtrlTxUuid) &&
+              (c.properties.write || c.properties.writeWithoutResponse)) {
+            _naviCtrlTxChar = c;
+            debugPrint('BleManager: ✓ found FFD1 (navi ctrl tx)');
+          }
+          if (uuid.contains(_naviCtrlRxUuid) &&
+              (c.properties.notify || c.properties.indicate)) {
+            _naviCtrlRxChar = c;
+            debugPrint('BleManager: ✓ found FFD2 (navi ctrl rx)');
+          }
+          if (uuid.contains(_naviDataTxUuid) &&
+              c.properties.writeWithoutResponse) {
+            _naviDataTxChar = c;
+            debugPrint('BleManager: ✓ found FFD3 (navi data tx)');
+          }
+          if (uuid.contains(_naviDataRxUuid) &&
+              (c.properties.notify || c.properties.indicate)) {
+            _naviDataRxChar = c;
+            debugPrint('BleManager: ✓ found FFD4 (navi data rx)');
+          }
         }
       }
 
@@ -382,9 +453,46 @@ class BleManager {
         _streamRxChar = null;
       }
 
+      // Enable the Navigation Projection Service if the device exposes it.
+      if (naviProjAvailable) {
+        try {
+          // Set up navi control channel (FFD1/FFD2) with its own L1 engine.
+          await _naviCtrlRxChar!.setNotifyValue(true);
+          _naviCtrlRxSub = _naviCtrlRxChar!.onValueReceived.listen((data) {
+            _naviL1?.onNotified(Uint8List.fromList(data));
+          });
+
+          _naviL1 = L1Engine(writeFn: _enqueueNaviCtrlWrite);
+          _naviL1!.setMtu(mtu);
+          // Navi control L2 payloads — dispatched by NaviProjectionSession.
+          // We expose them via a shared field so the session can register.
+          _naviL1!.onL2Data = (payload) {
+            if (!_disposed) _naviCtrlL2Controller.add(payload);
+          };
+
+          // Set up navi data channel (FFD4 notify).
+          await _naviDataRxChar!.setNotifyValue(true);
+          _naviDataRxSub = _naviDataRxChar!.onValueReceived.listen((data) {
+            if (!_disposed) {
+              _naviDataNotifyController.add(Uint8List.fromList(data));
+            }
+          });
+
+          debugPrint('BleManager: Navi Projection ready (FFD1-FFD4)');
+        } catch (e) {
+          debugPrint('BleManager: Navi Projection setup failed: $e');
+          _naviCtrlTxChar = null;
+          _naviCtrlRxChar = null;
+          _naviDataTxChar = null;
+          _naviDataRxChar = null;
+          _naviL1 = null;
+        }
+      }
+
       _setState(BleState.connected);
       debugPrint('BleManager: ready, mtu=$mtu, '
-          'stream=${streamAvailable ? "on" : "off"}');
+          'stream=${streamAvailable ? "on" : "off"}, '
+          'naviProj=${naviProjAvailable ? "on" : "off"}');
       return true;
     } catch (e) {
       debugPrint('BleManager: connect failed: $e');
@@ -444,8 +552,61 @@ class BleManager {
     return _l1!.sendL2(l2);
   }
 
+  // ── Navigation Projection write helpers ──
+
+  /// Enqueue a raw L1 chunk for delivery over the FFD1 characteristic.
+  void _enqueueNaviCtrlWrite(Uint8List chunk) {
+    if (_disposed || _naviCtrlTxChar == null) {
+      debugPrint(
+          'BleManager: navi ctrl enqueue SKIP disposed=$_disposed char=${_naviCtrlTxChar != null}');
+      return;
+    }
+    debugPrint(
+        'BleManager: navi ctrl enqueue ${chunk.length}B, queue depth=${_writeQueue.length}');
+    _writeQueue.add((_naviCtrlTxChar!, chunk));
+    if (!_writing) {
+      _flushQueue();
+    }
+  }
+
+  /// Send one L2 command frame over the navi control channel (FFD1/FFD2, with
+  /// L1 framing). Returns the assigned L1 sequence number, or null if the navi
+  /// control channel isn't ready.
+  int? sendNaviControl(Uint8List l2) {
+    debugPrint(
+        'BleManager: sendNaviControl l2=${l2.length}B disposed=$_disposed '
+        'naviL1=${_naviL1 != null} ctrlTx=${_naviCtrlTxChar != null}');
+    if (_disposed || _naviL1 == null || _naviCtrlTxChar == null) return null;
+    final seq = _naviL1!.sendL2(l2);
+    debugPrint('BleManager: sendNaviControl → L1 seq=$seq');
+    return seq;
+  }
+
+  /// Send one raw L2 data message over the FFD3 characteristic (no L1).
+  /// Shares the serial write queue with all other GATT writes.
+  Future<void> writeNaviData(Uint8List l2) {
+    final char = _naviDataTxChar;
+    if (_disposed || char == null) {
+      debugPrint(
+          'BleManager: writeNaviData FAIL disposed=$_disposed char=${char != null}');
+      return Future.error(StateError('导航投屏数据通道未就绪'));
+    }
+    debugPrint(
+        'BleManager: writeNaviData ${l2.length}B, queue depth=${_writeQueue.length}');
+    final completer = Completer<void>();
+    _writeQueue.add((char, l2));
+    _naviDataCompleters[l2] = completer;
+    if (!_writing) {
+      _flushQueue();
+    }
+    return completer.future;
+  }
+
   /// Resolves the future returned by [writeStream] once the write completes.
   final Map<Uint8List, Completer<void>> _streamWriteCompleters = {};
+
+  /// Resolves the future returned by [writeNaviData] once the write completes.
+  final Map<Uint8List, Completer<void>> _naviDataCompleters = {};
 
   /// Flush queued writes sequentially using `write(withoutResponse: true)`.
   void _flushQueue() {
@@ -456,19 +617,33 @@ class BleManager {
 
     _writing = true;
     final (char, bytes) = _writeQueue.removeAt(0);
-    final completer = _streamWriteCompleters.remove(bytes);
+    final completer = _streamWriteCompleters.remove(bytes) ??
+        _naviDataCompleters.remove(bytes);
+    final isNavi =
+        (identical(char, _naviCtrlTxChar) || identical(char, _naviDataTxChar));
+
+    debugPrint('BleManager: _flushQueue write ${bytes.length}B to '
+        '${char.characteristicUuid} (navi=$isNavi, remQueue=${_writeQueue.length})');
 
     char.write(bytes, withoutResponse: true).then((_) {
       completer?.complete();
       _flushQueue();
     }).catchError((Object error) {
+      debugPrint('BleManager: _flushQueue write FAILED: $error');
       completer?.completeError(error);
-      // L1 write failed – treat as a dropped connection. Stream-only failures
-      // also surface via the completer; tear down to be safe.
-      _writing = false;
-      _writeQueue.clear();
-      _streamWriteCompleters.clear();
-      _onDisconnected();
+      // Write failure on the navi data channel (FFD3) is not fatal — the
+      // control channel (FFD1/FFD2) and other connections stay intact.
+      // Only treat command-channel (FFC1) failure as a dropped connection.
+      if (!isNavi) {
+        _writing = false;
+        _writeQueue.clear();
+        _streamWriteCompleters.clear();
+        _naviDataCompleters.clear();
+        _onDisconnected();
+      } else {
+        // Drain the failed entry and continue with the rest of the queue.
+        _flushQueue();
+      }
     });
   }
 
@@ -497,6 +672,10 @@ class BleManager {
     _notificationSub = null;
     _streamNotificationSub?.cancel();
     _streamNotificationSub = null;
+    _naviCtrlRxSub?.cancel();
+    _naviCtrlRxSub = null;
+    _naviDataRxSub?.cancel();
+    _naviDataRxSub = null;
     _connectionStateSub?.cancel();
     _connectionStateSub = null;
     _scanSub?.cancel();
@@ -507,15 +686,22 @@ class BleManager {
     _session = null;
     _l1?.reset();
     _l1 = null;
+    _naviL1?.reset();
+    _naviL1 = null;
     _txChar = null;
     _rxChar = null;
     _streamTxChar = null;
     _streamRxChar = null;
+    _naviCtrlTxChar = null;
+    _naviCtrlRxChar = null;
+    _naviDataTxChar = null;
+    _naviDataRxChar = null;
     _device = null;
     _mtu = 23;
 
     _writeQueue.clear();
     _streamWriteCompleters.clear();
+    _naviDataCompleters.clear();
     _writing = false;
     _deviceId = null;
     _deviceName = null;

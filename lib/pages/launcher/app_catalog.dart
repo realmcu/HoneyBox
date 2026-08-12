@@ -48,11 +48,11 @@ const List<AppEntry> kAppCatalog = <AppEntry>[
   AppEntry(
     id: AppId.dashboard,
     title: '仪表盘',
-    subtitle: '车载仪表盘调试',
+    subtitle: '高德地图模拟导航与仪表投屏',
     icon: Icons.dashboard_outlined,
     accent: Color(0xFFB0603A),
     deviceFilter: 'Dashboard',
-    implemented: false,
+    implemented: true,
   ),
 ];
 

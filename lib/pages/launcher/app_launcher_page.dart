@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/current_app_provider.dart';
 import '../dashboard/dashboard_app_root.dart';
@@ -43,7 +44,36 @@ class AppLauncherPage extends ConsumerWidget {
     );
   }
 
-  void _launch(BuildContext context, WidgetRef ref, AppEntry entry) {
+  Future<void> _launch(
+    BuildContext context,
+    WidgetRef ref,
+    AppEntry entry,
+  ) async {
+    if (entry.id == AppId.dashboard) {
+      try {
+        await const MethodChannel('honeybox/map').invokeMethod<void>('open');
+      } on PlatformException catch (error) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error.message ?? '无法打开地图功能')),
+          );
+        }
+      } on MissingPluginException {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('当前平台不支持地图功能')),
+          );
+        }
+      } catch (error) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('无法打开地图功能：$error')),
+          );
+        }
+      }
+      return;
+    }
+
     ref.read(currentAppProvider.notifier).state = entry.id;
     final name = routeNameFor(entry.id);
     Navigator.of(context).push(MaterialPageRoute(

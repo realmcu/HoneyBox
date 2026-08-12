@@ -41,8 +41,10 @@ class BleCmd {
   static const int stream = 0x0E; // stream (!!)
   static const int remoteControl = 0x0F; // command
   static const int fileTransfer = 0x10; // command
+  static const int naviProj = 0x11; // command (FFD1/FFD2) + stream (FFD3/FFD4)
 
   /// 该 CMD 跑在哪条 GATT 特征上。除 [stream] 外全部走命令通道。
+  /// 注意 [naviProj] 的控制消息走 command 通道、数据帧走独立的 stream 通道。
   static BleCmdChannel channelOf(int cmd) => switch (cmd) {
         stream => BleCmdChannel.stream,
         _ => BleCmdChannel.command,
@@ -138,4 +140,28 @@ abstract class BleCmdRemoteControlKey {
   // Preview 拉取(0x20–0x2F,P0 一律 UNSUPPORTED)
   static const int previewReq = 0x20;
   static const int previewAck = 0x21;
+}
+
+/// 导航投屏 (CMD 0x11) sub-command keys。
+///
+/// 控制消息 (OPEN/ACK/CLOSE/ERROR) 走 **FFD1/FFD2 命令通道** (L1 封装):
+///   FFD1 write  (App → Dev)
+///   FFD2 notify (Dev → App)
+///
+/// 数据帧 (FRAME/CREDIT/REPORT) 走 **FFD3/FFD4 流通道** (裸 L2, 无 L1):
+///   FFD3 write without response (App → Dev)
+///   FFD4 notify                (Dev → App)
+///
+/// 详见 `navi_projection_protocol.dart`。
+abstract class BleCmdNaviProjKey {
+  // ── 控制通道 (FFD1→FFD2, 走 L1) ──
+  static const int open = 0x01; // App → Dev: 开始投屏
+  static const int ack = 0x02; // Dev → App: OPEN 应答
+  static const int close = 0x03; // App → Dev: 停止投屏
+  static const int error = 0x04; // Dev → App: 异常报告
+
+  // ── 数据通道 (FFD3→FFD4, 裸 L2) ──
+  static const int frame = 0x05; // App → Dev: JPEG 帧数据块
+  static const int credit = 0x06; // Dev → App: 信用补充
+  static const int report = 0x07; // Dev → App: 缺口报告(请求重传)
 }

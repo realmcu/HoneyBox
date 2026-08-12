@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
 import '../../providers/current_app_provider.dart';
+import '../../providers/navi_projection_provider.dart';
 import '../scan/scan_page.dart';
-import '../shared/app_placeholder_page.dart';
+import 'navi_dashboard_page.dart';
 
-/// Dashboard（仪表盘）应用根：结构同 EBadgeAppRoot / WatchAppRoot。
+/// Dashboard（仪表盘）应用根。
+///
+/// BLE 连接后进入 [NaviDashboardPage]，在其中验证对端是否具备导航投屏
+/// Profile (FFD0 Service + FFD1-FFD4 特征)，并提供开始/停止投屏控制。
+///
 /// [PopScope] 保证返回 Launcher 时 disconnect + 清 currentApp（spec §4.4）。
 class DashboardAppRoot extends ConsumerWidget {
   const DashboardAppRoot({super.key});
@@ -14,6 +19,8 @@ class DashboardAppRoot extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.listen<ConnectedDeviceInfo?>(connectedDeviceProvider, (prev, next) {
       if (prev != null && next == null) {
+        // 设备断开时停止投屏
+        ref.read(naviProjectionProvider.notifier).stopProjection();
         Navigator.of(context)
             .popUntil((r) => r.settings.name == '/dashboard-root');
         ScaffoldMessenger.of(context).showSnackBar(
@@ -24,10 +31,7 @@ class DashboardAppRoot extends ConsumerWidget {
 
     final connected = ref.watch(connectedDeviceProvider);
     final child = connected != null
-        ? AppPlaceholderPage(
-            appTitle: '仪表盘',
-            deviceName: connected.name,
-          )
+        ? const NaviDashboardPage()
         : const ScanPage(
             defaultDeviceFilter: 'Dashboard',
             appTitle: '仪表盘',
@@ -37,6 +41,7 @@ class DashboardAppRoot extends ConsumerWidget {
       canPop: true,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) return;
+        ref.read(naviProjectionProvider.notifier).stopProjection();
         ref.read(bleNotifierProvider.notifier).disconnect();
         ref.read(currentAppProvider.notifier).state = null;
       },

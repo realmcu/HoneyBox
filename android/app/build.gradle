@@ -5,18 +5,39 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+import java.util.Properties
+
+final Properties localProperties = new Properties()
+final File localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+
+final String amapDebugKey = localProperties.getProperty("AMAP_DEBUG_KEY")?.trim()
+final String amapReleaseKey = localProperties.getProperty("AMAP_RELEASE_KEY")?.trim()
+final String releaseStoreFile = localProperties.getProperty("RELEASE_STORE_FILE")?.trim()
+final String releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
+final String releaseKeyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")?.trim()
+final String releaseKeyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+final boolean hasReleaseSigning = [
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+].every { it != null && !it.isEmpty() }
+
 android {
     namespace = "com.honeygui.honeybox"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
+        jvmTarget = JavaVersion.VERSION_11
     }
 
     defaultConfig {
@@ -25,16 +46,84 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            excludes += [
+                "lib/armeabi-v7a/**",
+                "lib/x86/**",
+                "lib/x86_64/**",
+            ]
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            manifestPlaceholders["AMAP_KEY"] = amapDebugKey ?: ""
+        }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            manifestPlaceholders["AMAP_KEY"] = amapReleaseKey ?: ""
+            signingConfig = signingConfigs.release
+            minifyEnabled = true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    applicationVariants.configureEach { variant ->
+        def requiredAmapKey = variant.buildType.name == "release" ? amapReleaseKey : amapDebugKey
+        def amapProperty = variant.buildType.name == "release" ? "AMAP_RELEASE_KEY" : "AMAP_DEBUG_KEY"
+        def validateAmapConfiguration = tasks.register(
+            "validate${variant.name.capitalize()}AmapConfiguration"
+        ) {
+            doLast {
+                if (requiredAmapKey == null || requiredAmapKey.isEmpty()) {
+                    throw new GradleException(
+                        "Missing ${amapProperty} in android/local.properties. " +
+                        "AMap requires a key registered for com.honeygui.honeybox and this build's signing SHA1."
+                    )
+                }
+                if (variant.buildType.name == "release") {
+                    def missingSigningProperties = [
+                        RELEASE_STORE_FILE: releaseStoreFile,
+                        RELEASE_STORE_PASSWORD: releaseStorePassword,
+                        RELEASE_KEY_ALIAS: releaseKeyAlias,
+                        RELEASE_KEY_PASSWORD: releaseKeyPassword,
+                    ].findAll { propertyName, value -> value == null || value.isEmpty() }.keySet()
+                    if (!missingSigningProperties.isEmpty()) {
+                        throw new GradleException(
+                            "Release signing is not configured. Add ${missingSigningProperties.join(', ')} " +
+                            "to android/local.properties; release builds never use the debug signing key."
+                        )
+                    }
+                    if (!file(releaseStoreFile).isFile()) {
+                        throw new GradleException(
+                            "RELEASE_STORE_FILE does not exist: ${file(releaseStoreFile)}"
+                        )
+                    }
+                }
+            }
+        }
+        tasks.named("assemble${variant.name.capitalize()}").configure {
+            dependsOn(validateAmapConfiguration)
         }
     }
 
@@ -47,4 +136,8 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    implementation project(":mapfeature")
 }

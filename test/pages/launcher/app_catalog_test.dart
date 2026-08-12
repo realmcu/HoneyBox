@@ -18,11 +18,11 @@ void main() {
       }
     });
 
-    test('only ebadge is marked implemented', () {
+    test('ebadge and dashboard are implemented, watch is not', () {
       final map = {for (final e in kAppCatalog) e.id: e.implemented};
       expect(map[AppId.ebadge], isTrue);
       expect(map[AppId.watch], isFalse);
-      expect(map[AppId.dashboard], isFalse);
+      expect(map[AppId.dashboard], isTrue);
     });
 
     test('device filters are the exact spec values', () {

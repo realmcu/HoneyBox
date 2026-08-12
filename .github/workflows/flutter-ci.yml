@@ -79,6 +79,64 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # AMap Key 与 release keystore 都不入库，构建前从 Secrets 还原。
+      # build.gradle 会校验这些值，缺失时直接抛 GradleException。
+      # 高德 Key 按「Key + 包名 + 签名 SHA1」三元组校验，故 debug 与
+      # release 必须使用各自签名对应的 Key，不可混用。
+      - name: Configure signing and AMap keys
+        env:
+          AMAP_DEBUG_KEY: ${{ secrets.AMAP_DEBUG_KEY }}
+          AMAP_RELEASE_KEY: ${{ secrets.AMAP_RELEASE_KEY }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          is_release=false
+          if [[ "${GITHUB_REF}" == refs/tags/v* || -n "${{ github.event.inputs.release_tag }}" ]]; then
+            is_release=true
+          fi
+
+          # local.properties 不入库；这里只写构建必需的键。
+          # flutter.sdk / sdk.dir 由 flutter 工具链自行补全，无需手写。
+          : > android/local.properties
+
+          if [[ "${is_release}" == "true" ]]; then
+            for name in AMAP_RELEASE_KEY RELEASE_KEYSTORE_BASE64 RELEASE_STORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
+              if [[ -z "${!name:-}" ]]; then
+                echo "::error::Missing required secret ${name} for release build" >&2
+                exit 1
+              fi
+            done
+
+            keystore_path="${RUNNER_TEMP}/honeybox-release.jks"
+            printf '%s' "${RELEASE_KEYSTORE_BASE64}" | base64 -d > "${keystore_path}"
+            # keytool 能读通才算解码成功，避免把损坏文件带进构建。
+            keytool -list -keystore "${keystore_path}" \
+              -storepass "${RELEASE_STORE_PASSWORD}" > /dev/null
+            echo "Release keystore decoded and verified."
+
+            {
+              echo "AMAP_RELEASE_KEY=${AMAP_RELEASE_KEY}"
+              echo "RELEASE_STORE_FILE=${keystore_path}"
+              echo "RELEASE_STORE_PASSWORD=${RELEASE_STORE_PASSWORD}"
+              echo "RELEASE_KEY_ALIAS=${RELEASE_KEY_ALIAS}"
+              echo "RELEASE_KEY_PASSWORD=${RELEASE_KEY_PASSWORD}"
+            } >> android/local.properties
+          else
+            if [[ -z "${AMAP_DEBUG_KEY:-}" ]]; then
+              echo "::error::Missing required secret AMAP_DEBUG_KEY for debug build" >&2
+              exit 1
+            fi
+            echo "AMAP_DEBUG_KEY=${AMAP_DEBUG_KEY}" >> android/local.properties
+          fi
+
+          # 只打印键名，值一律不落日志。
+          echo "Wrote android/local.properties with keys:"
+          cut -d= -f1 android/local.properties
+
       - name: Build Android APK (debug)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event.inputs.release_tag == '' }}
         run: |
@@ -91,12 +149,46 @@ jobs:
           flutter build apk --release
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/HoneyBox.apk
 
+      # 验证产物签名指纹与高德控制台绑定值一致；不一致则地图会鉴权失败，
+      # 而这种问题在装机运行前不会暴露，故在 CI 阶段就卡住。
+      - name: Verify release APK signature
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != '' }}
+        env:
+          EXPECTED_SHA1: ${{ secrets.RELEASE_SIGNING_SHA1 }}
+        run: |
+          set -euo pipefail
+          apksigner="$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n1)"
+          certs="$("${apksigner}" verify --print-certs \
+            build/app/outputs/flutter-apk/HoneyBox.apk)"
+          echo "${certs}"
+
+          actual="$(echo "${certs}" | grep -im1 'SHA-1 digest' \
+            | sed 's/.*: *//' | tr -d ' :' | tr 'a-f' 'A-F')"
+
+          if [[ -z "${EXPECTED_SHA1:-}" ]]; then
+            echo "::warning::RELEASE_SIGNING_SHA1 not set; skipped fingerprint check (actual ${actual})"
+            exit 0
+          fi
+
+          expected="$(echo "${EXPECTED_SHA1}" | tr -d ' :' | tr 'a-f' 'A-F')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "::error::APK signing SHA-1 ${actual} does not match expected ${expected}" >&2
+            exit 1
+          fi
+          echo "Signature fingerprint matches AMap-registered SHA-1."
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: honeybox-android-apk
           path: build/app/outputs/flutter-apk/*.apk
           retention-days: 7
+
+      # 凭据只在本 job 的运行期内有效，无论成败都在结束前清除。
+      - name: Clean up signing material
+        if: always()
+        run: |
+          rm -f android/local.properties "${RUNNER_TEMP}/honeybox-release.jks"
 
   # ─── Job 3: Windows Build ────────────────────────────────────────
   build-windows:

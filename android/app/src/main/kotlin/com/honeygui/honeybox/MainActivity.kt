@@ -4,6 +4,9 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import com.example.map1.MapFeature
+import com.example.map1.navi.NaviCaptureService
+import com.example.map1.navi.NaviFramePreview
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -26,6 +29,8 @@ class MainActivity : FlutterActivity() {
     private val converterChannelName = "ebadge/converter"
     private val systemChannelName = "ebadge/system"
     private val playerChannelName = "ebadge/player"
+    private val mapChannelName = "honeybox/map"
+    private val naviChannelName = "honeybox/navi"
 
     private var encoder: CameraEncoder? = null
     private var eventSink: EventChannel.EventSink? = null
@@ -214,6 +219,86 @@ class MainActivity : FlutterActivity() {
                         result.error("no_activity", e.message, null)
                     }
                 }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(messenger, mapChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "open" -> {
+                    MapFeature.open(
+                        this,
+                        object : MapFeature.OpenCallback {
+                            override fun onOpened() {
+                                result.success(null)
+                            }
+
+                            override fun onDeclined() {
+                                result.error("privacy_declined", "未同意高德地图隐私授权", null)
+                            }
+
+                            override fun onError(error: Throwable) {
+                                result.error(
+                                    "map_open_failed",
+                                    error.message ?: "无法打开地图功能",
+                                    null,
+                                )
+                            }
+                        },
+                    )
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(messenger, naviChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startCapture" -> {
+                    val width = call.argument<Int>("width") ?: NaviCaptureService.DEFAULT_JPG_WIDTH
+                    val height = call.argument<Int>("height") ?: NaviCaptureService.DEFAULT_JPG_HEIGHT
+                    val fps = call.argument<Int>("fps") ?: 5
+                    val speed = call.argument<Int>("speed") ?: 60
+                    val startLat = call.argument<Double>("startLat") ?: 31.314
+                    val startLng = call.argument<Double>("startLng") ?: 120.728
+                    val endLat = call.argument<Double>("endLat") ?: 31.325
+                    val endLng = call.argument<Double>("endLng") ?: 120.629
+                    val intent = NaviCaptureService.newIntent(
+                        context = this,
+                        host = "", // BLE 模式: 不走 TCP
+                        port = 0,
+                        fps = fps,
+                        speed = speed,
+                        dpi = NaviCaptureService.DEFAULT_VIRTUAL_DISPLAY_DPI,
+                        width = width,
+                        height = height,
+                        startLat = startLat,
+                        startLng = startLng,
+                        endLat = endLat,
+                        endLng = endLng,
+                    )
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    result.success(null)
+                }
+                "stopCapture" -> {
+                    startService(NaviCaptureService.stopIntent(this))
+                    result.success(null)
+                }
+                "pollFrame" -> {
+                    val frame = NaviFramePreview.latestFrame.value
+                    if (frame != null) {
+                        result.success(mapOf(
+                            "seq" to frame.seq,
+                            "jpeg" to frame.jpeg,
+                        ))
+                    } else {
+                        result.success(null)
+                    }
+                }
+                "isRunning" -> result.success(NaviFramePreview.running.value)
                 else -> result.notImplemented()
             }
         }
