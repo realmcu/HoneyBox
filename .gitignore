@@ -77,6 +77,11 @@ coverage/
 /build_output*.txt
 /gh_*.json
 /gh_*.txt
+/analyze_*.txt
+/build_log.txt
+/build_out.txt
+# 本机一键构建脚本，内含开发者本地的 SDK 绝对路径。
+/build-release.cmd
 
 # One-off local content migration scripts
 /tool/update_flutter_provider.py
