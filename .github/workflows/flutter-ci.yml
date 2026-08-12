@@ -253,7 +253,11 @@ jobs:
   release:
     name: Publish Release
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    # 到 Gitee 的上行实测仅 12-14 KB/s，两个串行步骤都受它限制：
+    # 推代码（含约 80 MB 高德二进制）实测 75 分钟，再传 132 MB APK 需 160-187
+    # 分钟，合计约 240-265 分钟。GitHub 托管 runner 的硬上限是 360 分钟，
+    # 取 330 分钟留出余量。v0.8.14 就是卡在原来的 150 分钟上限被 cancel 的。
+    timeout-minutes: 330
     needs: [build-android, build-windows, lint]
     if: >-
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
@@ -382,11 +386,13 @@ jobs:
             exit 1
           fi
 
-          # GitHub hosted runner 到 Gitee 的实测上行约 12-14 KB/s，62 MB APK
-          # 需要约 80 分钟。短超时重试会每次从零开始，永远无法传完，因此允许
-          # 一次最长两小时的连续上传，并由 job 的 150 分钟上限兜底。
+          # GitHub hosted runner 到 Gitee 的实测上行约 12-14 KB/s。APK 随高德
+          # SDK 接入从 62 MB 涨到 132 MB，所需时间也从约 80 分钟涨到 160-187
+          # 分钟，原来的 7200 秒（两小时）不够，v0.8.14 因此被 cancel。
+          # 短超时重试会每次从零开始，永远无法传完，所以仍然只做一次连续上传，
+          # 把窗口放到 4 小时，由 job 的 330 分钟上限兜底。
           if ! curl -fS --show-error \
-            --connect-timeout 30 --max-time 7200 \
+            --connect-timeout 30 --max-time 14400 \
             --retry 0 \
             -X POST \
             "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files" \

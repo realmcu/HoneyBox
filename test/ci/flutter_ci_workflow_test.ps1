@@ -26,8 +26,8 @@ Assert-Contains 'flutter build apk --release' 'Tag builds must produce a release
 Assert-Contains 'tag_name:\s*\$\{\{ env\.RELEASE_TAG \}\}' `
     'The requested release tag must be used as the GitHub release tag.'
 Assert-Contains 'prerelease:\s*false' 'Version tags must create normal releases.'
-Assert-Contains '--max-time\s+7200' `
-    'Gitee APK upload must allow one continuous two-hour transfer.'
+Assert-Contains '--max-time\s+14400' `
+    'Gitee APK upload must allow one continuous four-hour transfer (132 MB at the observed 12-14 KB/s needs ~3 hours).'
 Assert-NotContains 'for attempt in 1 2 3 4' `
     'Gitee APK upload must not restart slow transfers from zero.'
 Assert-Contains 'releases/tags/\$\{TAG\}' `
