@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../app_info.dart';
 import '../../theme/app_theme.dart';
-import 'update_flow.dart';
 
 /// App-wide navigation drawer (nRF-Connect style): a Realtek wordmark pinned to
 /// the top, a middle list of app-level entries (chip config, settings, …), and
@@ -55,23 +54,14 @@ class AppDrawer extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: cs.outline.withValues(alpha: 0.3)),
-          // ── Bottom: check GitHub for a newer release, then the app version
-          // (kept clear of the nav-gesture inset) ──
+          // ── Bottom: the app version (kept clear of the nav-gesture inset).
+          // "检查更新" now lives in the launcher's top-right overflow menu so
+          // it sits one level up, alongside the other app-wide entries. ──
           SafeArea(
             top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _DrawerItem(
-                  icon: Icons.system_update,
-                  label: '检查更新',
-                  onTap: () => runUpdateCheck(context),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 4, bottom: 12),
-                  child: Text('v${AppInfo.version}', style: tt.bodySmall),
-                ),
-              ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text('v${AppInfo.version}', style: tt.bodySmall),
             ),
           ),
         ],

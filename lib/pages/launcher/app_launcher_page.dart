@@ -4,9 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/current_app_provider.dart';
 import '../dashboard/dashboard_app_root.dart';
 import '../ebadge/ebadge_app_root.dart';
+import '../shared/update_flow.dart';
 import '../watch/watch_app_root.dart';
 import 'app_catalog.dart';
 import 'widgets/app_card.dart';
+
+/// Sentinel value for the overflow-menu entry that is an *action* rather than a
+/// route push (all other values are route names).
+const String _kUpdateAction = '#check-update';
 
 /// APK 打开时首先看到的页面。
 /// 从 [kAppCatalog] 读取应用清单，展示为卡片列表。点击后 push 对应
@@ -21,11 +26,19 @@ class AppLauncherPage extends ConsumerWidget {
         title: const Text('选择应用'),
         actions: [
           PopupMenuButton<String>(
-            onSelected: (v) => Navigator.pushNamed(context, v),
+            onSelected: (v) {
+              // '检查更新' runs in place; every other entry is a route name.
+              if (v == _kUpdateAction) {
+                runUpdateCheck(context);
+                return;
+              }
+              Navigator.pushNamed(context, v);
+            },
             itemBuilder: (_) => const [
               PopupMenuItem(value: '/settings', child: Text('设置')),
               PopupMenuItem(value: '/cache', child: Text('缓存管理')),
               PopupMenuItem(value: '/chip-config', child: Text('芯片配置')),
+              PopupMenuItem(value: _kUpdateAction, child: Text('检查更新')),
             ],
           ),
         ],
