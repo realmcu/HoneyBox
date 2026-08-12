@@ -8,7 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 class AppInfo {
   AppInfo._();
 
-  static String version = '0.8.13';
+  static String version = '0.8.14';
 
   /// Reads the real package version. Call once during startup, before the UI
   /// reads [version] (e.g. the drawer footer or the update check).
