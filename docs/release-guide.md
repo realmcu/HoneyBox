@@ -9,12 +9,19 @@
 Release APK、创建 **GitHub** Release 并附上 `HoneyBox.apk`，同时把代码与 tag 同步到
 Gitee。
 
-> ⚠️ **Gitee Release 的 APK 需要手动上传**，CI 不再自动传。原因：GitHub 托管 runner
-> 到 Gitee 的上行实测仅 12–14 KB/s，百余 MB 的 APK 需要两三个小时且经常中断，曾导致
-> release job 反复失败（v0.8.14 被 cancel、v0.8.15 上传中断）。因此该步骤已从 CI 移除。
+> ⚠️ **Gitee Release 的 APK 需要手动上传**，CI 不再自动传：CI 里那个上传步骤长期
+> 失败（v0.8.14 被 cancel、v0.8.15 中断），已从 workflow 移除。
 > 不传的后果：App 里选「从 Gitee 更新」的用户**检测不到新版本**（选 GitHub 的不受影响）。
 
-> 以发布 `0.8.16` 为例，将命令中的版本号替换为实际版本即可。
+> 🚧 **Gitee 附件上限 100 MB，这是硬约束。** 超限时 API 直接返回
+> `{"message":"验证失败：文件大小已超出限制：100 MB"}`，与上传速度无关（本机上行
+> 实测 17.5 MB/s，131 MiB 仅需 8 秒也照样被拒）。APK 因接入高德导航 SDK 从 61 MiB
+> 涨到 132 MiB，导致 v0.8.14～v0.8.16 在 Gitee 上都没有 APK 资产。
+> 自 v0.8.17 起 `android/app/build.gradle` 开启 `useLegacyPackaging`，`.so` 改为
+> 压缩存放，APK 降到约 76 MiB。**后续若 APK 再逼近 100 MB，必须先瘦身**，否则
+> Gitee 发布仍会被拒。
+
+> 以发布 `0.8.17` 为例，将命令中的版本号替换为实际版本即可。
 
 ## 前置条件
 
@@ -51,7 +58,7 @@ Gitee。
 ## 2. 提交、打 tag、推送
 
 ```powershell
-$ver = "0.8.16"
+$ver = "0.8.17"
 git add -A
 git commit -m "chore: 版本号升至 $ver"
 git tag -a "v$ver" -m "v$ver"
@@ -91,7 +98,7 @@ CI 不再自动传，需手动完成，否则选「从 Gitee 更新」的用户�
 从 CI 产物或 GitHub Release 下载，避免本地重新构建（保证与发布产物字节一致）：
 
 ```powershell
-$ver = "0.8.16"
+$ver = "0.8.17"
 gh release download "v$ver" --repo realmcu/HoneyBox --pattern "HoneyBox.apk" --dir .
 ```
 
@@ -170,5 +177,6 @@ SHA-256: <64 位小写 hex>
 1. `pubspec.yaml` 版本号 + build number 已递增，`lib/app_info.dart` 同步
 2. 提交、打 `vX.Y.Z` tag、推送
 3. CI 全绿，GitHub Release 已带 `HoneyBox.apk`
-4. **手动**在 Gitee 建 Release、上传 `HoneyBox.apk`、notes 写入 `SHA-256`
-5. 两个源的 `releases/latest` 都能查到新 tag 与 APK
+4. **确认 APK < 100 MB**，否则 Gitee 会拒收（见开头的硬约束说明）
+5. **手动**在 Gitee 建 Release、上传 `HoneyBox.apk`、notes 写入 `SHA-256`
+6. 两个源的 `releases/latest` 都能查到新 tag 与 APK
