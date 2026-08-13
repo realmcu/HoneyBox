@@ -91,7 +91,8 @@ class UpdateService {
       // GitHub's API expects (and rewards) an explicit API version header; it
       // is harmless to Gitee, which ignores unknown Accept media types.
       if (source == UpdateSource.github) {
-        req.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
+        req.headers
+            .set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
       }
       final resp = await req.close();
       if (resp.statusCode != 200) {

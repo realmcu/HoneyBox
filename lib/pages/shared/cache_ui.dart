@@ -111,7 +111,9 @@ Future<ui.Image?> loadCacheThumb(CacheEntry e) async {
       ui.PixelFormat.rgba8888,
       completer.complete,
     );
-    return completer.future;
+    // await so a decode failure surfaces into this try's catch, not an
+    // unhandled rejection on the returned future (unawaited_return_in_try_block).
+    return await completer.future;
   } catch (_) {
     return null;
   }

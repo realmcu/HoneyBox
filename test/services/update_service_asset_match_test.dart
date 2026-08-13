@@ -40,11 +40,23 @@ void main() {
     // picker must still single it out.
     final assets = [
       {'name': 'app.so', 'browser_download_url': 'https://x/app.so'},
-      {'name': 'flutter_windows.dll', 'browser_download_url': 'https://x/f.dll'},
-      {'name': 'badge-preset-gif-1.gif', 'browser_download_url': 'https://x/g.gif'},
+      {
+        'name': 'flutter_windows.dll',
+        'browser_download_url': 'https://x/f.dll'
+      },
+      {
+        'name': 'badge-preset-gif-1.gif',
+        'browser_download_url': 'https://x/g.gif'
+      },
       {'name': 'icudtl.dat', 'browser_download_url': 'https://x/i.dat'},
-      {'name': 'HoneyBox.apk', 'browser_download_url': 'https://x/HoneyBox.apk'},
-      {'name': 'HoneyBox.exe', 'browser_download_url': 'https://x/HoneyBox.exe'},
+      {
+        'name': 'HoneyBox.apk',
+        'browser_download_url': 'https://x/HoneyBox.apk'
+      },
+      {
+        'name': 'HoneyBox.exe',
+        'browser_download_url': 'https://x/HoneyBox.exe'
+      },
     ];
     expect(UpdateService.pickApkUrl(assets), 'https://x/HoneyBox.apk');
   });
