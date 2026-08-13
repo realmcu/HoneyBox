@@ -26,20 +26,14 @@ Assert-Contains 'flutter build apk --release' 'Tag builds must produce a release
 Assert-Contains 'tag_name:\s*\$\{\{ env\.RELEASE_TAG \}\}' `
     'The requested release tag must be used as the GitHub release tag.'
 Assert-Contains 'prerelease:\s*false' 'Version tags must create normal releases.'
-Assert-Contains '--max-time\s+14400' `
-    'Gitee APK upload must allow one continuous four-hour transfer (132 MB at the observed 12-14 KB/s needs ~3 hours).'
-Assert-NotContains 'for attempt in 1 2 3 4' `
-    'Gitee APK upload must not restart slow transfers from zero.'
-Assert-Contains 'releases/tags/\$\{TAG\}' `
-    'Gitee publishing must look up an existing release before creating one.'
-Assert-Contains 'missing.*data is None.*found' `
-    'Gitee publishing must treat an HTTP 200 null response as a missing release.'
-Assert-Contains 'apk_exists=.*HoneyBox\.apk' `
-    'Gitee publishing must skip an APK that is already available.'
-Assert-Contains "release_created.*=.*false" `
-    'Gitee publishing must track whether the release was created by this run.'
-Assert-Contains 'if \[ "\$release_created" = true \]' `
-    'Gitee publishing must only roll back a release created by this run.'
+# APK 不再经 CI 上传到 Gitee（实测公网上行仅 12-14 KB/s，132 MB 传不稳），
+# 改为手动上传；CI 只把代码与 tag 推到 Gitee 镜像。
+Assert-Contains 'Push tag and code to Gitee' `
+    'CI must still push code and tags to the Gitee mirror.'
+Assert-NotContains 'Publish Gitee Release' `
+    'CI must not upload the APK to Gitee (uploaded by hand instead).'
+Assert-NotContains 'attach_files' `
+    'CI must not attempt the slow Gitee APK asset upload.'
 Assert-Contains 'refs/remotes/origin/master:refs/heads/master' `
     'Repair runs must keep Gitee master aligned with GitHub master.'
 Assert-NotContains 'HEAD:refs/heads/master' `

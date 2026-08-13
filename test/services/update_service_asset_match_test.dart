@@ -33,4 +33,30 @@ void main() {
     ];
     expect(UpdateService.pickApkUrl(assets), 'https://x/b.apk');
   });
+
+  test('finds the lone apk among GitHub\'s flattened assets', () {
+    // A tag build attaches every Windows-runner file individually, so the
+    // GitHub release lists dozens of loose assets with only one .apk. The
+    // picker must still single it out.
+    final assets = [
+      {'name': 'app.so', 'browser_download_url': 'https://x/app.so'},
+      {'name': 'flutter_windows.dll', 'browser_download_url': 'https://x/f.dll'},
+      {'name': 'badge-preset-gif-1.gif', 'browser_download_url': 'https://x/g.gif'},
+      {'name': 'icudtl.dat', 'browser_download_url': 'https://x/i.dat'},
+      {'name': 'HoneyBox.apk', 'browser_download_url': 'https://x/HoneyBox.apk'},
+      {'name': 'HoneyBox.exe', 'browser_download_url': 'https://x/HoneyBox.exe'},
+    ];
+    expect(UpdateService.pickApkUrl(assets), 'https://x/HoneyBox.apk');
+  });
+
+  test('builds the correct latest-release API url per source', () {
+    expect(
+      UpdateService.latestReleaseApi(UpdateSource.github),
+      'https://api.github.com/repos/realmcu/HoneyBox/releases/latest',
+    );
+    expect(
+      UpdateService.latestReleaseApi(UpdateSource.gitee),
+      'https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/latest',
+    );
+  });
 }

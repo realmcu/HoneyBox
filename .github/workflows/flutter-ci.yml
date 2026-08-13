@@ -253,11 +253,10 @@ jobs:
   release:
     name: Publish Release
     runs-on: ubuntu-latest
-    # 到 Gitee 的上行实测仅 12-14 KB/s，两个串行步骤都受它限制：
-    # 推代码（含约 80 MB 高德二进制）实测 75 分钟，再传 132 MB APK 需 160-187
-    # 分钟，合计约 240-265 分钟。GitHub 托管 runner 的硬上限是 360 分钟，
-    # 取 330 分钟留出余量。v0.8.14 就是卡在原来的 150 分钟上限被 cancel 的。
-    timeout-minutes: 330
+    # 唯一的慢步骤是「推代码 + tag 到 Gitee」：到 Gitee 的上行实测仅 12-14 KB/s，
+    # 推送含约 80 MB 高德二进制实测约 75 分钟。APK 不再经 CI 上传（改为手动传），
+    # 故取 90 分钟留出余量即可。
+    timeout-minutes: 90
     needs: [build-android, build-windows, lint]
     if: >-
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
@@ -315,18 +314,6 @@ jobs:
           prerelease: false
           generate_release_notes: true
 
-      - name: Locate APK
-        id: apk
-        run: |
-          set -euo pipefail
-          apk="$(find release-artifacts -name 'HoneyBox.apk' -type f | head -n1)"
-          if [ -z "$apk" ]; then
-            echo "HoneyBox.apk not found under release-artifacts" >&2
-            exit 1
-          fi
-          echo "path=$apk" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(sha256sum "$apk" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-
       - name: Push tag and code to Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -335,75 +322,3 @@ jobs:
           git push --force "https://oauth2:${GITEE_TOKEN}@gitee.com/realmcu/HoneyBox.git" \
             "refs/remotes/origin/master:refs/heads/master" \
             "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
-
-      - name: Publish Gitee Release
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ env.RELEASE_TAG }}
-          SHA256: ${{ steps.apk.outputs.sha256 }}
-          APK: ${{ steps.apk.outputs.path }}
-        run: |
-          set -euo pipefail
-          body="HoneyBox ${TAG}"$'\n\n'"SHA-256: ${SHA256}"
-          response_file="$(mktemp)"
-          trap 'rm -f "$response_file"' EXIT
-          release_created=false
-
-          status="$(curl -sS --max-time 60 -o "$response_file" -w '%{http_code}' \
-            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/tags/${TAG}?access_token=${GITEE_TOKEN}")"
-          lookup=error
-          if [ "$status" = 200 ]; then
-            lookup="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print("missing" if data is None else "found")' "$response_file")"
-          fi
-
-          if [ "$status" = 200 ] && [ "$lookup" = found ]; then
-            rid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["id"])' "$response_file")"
-            apk_exists="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); print(str(any(asset.get("name") == "HoneyBox.apk" for asset in data.get("assets", []))).lower())' "$response_file")"
-            if [ "$apk_exists" = true ]; then
-              echo "Gitee release ${TAG} already contains HoneyBox.apk; nothing to upload."
-              exit 0
-            fi
-            echo "Reusing Gitee release ${TAG} (${rid}) and uploading its missing APK."
-          elif { [ "$status" = 404 ] || { [ "$status" = 200 ] && [ "$lookup" = missing ]; }; }; then
-            status="$(curl -sS --max-time 60 -o "$response_file" -w '%{http_code}' -X POST \
-              "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases" \
-              --data-urlencode "access_token=${GITEE_TOKEN}" \
-              --data-urlencode "tag_name=${TAG}" \
-              --data-urlencode "name=HoneyBox ${TAG}" \
-              --data-urlencode "body=${body}" \
-              -d "target_commitish=master")"
-            if [ "$status" != 201 ]; then
-              echo "Failed to create Gitee release ${TAG} (HTTP ${status}):" >&2
-              cat "$response_file" >&2
-              exit 1
-            fi
-            rid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["id"])' "$response_file")"
-            release_created=true
-            echo "Created Gitee release ${TAG} (${rid})."
-          else
-            echo "Failed to query Gitee release ${TAG} (HTTP ${status}):" >&2
-            cat "$response_file" >&2
-            exit 1
-          fi
-
-          # GitHub hosted runner 到 Gitee 的实测上行约 12-14 KB/s。APK 随高德
-          # SDK 接入从 62 MB 涨到 132 MB，所需时间也从约 80 分钟涨到 160-187
-          # 分钟，原来的 7200 秒（两小时）不够，v0.8.14 因此被 cancel。
-          # 短超时重试会每次从零开始，永远无法传完，所以仍然只做一次连续上传，
-          # 把窗口放到 4 小时，由 job 的 330 分钟上限兜底。
-          if ! curl -fS --show-error \
-            --connect-timeout 30 --max-time 14400 \
-            --retry 0 \
-            -X POST \
-            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files" \
-            -F "access_token=${GITEE_TOKEN}" \
-            -F "file=@${APK}"; then
-            echo "Failed to upload HoneyBox.apk to Gitee release ${rid}." >&2
-            if [ "$release_created" = true ]; then
-              echo "Rolling back the Gitee release created by this run." >&2
-              curl -fsS --max-time 60 -X DELETE \
-                "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}?access_token=${GITEE_TOKEN}" \
-                || echo "Rollback failed; delete Gitee release ${rid} manually." >&2
-            fi
-            exit 1
-          fi

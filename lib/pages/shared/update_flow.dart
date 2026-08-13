@@ -8,10 +8,10 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../app_info.dart';
 import '../../services/update_service.dart';
 
-/// Runs the full "检查更新" flow off [context]: query GitHub → compare versions →
-/// (if newer) confirm, download with a progress dialog, then hand the APK to
-/// the system installer. Manages its own dialogs and snackbars, so the caller
-/// only needs to supply a live [context].
+/// Runs the full "检查更新" flow off [context]: pick a mirror → query it →
+/// compare versions → (if newer) confirm, download with a progress dialog,
+/// then hand the APK to the system installer. Manages its own dialogs and
+/// snackbars, so the caller only needs to supply a live [context].
 Future<void> runUpdateCheck(BuildContext context) async {
   // Capture navigator/messenger up front so they can be used across the awaits
   // below without tripping `use_build_context_synchronously`.
@@ -28,6 +28,11 @@ Future<void> runUpdateCheck(BuildContext context) async {
     }
   }
 
+  // 0. Ask which mirror to check. GitHub is usually freshest; Gitee is the
+  // mainland-friendly fallback. Dismissing the dialog cancels the whole flow.
+  final source = await _pickSource(context);
+  if (!context.mounted || source == null) return;
+
   // 1. Query the release page behind a blocking spinner.
   showDialog<void>(
     context: context,
@@ -38,7 +43,7 @@ Future<void> runUpdateCheck(BuildContext context) async {
   UpdateInfo? info;
   Object? error;
   try {
-    info = await UpdateService.checkForUpdate(AppInfo.version);
+    info = await UpdateService.checkForUpdate(AppInfo.version, source: source);
   } catch (e) {
     error = e;
   }
@@ -213,6 +218,53 @@ Future<void> runUpdateCheck(BuildContext context) async {
   if (opened.type != ResultType.done) {
     snack('无法启动安装程序：${opened.message}');
   }
+}
+
+/// Asks which mirror to check for updates. Returns the chosen [UpdateSource],
+/// or null when the user dismisses the dialog (cancelling the whole flow).
+/// Uses the same stacked full-width button layout as the other update dialogs.
+Future<UpdateSource?> _pickSource(BuildContext context) {
+  return showDialog<UpdateSource>(
+    context: context,
+    builder: (dctx) {
+      final cs = Theme.of(dctx).colorScheme;
+      return AlertDialog(
+        title: const Text('检查更新'),
+        content: const Text('请选择更新来源。GitHub 通常最新；GitHub 无法访问时可改用 Gitee。'),
+        actionsOverflowDirection: VerticalDirection.down,
+        actions: [
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(dctx, UpdateSource.github),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  child: const Text('从 GitHub 更新'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(dctx, UpdateSource.gitee),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    backgroundColor: cs.surfaceContainerHighest,
+                    foregroundColor: cs.onSurface,
+                  ),
+                  child: const Text('从 Gitee 更新'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    },
+  );
 }
 
 /// Small centred spinner shown while the release API is queried.

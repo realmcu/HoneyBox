@@ -38,18 +38,30 @@ class UpdateInfo {
   });
 }
 
-/// Checks the project's **public** Gitee repository for a newer release APK and
-/// downloads it. The repo is public, so the Releases API is read anonymously —
-/// no access token is embedded in the shipped app.
+/// Where to look for the latest release. Both hosts are **public** mirrors of
+/// the same repo and expose a compatible Releases API, so the caller picks one
+/// and the rest of the flow is identical. GitHub is usually freshest; Gitee is
+/// the mainland-friendly fallback whose APK is uploaded by hand.
+enum UpdateSource { github, gitee }
+
+/// Checks the project's **public** repository for a newer release APK and
+/// downloads it. The repo is public on both hosts, so each Releases API is read
+/// anonymously — no access token is embedded in the shipped app.
 class UpdateService {
   UpdateService._();
 
   static const String _owner = 'realmcu';
   static const String _repo = 'HoneyBox';
 
-  /// Gitee Releases API — latest release of the repo.
-  static const String _latestReleaseApi =
-      'https://gitee.com/api/v5/repos/$_owner/$_repo/releases/latest';
+  /// Releases API — latest release of the repo on [source]. GitHub and Gitee
+  /// both return `tag_name` / `body` / `assets[].browser_download_url`, so the
+  /// parsing below is source-agnostic.
+  static String latestReleaseApi(UpdateSource source) => switch (source) {
+        UpdateSource.github =>
+          'https://api.github.com/repos/$_owner/$_repo/releases/latest',
+        UpdateSource.gitee =>
+          'https://gitee.com/api/v5/repos/$_owner/$_repo/releases/latest',
+      };
 
   /// Selects the download URL of the first asset whose name ends with `.apk`
   /// (case-insensitive) and has a non-empty URL. Ignores Gitee's auto-attached
@@ -64,17 +76,26 @@ class UpdateService {
     return '';
   }
 
-  /// Queries the latest release and compares it with [currentVersion].
-  /// Throws on network / parse errors so the caller can surface them.
-  static Future<UpdateInfo> checkForUpdate(String currentVersion) async {
+  /// Queries the latest release on [source] and compares it with
+  /// [currentVersion]. Throws on network / parse errors so the caller can
+  /// surface them.
+  static Future<UpdateInfo> checkForUpdate(
+    String currentVersion, {
+    required UpdateSource source,
+  }) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15);
     try {
-      final req = await client.getUrl(Uri.parse(_latestReleaseApi));
+      final req = await client.getUrl(Uri.parse(latestReleaseApi(source)));
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      // GitHub's API expects (and rewards) an explicit API version header; it
+      // is harmless to Gitee, which ignores unknown Accept media types.
+      if (source == UpdateSource.github) {
+        req.headers.set(HttpHeaders.acceptHeader, 'application/vnd.github+json');
+      }
       final resp = await req.close();
       if (resp.statusCode != 200) {
-        throw HttpException('Gitee 返回状态码 ${resp.statusCode}');
+        throw HttpException('服务器返回状态码 ${resp.statusCode}');
       }
       final body = await resp.transform(utf8.decoder).join();
       final json = jsonDecode(body) as Map<String, dynamic>;
