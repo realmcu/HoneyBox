@@ -28,12 +28,12 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -65,12 +65,12 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -186,7 +186,7 @@ jobs:
           echo "Signature fingerprint matches AMap-registered SHA-1."
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: honeybox-android-apk
           path: build/app/outputs/flutter-apk/*.apk
@@ -207,7 +207,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.release_tag || github.ref }}
 
@@ -227,7 +227,7 @@ jobs:
         run: flutter build windows --release
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: honeybox-windows-release
           path: build/windows/x64/runner/Release/
@@ -240,7 +240,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.release_tag || github.ref }}
 
@@ -283,7 +283,7 @@ jobs:
       RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.release_tag || github.ref }}
@@ -301,19 +301,19 @@ jobs:
           echo "sha=${release_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Download Android APK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: honeybox-android-apk
           path: release-artifacts/
 
       - name: Download Windows build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: honeybox-windows-release
           path: release-artifacts/windows/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: "HoneyBox ${{ env.RELEASE_TAG }}"
