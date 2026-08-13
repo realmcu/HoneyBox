@@ -194,9 +194,9 @@ GitHub Actions 工作流位于 `.github/workflows/flutter-ci.yml`，自动执行
 2. **分支构建**：向 `master`、`main` 或 `develop` 推送非文档、非资源文件改动时，在检查通过后构建 Android Debug APK 和 Windows x64 Release，并将产物保留 7 天。
 3. **手动构建**：可在 GitHub Actions 页面手动触发相同的检查及 Android、Windows 构建流程。
 4. **版本发布**：推送 `v*` 格式的标签（例如 `v1.2.0`）后，CI 构建 Android Release APK 和 Windows x64 Release，创建 GitHub Release 并上传构建产物。
-5. **同步国内镜像**：版本发布成功后，CI 将代码与标签同步到 Gitee，并创建 Gitee Release、上传 APK 及记录 APK 的 SHA-256。Gitee 在此流程中仅承担镜像和国内下载用途。
+5. **同步国内镜像**：版本发布成功后，CI 将代码与标签同步到 Gitee。Gitee Release 的 APK **不由 CI 上传**（公网到 Gitee 的上行实测仅 12–14 KB/s，百余 MB 的 APK 传不稳），需在发布后手动上传，步骤见 [docs/release-guide.md](docs/release-guide.md)。Gitee 在此流程中仅承担镜像和国内下载用途。
 
-开发与发布流程以 GitHub CI 的执行结果为准；Gitee 镜像由发布流程自动更新，不接受直接开发提交。
+开发与发布流程以 GitHub CI 的执行结果为准；Gitee 镜像的代码与标签由发布流程自动更新，不接受直接开发提交。
 
 CI 构建 Android 包需要高德 Key 与 release 签名凭据，这些内容不入库，由 GitHub Secrets 在构建前注入。所需 Secret 清单与配置步骤见 [docs/ci_release_signing.md](docs/ci_release_signing.md)。未配置时打标签会导致 release 构建失败。
 
