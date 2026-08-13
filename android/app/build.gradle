@@ -62,6 +62,13 @@ android {
                 "lib/x86/**",
                 "lib/x86_64/**",
             ]
+            // 以 deflate 压缩存放 .so，而非 AGP 默认的 STORED。高德导航 SDK 的
+            // libAMapSDK_NAVI 单个就有 57 MiB，未压缩时 APK 达 131 MiB，超过
+            // Gitee Release 附件 100 MB 的上限而无法发布（v0.8.14 起一直传不上
+            // 去）。压缩后 .so 由 94 MiB 降至约 39 MiB，APK 约 76 MiB。
+            // 代价：so 在安装时解压，设备占用略增、首次加载多几十毫秒；
+            // System.loadLibrary 的行为不变，功能不受影响。
+            useLegacyPackaging = true
         }
     }
 
