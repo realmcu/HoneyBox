@@ -42,6 +42,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # 固定版本，不随 stable 频道漂移：上游发新版曾把 Gradle/Kotlin 的
+          # 版本下限从警告提为错误，在本仓库零改动的情况下让 CI 变红。
+          # 升级时本地先升到同一版本验证，再改这里，保持本地与 CI 一致。
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
@@ -75,6 +79,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # 固定版本，不随 stable 频道漂移：上游发新版曾把 Gradle/Kotlin 的
+          # 版本下限从警告提为错误，在本仓库零改动的情况下让 CI 变红。
+          # 升级时本地先升到同一版本验证，再改这里，保持本地与 CI 一致。
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
@@ -207,6 +215,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # 固定版本，不随 stable 频道漂移：上游发新版曾把 Gradle/Kotlin 的
+          # 版本下限从警告提为错误，在本仓库零改动的情况下让 CI 变红。
+          # 升级时本地先升到同一版本验证，再改这里，保持本地与 CI 一致。
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
@@ -236,6 +248,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # 固定版本，不随 stable 频道漂移：上游发新版曾把 Gradle/Kotlin 的
+          # 版本下限从警告提为错误，在本仓库零改动的情况下让 CI 变红。
+          # 升级时本地先升到同一版本验证，再改这里，保持本地与 CI 一致。
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
