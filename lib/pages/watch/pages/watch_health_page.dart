@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../services/watch_health_protocol.dart';
 import '../../../theme/app_theme.dart';
 import '../health/watch_health_data.dart';
 import '../health/watch_health_provider.dart';
@@ -263,7 +264,6 @@ class _MetricsGrid extends StatelessWidget {
           (snapshot.distanceMeters / 1000).toStringAsFixed(2), '公里'),
       _Metric(Icons.local_fire_department_outlined, '卡路里',
           snapshot.caloriesKcal.toStringAsFixed(1), 'kcal'),
-      _Metric(Icons.timer_outlined, '活动时长', '${snapshot.activeMinutes}', '分钟'),
       _Metric(Icons.favorite, '最近心率', heartRate?.toString() ?? '--',
           heartRate == null ? '暂无数据' : '次/分'),
       _Metric(
@@ -524,7 +524,7 @@ class _SleepSection extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 5),
                     child: Row(children: [
                       Icon(
-                        stage.mode == 1
+                        stage.state == WatchSleepState.deep
                             ? Icons.nights_stay_outlined
                             : Icons.bedtime_outlined,
                         size: 18,
@@ -547,11 +547,13 @@ class _HeartRateSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final records = [...snapshot.heartRateRecords]
+    // Version 1 has no per-sample heart rate stream; each entry here is the
+    // average bpm of one 15-minute activity bucket.
+    final records = [...snapshot.heartRateBuckets]
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     final recent = records.take(5).toList();
     return Column(children: [
-      _SectionHeading(title: '最近心率', trailing: '${records.length} 次测量'),
+      _SectionHeading(title: '心率', trailing: '${records.length} 个时段'),
       const SizedBox(height: 10),
       _DataPanel(
         child: recent.isEmpty
@@ -565,7 +567,7 @@ class _HeartRateSection extends StatelessWidget {
                           size: 18, color: AppTheme.error),
                       const SizedBox(width: 9),
                       Expanded(child: Text(_recordTime(recent[i].timestamp))),
-                      Text('${recent[i].bpm} 次/分'),
+                      Text('${recent[i].heartRate} 次/分'),
                     ]),
                   ),
                   if (i < recent.length - 1) const Divider(),
@@ -575,8 +577,9 @@ class _HeartRateSection extends StatelessWidget {
     ]);
   }
 
+  /// Buckets land on 15-minute boundaries, so seconds carry no information.
   static String _recordTime(DateTime value) =>
-      '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}:${value.second.toString().padLeft(2, '0')}';
+      '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
 }
 
 class _DataPanel extends StatelessWidget {

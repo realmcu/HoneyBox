@@ -1,53 +1,52 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:honeybox/pages/watch/health/watch_health_data.dart';
+import 'package:honeybox/services/watch_health_protocol.dart';
 
 void main() {
   final snapshot = WatchHealthSnapshot.fromRecords(
     syncedAt: DateTime(2026, 7, 30, 12),
     sportRecords: [
+      // Yesterday -- excluded from "today" metrics, included in week trends.
       WatchSportRecord(
-        date: DateTime(2026, 7, 29),
-        offset: 80,
-        mode: 1,
+        timestamp: DateTime(2026, 7, 29, 20),
+        mode: WatchSportMode.run,
         steps: 900,
-        activeMinutes: 12,
-        caloriesMilliKcal: 20000,
+        caloriesDeciKcal: 200,
         distanceMeters: 700,
+        heartRate: 75,
+        hasHeartRate: true,
       ),
       WatchSportRecord(
-        date: DateTime(2026, 7, 30),
-        offset: 32,
-        mode: 1,
+        timestamp: DateTime(2026, 7, 30, 8),
+        mode: WatchSportMode.run,
         steps: 600,
-        activeMinutes: 10,
-        caloriesMilliKcal: 12500,
+        caloriesDeciKcal: 125,
         distanceMeters: 420,
+        heartRate: 72,
+        hasHeartRate: true,
       ),
       WatchSportRecord(
-        date: DateTime(2026, 7, 30),
-        offset: 33,
-        mode: 2,
+        timestamp: DateTime(2026, 7, 30, 8, 15),
+        mode: WatchSportMode.invalid,
         steps: 400,
-        activeMinutes: 8,
-        caloriesMilliKcal: 7500,
+        caloriesDeciKcal: 75,
         distanceMeters: 280,
+        heartRate: 78,
+        hasHeartRate: true,
       ),
     ],
     sleepRecords: [
-      WatchSleepRecord(date: DateTime(2026, 7, 29), minutes: 1380, mode: 1),
-      WatchSleepRecord(date: DateTime(2026, 7, 30), minutes: 60, mode: 2),
-      WatchSleepRecord(date: DateTime(2026, 7, 30), minutes: 180, mode: 3),
-    ],
-    heartRateRecords: [
-      WatchHeartRateRecord(
-        date: DateTime(2026, 7, 30),
-        seconds: 36000,
-        bpm: 72,
+      WatchSleepRecord(
+        timestamp: DateTime(2026, 7, 29, 23),
+        state: WatchSleepState.deep,
       ),
-      WatchHeartRateRecord(
-        date: DateTime(2026, 7, 30),
-        seconds: 36600,
-        bpm: 78,
+      WatchSleepRecord(
+        timestamp: DateTime(2026, 7, 30, 1),
+        state: WatchSleepState.light,
+      ),
+      WatchSleepRecord(
+        timestamp: DateTime(2026, 7, 30, 3),
+        state: WatchSleepState.wake,
       ),
     ],
   );
@@ -56,19 +55,51 @@ void main() {
     expect(snapshot.steps, 1000);
     expect(snapshot.distanceMeters, 700);
     expect(snapshot.caloriesKcal, 20);
-    expect(snapshot.activeMinutes, 18);
     expect(snapshot.latestHeartRate, 78);
     expect(snapshot.minimumHeartRate, 72);
     expect(snapshot.maximumHeartRate, 78);
+  });
+
+  test('ignores bucket heart rate when the HAS_HR flag is clear', () {
+    final noHr = WatchHealthSnapshot.fromRecords(
+      syncedAt: DateTime(2026, 7, 30, 12),
+      sportRecords: [
+        WatchSportRecord(
+          timestamp: DateTime(2026, 7, 30, 8),
+          mode: WatchSportMode.walk,
+          steps: 100,
+          caloriesDeciKcal: 10,
+          distanceMeters: 80,
+        ),
+      ],
+      sleepRecords: const [],
+    );
+
+    expect(noHr.steps, 100);
+    expect(noHr.latestHeartRate, isNull);
+    expect(noHr.heartRateBuckets, isEmpty);
   });
 
   test('computes sleep stages from state transitions', () {
     expect(snapshot.sleepMinutes, 240);
     expect(snapshot.sleepRange, '23:00 - 03:00');
     expect(
-      snapshot.sleepStages.map((stage) => (stage.mode, stage.minutes)).toList(),
-      [(1, 120), (2, 120)],
+      snapshot.sleepStages
+          .map((stage) => (stage.state, stage.minutes))
+          .toList(),
+      [(WatchSleepState.deep, 120), (WatchSleepState.light, 120)],
     );
+  });
+
+  test('buckets the day trend by wall-clock hour', () {
+    final trend = snapshot.trend(WatchHealthPeriod.day);
+
+    // Both of today's buckets land at 08:00-08:15, i.e. the 08:00-12:00 slot.
+    final slot = trend.points[2];
+    expect(slot.label, '8时');
+    expect(slot.steps, 1000);
+    expect(slot.heartRate, 75); // average of 72 and 78
+    expect(trend.points.where((point) => point.steps > 0), hasLength(1));
   });
 
   test('aggregates real records for week trends', () {
@@ -85,7 +116,6 @@ void main() {
       syncedAt: DateTime(2026, 7, 30),
       sportRecords: const [],
       sleepRecords: const [],
-      heartRateRecords: const [],
     );
 
     expect(empty.latestHeartRate, isNull);

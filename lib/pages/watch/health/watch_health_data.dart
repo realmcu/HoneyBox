@@ -1,63 +1,65 @@
+import '../../../services/watch_health_protocol.dart';
+
 enum WatchHealthPeriod { day, week, month }
 
+/// One 15-minute activity bucket, as stored after a version 1 sync.
+///
+/// [timestamp] is the bucket's end/flush time and is authoritative -- version 0
+/// used to reconstruct it from a packed date plus a 15-minute slot index, which
+/// forced everything downstream to think in intra-day slots.
 class WatchSportRecord {
   const WatchSportRecord({
-    required this.date,
-    required this.offset,
+    required this.timestamp,
     required this.mode,
     required this.steps,
-    required this.activeMinutes,
-    required this.caloriesMilliKcal,
+    required this.caloriesDeciKcal,
     required this.distanceMeters,
+    this.heartRate = 0,
+    this.hasHeartRate = false,
+    this.partialBucket = false,
   });
 
-  final DateTime date;
-  final int offset;
+  final DateTime timestamp;
   final int mode;
   final int steps;
-  final int activeMinutes;
-  final int caloriesMilliKcal;
+
+  /// Calories in 0.1 kcal units, matching the wire format.
+  final int caloriesDeciKcal;
   final int distanceMeters;
 
-  DateTime get timestamp => date.add(Duration(minutes: offset * 15));
+  /// Bucket-average bpm; meaningful only when [hasHeartRate].
+  final int heartRate;
+  final bool hasHeartRate;
+
+  /// Device flushed this bucket before its 15 minutes elapsed.
+  final bool partialBucket;
 }
 
+/// One sleep state transition. Not produced yet -- the device has no sleep
+/// storage, so a sync never yields these.
 class WatchSleepRecord {
   const WatchSleepRecord({
-    required this.date,
-    required this.minutes,
-    required this.mode,
+    required this.timestamp,
+    required this.state,
+    this.backfilled = false,
   });
 
-  final DateTime date;
-  final int minutes;
-  final int mode;
+  final DateTime timestamp;
 
-  DateTime get timestamp => date.add(Duration(minutes: minutes));
-}
-
-class WatchHeartRateRecord {
-  const WatchHeartRateRecord({
-    required this.date,
-    required this.seconds,
-    required this.bpm,
-  });
-
-  final DateTime date;
-  final int seconds;
-  final int bpm;
-
-  DateTime get timestamp => date.add(Duration(seconds: seconds));
+  /// See `WatchSleepState` in watch_health_protocol.dart.
+  final int state;
+  final bool backfilled;
 }
 
 class WatchSleepStage {
   const WatchSleepStage({
-    required this.mode,
+    required this.state,
     required this.name,
     required this.minutes,
   });
 
-  final int mode;
+  /// See `WatchSleepState` in watch_health_protocol.dart.
+  final int state;
   final String name;
   final int minutes;
 }
@@ -91,25 +93,30 @@ class WatchHealthSnapshot {
     required this.syncedAt,
     required List<WatchSportRecord> sportRecords,
     required List<WatchSleepRecord> sleepRecords,
-    required List<WatchHeartRateRecord> heartRateRecords,
   })  : sportRecords = List.unmodifiable(sportRecords),
-        sleepRecords = List.unmodifiable(sleepRecords),
-        heartRateRecords = List.unmodifiable(heartRateRecords);
+        sleepRecords = List.unmodifiable(sleepRecords);
 
   final DateTime syncedAt;
   final List<WatchSportRecord> sportRecords;
   final List<WatchSleepRecord> sleepRecords;
-  final List<WatchHeartRateRecord> heartRateRecords;
 
   DateTime get _today => DateTime(syncedAt.year, syncedAt.month, syncedAt.day);
 
   Iterable<WatchSportRecord> get _todaySport =>
-      sportRecords.where((record) => _sameDate(record.date, _today));
+      sportRecords.where((record) => _sameDate(record.timestamp, _today));
 
-  List<WatchHeartRateRecord> get _todayHeartRates => heartRateRecords
-      .where((record) => _sameDate(record.date, _today) && record.bpm > 0)
+  /// Today's buckets that carry a valid average bpm, oldest first.
+  ///
+  /// Version 1 has no per-sample heart rate stream (key 0x0D is reserved), so
+  /// every bpm figure below is a 15-minute bucket average.
+  List<WatchSportRecord> get _todayHeartRateBuckets => _todaySport
+      .where((record) => record.hasHeartRate && record.heartRate > 0)
       .toList()
     ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+  /// Today's buckets carrying a valid average bpm, oldest first. Exposed for
+  /// the heart-rate list UI; each entry is a 15-minute average, not a sample.
+  List<WatchSportRecord> get heartRateBuckets => _todayHeartRateBuckets;
 
   int get steps => _todaySport.fold(0, (sum, record) => sum + record.steps);
 
@@ -118,22 +125,20 @@ class WatchHealthSnapshot {
 
   double get caloriesKcal => _todaySport.fold(
         0,
-        (sum, record) => sum + record.caloriesMilliKcal / 1000,
+        (sum, record) => sum + record.caloriesDeciKcal / 10,
       );
 
-  int get activeMinutes =>
-      _todaySport.fold(0, (sum, record) => sum + record.activeMinutes);
-
-  int? get latestHeartRate =>
-      _todayHeartRates.isEmpty ? null : _todayHeartRates.last.bpm;
-
-  int? get minimumHeartRate => _todayHeartRates.isEmpty
+  int? get latestHeartRate => _todayHeartRateBuckets.isEmpty
       ? null
-      : _todayHeartRates.map((record) => record.bpm).reduce(_min);
+      : _todayHeartRateBuckets.last.heartRate;
 
-  int? get maximumHeartRate => _todayHeartRates.isEmpty
+  int? get minimumHeartRate => _todayHeartRateBuckets.isEmpty
       ? null
-      : _todayHeartRates.map((record) => record.bpm).reduce(_max);
+      : _todayHeartRateBuckets.map((record) => record.heartRate).reduce(_min);
+
+  int? get maximumHeartRate => _todayHeartRateBuckets.isEmpty
+      ? null
+      : _todayHeartRateBuckets.map((record) => record.heartRate).reduce(_max);
 
   List<WatchSleepStage> get sleepStages {
     final records = _sortedSleepRecords();
@@ -141,19 +146,29 @@ class WatchHealthSnapshot {
     for (var i = 0; i + 1 < records.length; i++) {
       final current = records[i];
       final duration = records[i + 1].timestamp.difference(current.timestamp);
-      if ((current.mode == 1 || current.mode == 2) && duration.inMinutes > 0) {
+      if ((current.state == WatchSleepState.deep ||
+              current.state == WatchSleepState.light) &&
+          duration.inMinutes > 0) {
         totals.update(
-          current.mode,
+          current.state,
           (value) => value + duration.inMinutes,
           ifAbsent: () => duration.inMinutes,
         );
       }
     }
     return [
-      if ((totals[1] ?? 0) > 0)
-        WatchSleepStage(mode: 1, name: '深睡', minutes: totals[1]!),
-      if ((totals[2] ?? 0) > 0)
-        WatchSleepStage(mode: 2, name: '浅睡', minutes: totals[2]!),
+      if ((totals[WatchSleepState.deep] ?? 0) > 0)
+        WatchSleepStage(
+          state: WatchSleepState.deep,
+          name: '深睡',
+          minutes: totals[WatchSleepState.deep]!,
+        ),
+      if ((totals[WatchSleepState.light] ?? 0) > 0)
+        WatchSleepStage(
+          state: WatchSleepState.light,
+          name: '浅睡',
+          minutes: totals[WatchSleepState.light]!,
+        ),
     ];
   }
 
@@ -162,11 +177,12 @@ class WatchHealthSnapshot {
 
   String? get sleepRange {
     final records = _sortedSleepRecords();
-    final startIndex =
-        records.indexWhere((record) => record.mode == 1 || record.mode == 2);
+    final startIndex = records.indexWhere((record) =>
+        record.state == WatchSleepState.deep ||
+        record.state == WatchSleepState.light);
     if (startIndex < 0) return null;
     final endIndex = records.indexWhere(
-      (record) => record.mode == 3,
+      (record) => record.state == WatchSleepState.wake,
       startIndex + 1,
     );
     if (endIndex < 0) return null;
@@ -186,15 +202,16 @@ class WatchHealthSnapshot {
     for (var slot = 0; slot < 6; slot++) {
       final startHour = slot * 4;
       final endHour = startHour + 4;
-      final steps = _todaySport
-          .where((record) =>
-              record.offset >= startHour * 4 && record.offset < endHour * 4)
-          .fold(0, (sum, record) => sum + record.steps);
-      final heartRates = _todayHeartRates
-          .where((record) =>
-              record.timestamp.hour >= startHour &&
-              record.timestamp.hour < endHour)
-          .map((record) => record.bpm)
+      // Bucket the day by wall-clock hour. Version 0 compared a 15-minute slot
+      // index here (offset >= startHour * 4); with real timestamps the hour is
+      // read directly, which also stays correct for partial buckets.
+      final inSlot = _todaySport.where((record) =>
+          record.timestamp.hour >= startHour &&
+          record.timestamp.hour < endHour);
+      final steps = inSlot.fold(0, (sum, record) => sum + record.steps);
+      final heartRates = inSlot
+          .where((record) => record.hasHeartRate && record.heartRate > 0)
+          .map((record) => record.heartRate)
           .toList();
       points.add(WatchHealthTrendPoint(
         label: '$startHour时',
@@ -214,12 +231,12 @@ class WatchHealthSnapshot {
     final points = <WatchHealthTrendPoint>[];
     for (var i = 0; i < days; i++) {
       final date = firstDay.add(Duration(days: i));
-      final daySteps = sportRecords
-          .where((record) => _sameDate(record.date, date))
-          .fold(0, (sum, record) => sum + record.steps);
-      final heartRates = heartRateRecords
-          .where((record) => _sameDate(record.date, date) && record.bpm > 0)
-          .map((record) => record.bpm)
+      final dayRecords =
+          sportRecords.where((record) => _sameDate(record.timestamp, date));
+      final daySteps = dayRecords.fold(0, (sum, record) => sum + record.steps);
+      final heartRates = dayRecords
+          .where((record) => record.hasHeartRate && record.heartRate > 0)
+          .map((record) => record.heartRate)
           .toList();
       points.add(WatchHealthTrendPoint(
         label: '${date.month}/${date.day}',

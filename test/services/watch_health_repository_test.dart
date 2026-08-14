@@ -24,26 +24,84 @@ void main() {
     expect(sent, [WatchHealthProtocol.buildRequest()]);
 
     notifications.add(_frame([
-      (WatchHealthKey.syncStart, Uint8List(0)),
-      (WatchHealthKey.sportData, _sportValue()),
-      (WatchHealthKey.heartRateData, _heartValue()),
-      (WatchHealthKey.more, Uint8List(0)),
+      (WatchHealthKey.syncStart, _dataType()),
+      (WatchHealthKey.sportData, _sportPage(steps: 600)),
+      (WatchHealthKey.more, _dataType()),
     ]));
     await Future<void>.delayed(Duration.zero);
+    // The follow-up request must repeat the session's data type.
     expect(sent, hasLength(2));
     expect(sent.last, WatchHealthProtocol.buildRequest());
 
     notifications.add(_frame([
-      (WatchHealthKey.sleepData, _sleepValue()),
-      (WatchHealthKey.syncEnd, Uint8List(0)),
+      (WatchHealthKey.sportData, _sportPage(steps: 250)),
+      (WatchHealthKey.syncEnd, _dataType()),
     ]));
     final snapshot = await future;
 
-    expect(snapshot.sportRecords, hasLength(1));
-    expect(snapshot.sportRecords.single.steps, 600);
-    expect(snapshot.heartRateRecords.map((record) => record.bpm), [72, 78]);
-    expect(snapshot.sleepRecords, hasLength(2));
+    expect(snapshot.sportRecords.map((record) => record.steps), [600, 250]);
     expect(snapshot.syncedAt, DateTime(2026, 7, 30, 12));
+  });
+
+  test('completes with no records when the device history is empty', () async {
+    // Spec: an empty DB goes straight from syncStart to syncEnd, with no
+    // count=0 data page in between.
+    final notifications = StreamController<Uint8List>.broadcast();
+    addTearDown(notifications.close);
+    final repository = WatchHealthBleRepository(
+      commandAvailable: () => true,
+      sendCommand: (_) => 1,
+      notifications: notifications.stream,
+      clock: () => DateTime(2026, 7, 30, 12),
+    );
+
+    final future = repository.sync('watch-01');
+    notifications.add(_frame([
+      (WatchHealthKey.syncStart, _dataType()),
+      (WatchHealthKey.syncEnd, _dataType()),
+    ]));
+
+    final snapshot = await future;
+    expect(snapshot.sportRecords, isEmpty);
+    expect(snapshot.sleepRecords, isEmpty);
+  });
+
+  test('ignores markers belonging to another data type', () async {
+    final notifications = StreamController<Uint8List>.broadcast();
+    addTearDown(notifications.close);
+    final repository = WatchHealthBleRepository(
+      commandAvailable: () => true,
+      sendCommand: (_) => 1,
+      notifications: notifications.stream,
+      timeout: const Duration(milliseconds: 20),
+    );
+
+    final future = repository.sync('watch-01');
+    // A sleep-typed syncEnd must not finish our activity session.
+    notifications.add(_frame([
+      (WatchHealthKey.syncStart, _dataType(WatchHealthDataType.activity)),
+      (WatchHealthKey.syncEnd, _dataType(WatchHealthDataType.sleep)),
+    ]));
+
+    expect(future, throwsA(isA<TimeoutException>()));
+  });
+
+  test('ignores version 0 frames entirely', () async {
+    final notifications = StreamController<Uint8List>.broadcast();
+    addTearDown(notifications.close);
+    final repository = WatchHealthBleRepository(
+      commandAvailable: () => true,
+      sendCommand: (_) => 1,
+      notifications: notifications.stream,
+      timeout: const Duration(milliseconds: 20),
+    );
+
+    final future = repository.sync('watch-01');
+    // Header byte 0x00 = deprecated version 0. Dropped, so the sync times out
+    // rather than half-parsing a foreign dialect.
+    notifications.add(Uint8List.fromList([0x05, 0x00, 0x07, 0x00, 0x00]));
+
+    expect(future, throwsA(isA<TimeoutException>()));
   });
 
   test('fails without sending when command channel is unavailable', () async {
@@ -71,7 +129,7 @@ void main() {
 
     final future = repository.sync('watch-01');
     notifications.add(_frame([
-      (WatchHealthKey.syncStart, Uint8List(0)),
+      (WatchHealthKey.syncStart, _dataType()),
     ]));
 
     expect(future, throwsA(isA<TimeoutException>()));
@@ -87,13 +145,15 @@ void main() {
     );
 
     final future = repository.sync('watch-01');
+    // Record count claims one 18-byte record but only one byte follows.
     notifications.add(Uint8List.fromList([
       0x05,
-      0x00,
+      0x10,
       WatchHealthKey.sportData,
       0x00,
-      0x08,
+      0x02,
       0x01,
+      0x00,
     ]));
 
     expect(future, throwsFormatException);
@@ -101,69 +161,26 @@ void main() {
 }
 
 Uint8List _frame(List<(int, Uint8List)> entries) {
-  final bytes = <int>[0x05, 0x00];
+  final bytes = <int>[0x05, 0x10];
   for (final (key, value) in entries) {
     bytes.addAll([key, value.length >> 8, value.length & 0xFF, ...value]);
   }
   return Uint8List.fromList(bytes);
 }
 
-Uint8List _sportValue() => Uint8List.fromList([
-      ..._date(2026, 7, 30),
-      0x00,
-      0x01,
-      ..._packBits([
-        (32, 11),
-        (1, 2),
-        (600, 12),
-        (10, 4),
-        (12500, 19),
-        (420, 16),
-      ]),
+Uint8List _dataType([int type = WatchHealthDataType.activity]) =>
+    Uint8List.fromList([type]);
+
+/// A one-record activity page.
+Uint8List _sportPage({required int steps}) => Uint8List.fromList([
+      0x01, // record count
+      0x00, 0x00, 0x03, 0xE8, // timestamp
+      (steps >> 8) & 0xFF, steps & 0xFF,
+      0x00, 0x00, // distance
+      0x00, 0x00, // calories
+      0x00, // heart rate
+      0x0F, // bucket minutes
+      0x00, // mode
+      0x00, // flags
+      0x00, 0x00, 0x00, 0x00, // reserved
     ]);
-
-Uint8List _heartValue() => Uint8List.fromList([
-      ..._date(2026, 7, 30),
-      0x00,
-      0x02,
-      0x00,
-      0x8F,
-      0x10,
-      72,
-      0x00,
-      0x8F,
-      0x2A,
-      78,
-    ]);
-
-Uint8List _sleepValue() => Uint8List.fromList([
-      ..._date(2026, 7, 29),
-      0x00,
-      0x02,
-      0x05,
-      0x64,
-      0x00,
-      0x01,
-      0x05,
-      0x8C,
-      0x00,
-      0x03,
-    ]);
-
-List<int> _date(int year, int month, int day) {
-  final packed = ((year - 2000) << 9) | (month << 5) | day;
-  return [packed >> 8, packed & 0xFF];
-}
-
-List<int> _packBits(List<(int, int)> fields) {
-  var packed = BigInt.zero;
-  for (final (value, width) in fields) {
-    packed = (packed << width) | BigInt.from(value);
-  }
-  final bytes = List<int>.filled(8, 0);
-  for (var i = bytes.length - 1; i >= 0; i--) {
-    bytes[i] = (packed & BigInt.from(0xFF)).toInt();
-    packed >>= 8;
-  }
-  return bytes;
-}

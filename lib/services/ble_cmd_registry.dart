@@ -62,7 +62,7 @@ abstract class BleCmdWatchBindKey {
   static const int bindResponse = 0x02; // Dev → App
 }
 
-/// Watch notification (CMD 0x05) sub-command keys.
+/// Watch notification (CMD 0x04) sub-command keys.
 abstract class BleCmdWatchNotificationKey {
   static const int pushNotification = 0x01; // App → Dev
   // 0x02 (app filter list) / 0x03 (master enable) 已在协议 spec 保留但未实现 —
@@ -70,20 +70,18 @@ abstract class BleCmdWatchNotificationKey {
 }
 
 /// Watch sport / health data (CMD 0x05) sub-command keys.
+///
+/// SPORT version 1 only defines the six keys below; every other number in this
+/// command is RESERVED and must not be sent by either side (spec 3.6). Notably
+/// 0x0D (per-sample heart rate) is gone — version 1 carries a per-bucket
+/// average bpm inside the 0x02 record instead.
 abstract class BleCmdWatchHealthKey {
   static const int requestData = 0x01; // App -> Dev
   static const int sportData = 0x02; // Dev -> App
   static const int sleepData = 0x03; // Dev -> App
   static const int more = 0x04; // Dev -> App
-  static const int sleepSettings = 0x05; // Dev -> App
-  static const int realtime = 0x06; // App -> Dev
   static const int syncStart = 0x07; // Dev -> App
   static const int syncEnd = 0x08; // Dev -> App
-  static const int todaySport = 0x09;
-  static const int latestSport = 0x0A;
-  static const int calibrate = 0x0B;
-  static const int calibrateResponse = 0x0C;
-  static const int heartRateData = 0x0D; // Dev -> App
 }
 
 /// WiFi provisioning (CMD 0x0D) sub-command keys.

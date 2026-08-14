@@ -50,10 +50,13 @@ class WatchHealthBleRepository implements WatchHealthRepository {
     final completer = Completer<WatchHealthSnapshot>();
     final sports = <WatchSportRecord>[];
     final sleeps = <WatchSleepRecord>[];
-    final heartRates = <WatchHeartRateRecord>[];
     StreamSubscription<Uint8List>? subscription;
     Timer? timer;
     var started = false;
+
+    // Version 1 sessions are per Data type and must not switch mid-flight, so
+    // every follow-up request repeats the type the device opened with.
+    const dataType = WatchHealthDataType.activity;
 
     void finishError(Object error, [StackTrace? stackTrace]) {
       if (completer.isCompleted) return;
@@ -75,7 +78,10 @@ class WatchHealthBleRepository implements WatchHealthRepository {
     bool sendRequest() {
       if (!_commandAvailable()) return false;
       try {
-        return _sendCommand(WatchHealthProtocol.buildRequest()) != null;
+        return _sendCommand(
+              WatchHealthProtocol.buildRequest(dataType: dataType),
+            ) !=
+            null;
       } catch (_) {
         return false;
       }
@@ -88,49 +94,54 @@ class WatchHealthBleRepository implements WatchHealthRepository {
         if (events.isEmpty) return;
         resetTimeout();
         for (final event in events) {
-          if (event == WatchHealthMarker.syncStart) {
+          // Markers for a Data type we didn't ask for belong to no session of
+          // ours; ignore them rather than letting them drive the state machine.
+          if (event is WatchHealthMarkerEvent && event.dataType != dataType) {
+            continue;
+          }
+
+          if (event is WatchHealthMarkerEvent &&
+              event.marker == WatchHealthMarker.syncStart) {
             started = true;
             sports.clear();
             sleeps.clear();
-            heartRates.clear();
           } else if (!started) {
             continue;
           } else if (event is WatchSportData) {
             sports.addAll(event.items.map((item) => WatchSportRecord(
-                  date: event.date,
-                  offset: item.offset,
+                  timestamp: item.timestamp,
                   mode: item.mode,
                   steps: item.steps,
-                  activeMinutes: item.activeMinutes,
-                  caloriesMilliKcal: item.caloriesMilliKcal,
+                  caloriesDeciKcal: item.caloriesDeciKcal,
                   distanceMeters: item.distanceMeters,
+                  heartRate: item.heartRate,
+                  hasHeartRate: item.hasHeartRate,
+                  partialBucket: item.partialBucket,
                 )));
           } else if (event is WatchSleepData) {
+            // Not reachable today: the device has no sleep storage, so an
+            // activity session never yields sleep pages. Decoded anyway so a
+            // future firmware needs no change here.
             sleeps.addAll(event.items.map((item) => WatchSleepRecord(
-                  date: event.date,
-                  minutes: item.minutes,
-                  mode: item.mode,
+                  timestamp: item.timestamp,
+                  state: item.state,
+                  backfilled: item.backfilled,
                 )));
-          } else if (event is WatchHeartRateData) {
-            heartRates.addAll(event.items.map((item) => WatchHeartRateRecord(
-                  date: event.date,
-                  seconds: item.seconds,
-                  bpm: item.bpm,
-                )));
-          } else if (event == WatchHealthMarker.more) {
+          } else if (event is WatchHealthMarkerEvent &&
+              event.marker == WatchHealthMarker.more) {
             if (!sendRequest()) {
               finishError(const WatchHealthSyncException(
                 'Failed to request the next health data batch',
               ));
               return;
             }
-          } else if (event == WatchHealthMarker.syncEnd) {
+          } else if (event is WatchHealthMarkerEvent &&
+              event.marker == WatchHealthMarker.syncEnd) {
             timer?.cancel();
             completer.complete(WatchHealthSnapshot.fromRecords(
               syncedAt: _clock(),
               sportRecords: sports,
               sleepRecords: sleeps,
-              heartRateRecords: heartRates,
             ));
             return;
           }

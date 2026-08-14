@@ -53,7 +53,9 @@ void main() {
 
     await tester.drag(find.byType(ListView), const Offset(0, -1000));
     await tester.pumpAndSettle();
-    expect(find.textContaining('10:10:00'), findsOneWidget);
+    // Bucket-average heart rate, labelled to the minute (v1 has no per-sample
+    // stream, so the fixture's newest bucket is 08:15).
+    expect(find.textContaining('7/30 08:15'), findsOneWidget);
   });
 
   testWidgets('switches to the weekly trend without another sync',
