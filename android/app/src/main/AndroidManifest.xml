@@ -10,7 +10,9 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <!-- Local-only Wi-Fi hotspot (WiFi 配网 probe). -->
+    <!-- Local-only Wi-Fi hotspot (WiFi 配网 probe)。
+         NEARBY_WIFI_DEVICES 在 Android 13+ 也是 eBadge 传图 (§5) 反向连设备
+         SoftAP 所必需的 —— WifiNetworkSpecifier 少了它会抛 SecurityException。 -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission

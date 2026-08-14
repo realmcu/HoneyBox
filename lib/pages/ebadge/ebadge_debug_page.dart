@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ebadge_link_provider.dart';
 import '../../services/ebadge_link.dart';
 import '../../services/ebadge_protocol.dart';
+import '../../services/ebadge_transfer_session.dart';
+import '../../services/ebadge_wifi_transport.dart';
 import '../../theme/app_theme.dart';
 
 /// eBadge 协议调试页。
@@ -46,6 +48,12 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
 
   bool _attaching = true;
   bool _autoScroll = true;
+
+  /// 传图会话状态。设备侧只允许单会话(§5.7 非 Idle 收到新 Offer 回 BUSY),
+  /// 所以按钮期间要禁用,不能靠用户自觉不连点。
+  bool _xferBusy = false;
+  EBadgeXferStage _xferStage = EBadgeXferStage.idle;
+  String? _xferDetail;
 
   /// 日志区占屏高比例。0.42 是权衡出来的:再高命令区就装不下两行按钮,
   /// 再低日志一次只能看三四条,来回滚反而更慢。
@@ -165,10 +173,13 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     }
   }
 
-  /// 0x10 TRANSFER_OFFER —— 调试用的假 Offer(不接后续 Wi-Fi 上传)。
+  /// 0x10 TRANSFER_OFFER —— **只发 Offer**,不接后续 Wi-Fi 上传。
   ///
-  /// 这里刻意用固定的假 size/crc32:本页的目的是验证 BLE 控制面的收发,
-  /// 完整传图链路(GET_AP_INFO → 连 AP → TCP 推流)不在协议调试范围内。
+  /// 保留这个按钮是为了单独验证控制面握手:能看到设备弹不弹确认窗、回 0x11 还是
+  /// 直接 0x16。想跑完整链路请用「WIFI 传图」按钮([_wifiTransfer])。
+  ///
+  /// 注意:本按钮发完就不管了,设备会停在 WaitSta 直到 §5.5 的 60s 超时,期间
+  /// 再发 Offer 会被回 XFER_ERR_BUSY(§5.7)。这是预期行为,不是 bug。
   Future<void> _transferOffer() async {
     final storage = _storage;
     const size = 64 * 1024;
@@ -193,9 +204,86 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
         size: size,
         crc32: eBadgeCrc32(List<int>.filled(16, 0x41)),
       ),
-      'debug.jpg JPEG ${size}B(调试假 Offer)',
+      'debug.jpg JPEG ${size}B(调试假 Offer,不接上传)',
     );
   }
+
+  /// Wi-Fi 数据面全链路传图(协议 §5.4 完整时序)。
+  ///
+  /// 与 [_transferOffer] 的分工:那个只发一帧 Offer 看设备怎么回,本按钮把
+  /// Offer → Decision → AP_INFO → 连热点 → TCP 推 EBXF → 收 EBXR → 等 0x15 DONE
+  /// 整条链路跑完,时序编排在 [EBadgeTransferSession] 里。
+  ///
+  /// **传的是固定的合成数据**,不选相册 —— 调试台要的是可重复的基准,固定数据下
+  /// CRC32 每次都一样,设备回 XFER_ERR_VERIFY 就一定是链路问题而非文件问题。
+  ///
+  /// **副作用要知道**:连上设备热点期间原生侧会 `bindProcessToNetwork`,本进程所
+  /// 有网络请求都改走这张无外网的热点,检查更新之类会失败;会话结束(含失败)会
+  /// 自动解绑。这也是本按钮做成一次一会话、不允许并发的原因。
+  Future<void> _wifiTransfer() async {
+    if (_xferBusy) return;
+
+    final storage = _storage;
+    final body = _demoPayload();
+    if (storage != null && !storage.canFit(body.length)) {
+      _link.logError(
+        '本地前置校验失败,未发起传图',
+        detail: '协议 §2.9 要求 free ≥ size + ${EBadgeLimits.fsMargin};'
+            '当前 free=${storage.free} size=${body.length}',
+      );
+      return;
+    }
+    if (storage == null) {
+      _link.logInfo(
+        '提示:尚未获取存储信息',
+        detail: '协议 §4.5 要求发 Offer 前先 0x19 GET_STORAGE 校验容量',
+      );
+    }
+
+    setState(() {
+      _xferBusy = true;
+      _xferStage = EBadgeXferStage.idle;
+      _xferDetail = null;
+    });
+
+    final session = EBadgeTransferSession(
+      link: _link,
+      wifi: EBadgeWifiTransport(),
+      onStage: (s, detail) {
+        if (!mounted) return;
+        setState(() {
+          _xferStage = s;
+          _xferDetail = detail;
+        });
+      },
+    );
+
+    try {
+      final err = await session.run(
+        name: _demoFileName,
+        type: EBadgeFileType.bin,
+        body: body,
+      );
+      if (!mounted) return;
+      final msg = err ?? '传图完成';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+      );
+    } finally {
+      if (mounted) setState(() => _xferBusy = false);
+    }
+  }
+
+  static const String _demoFileName = 'wifi_demo.bin';
+
+  /// 固定的测试载荷。
+  ///
+  /// 用递增字节而非全零:全零的数据一旦被截断或错位,CRC32 仍可能凑巧对得上,
+  /// 而递增序列任何一段错位都会立刻反映在校验值上。16 KiB 也刻意大于
+  /// [EBadgeWifiTransport.upload] 默认的 8 KiB 分块,好让进度回调真的走两次
+  /// 以上 —— 只走一次的话,分块逻辑坏了也看不出来。
+  Uint8List _demoPayload() =>
+      Uint8List.fromList(List.generate(16 * 1024, (i) => i & 0xFF));
 
   /// 0x02 SEND_FILE —— 固定数据的小文件直传模拟(§4.2)。
   ///
@@ -396,6 +484,22 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
           'SEND_FILE 发 §4.2 文档示例:a.bin / JPEG / 正文 DE AD BE EF,'
           '经 BLE 直传落到 <FAT_ROOT>/a.bin,应答为 0x04 RESULT。'
           '大图壁纸禁走此路,须用 TRANSFER_OFFER 走 Wi-Fi 数据面。',
+        ),
+        const SizedBox(height: 16),
+        const _SectionLabel('Wi-Fi 数据面(§5 全链路)'),
+        _CmdGrid(children: [
+          _XferButton(
+            busy: _xferBusy,
+            onTap: _wifiTransfer,
+          ),
+        ]),
+        if (_xferStage != EBadgeXferStage.idle || _xferBusy)
+          _XferProgress(stage: _xferStage, detail: _xferDetail),
+        const _Hint(
+          '按 §5.4 完整时序跑:0x10 Offer → 0x11 同意 → 0x13 AP_INFO → '
+          '连设备热点 → TCP 推 EBXF(40B 头)+ 正文 → 收 EBXR → 等 0x15 DONE。'
+          '固定传 16 KiB 递增字节,文件名 $_demoFileName。'
+          '注意:连热点期间本机所有网络请求都走设备热点(无外网),会话结束自动恢复。',
         ),
         const SizedBox(height: 16),
         const _SectionLabel('设备上报(只读,由设备主动发起)'),
@@ -877,6 +981,134 @@ class _CmdButton extends StatelessWidget {
           Text(name,
               style:
                   const TextStyle(fontSize: 12, color: AppTheme.textPrimary)),
+        ],
+      ),
+    );
+  }
+}
+
+/// 「WIFI 传图」按钮。
+///
+/// 单独写一个而不复用 [_CmdButton]:那个按钮一格对一条 cmd,而全链路传图要发
+/// 0x10/0x12 两条、收四条,标不上单一 cmd 号;它还需要一个 [_CmdButton] 没有的
+/// 「进行中禁用」态 —— 设备侧 §5.7 只允许单会话,连点第二次必然被回 BUSY。
+class _XferButton extends StatelessWidget {
+  const _XferButton({required this.busy, required this.onTap});
+
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return FilledButton(
+      onPressed: busy ? null : onTap,
+      style: FilledButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (busy)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cs.onPrimary,
+              ),
+            )
+          else
+            const Icon(Icons.wifi_tethering, size: 16),
+          const SizedBox(width: 7),
+          Text(busy ? '传图中…' : 'WIFI 传图(全链路)',
+              style: const TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+/// 传图阶段条。
+///
+/// 只显示当前阶段而不做成六格进度条:阶段之间的耗时差了两个数量级(等用户确认
+/// 可能 30 s,推 16 KiB 是毫秒级),等宽的六格反而会让人以为卡住了。
+class _XferProgress extends StatelessWidget {
+  const _XferProgress({required this.stage, this.detail});
+
+  final EBadgeXferStage stage;
+  final String? detail;
+
+  static const _labels = {
+    EBadgeXferStage.idle: '准备',
+    EBadgeXferStage.waitDecision: '1/6 等设备确认',
+    EBadgeXferStage.waitApInfo: '2/6 等热点信息',
+    EBadgeXferStage.joiningAp: '3/6 连接热点',
+    EBadgeXferStage.uploading: '4/6 TCP 上传',
+    EBadgeXferStage.waitDone: '5/6 等设备入库',
+    EBadgeXferStage.done: '6/6 完成',
+    EBadgeXferStage.failed: '已中止',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final failed = stage == EBadgeXferStage.failed;
+    final done = stage == EBadgeXferStage.done;
+    final color = failed
+        ? cs.error
+        : done
+            ? AppTheme.secondary
+            : cs.primary;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            failed
+                ? Icons.error_outline
+                : done
+                    ? Icons.check_circle_outline
+                    : Icons.sync,
+            size: 14,
+            color: color,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _labels[stage] ?? '$stage',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+                if (detail != null && detail!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      detail!,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        height: 1.3,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );

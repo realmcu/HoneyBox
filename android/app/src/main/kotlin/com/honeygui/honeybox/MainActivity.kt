@@ -35,6 +35,7 @@ class MainActivity : FlutterActivity() {
     private var encoder: CameraEncoder? = null
     private var eventSink: EventChannel.EventSink? = null
     private var hotspot: HotspotManager? = null
+    private var sta: EBadgeStaManager? = null
 
     // In-page video preview players (native MediaPlayer → Flutter texture),
     // keyed by their texture id. One at a time in practice, but keyed for safety.
@@ -162,6 +163,27 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "isHotspotActive" -> result.success(hotspot?.isActive ?: false)
+                // ── eBadge 传图数据面：手机作 STA 连设备 SoftAP（协议 §5）──
+                // 方向和上面的 hotspot 相反，两者不可同时生效。
+                "joinAp" -> {
+                    val ssid = call.argument<String>("ssid")
+                    if (ssid.isNullOrEmpty()) {
+                        result.error("bad_args", "缺少 ssid", null)
+                    } else {
+                        ensureSta().connect(
+                            ssid = ssid,
+                            password = call.argument<String>("password") ?: "",
+                            // 默认 60s 对齐协议 §5.5「Decision 同意 → STA 关联成功」。
+                            timeoutMs = call.argument<Int>("timeoutMs") ?: 60_000,
+                            result = result,
+                        )
+                    }
+                }
+                "leaveAp" -> {
+                    sta?.disconnect()
+                    result.success(null)
+                }
+                "isApJoined" -> result.success(sta?.isConnected ?: false)
                 else -> result.notImplemented()
             }
         }
@@ -594,6 +616,14 @@ class MainActivity : FlutterActivity() {
         return created
     }
 
+    private fun ensureSta(): EBadgeStaManager {
+        val existing = sta
+        if (existing != null) return existing
+        val created = EBadgeStaManager(applicationContext)
+        sta = created
+        return created
+    }
+
     private fun parseConfig(call: MethodCall): EncoderConfig = EncoderConfig(
         format = call.argument<String>("format") ?: "h264",
         width = call.argument<Int>("width") ?: 640,
@@ -622,6 +652,10 @@ class MainActivity : FlutterActivity() {
         encoder = null
         hotspot?.stop()
         hotspot = null
+        // 必须解绑:bindProcessToNetwork 是进程级的,泄漏出去会让本进程之后所有
+        // socket 都往一张已经消失的网上发,表现为「App 突然完全没网」。
+        sta?.disconnect()
+        sta = null
         players.values.forEach { it.release() }
         players.clear()
         textureRegistry = null

@@ -439,6 +439,27 @@ void main() {
       expect(head.sublist(21, 40).every((b) => b == 0), isTrue);
     });
 
+    test('完全复现 §5.2 文档示例头:wp.jpg / JPEG / 102400B / crc 0x12345678', () {
+      final head = EBadgeXferHeader.build(
+        fileType: EBadgeFileType.jpeg,
+        name: 'wp.jpg',
+        size: 102400,
+        crc32: 0x12345678,
+      );
+      expect(
+        hexOf(head),
+        hexOf(h('45 42 58 46 ' // magic EBXF
+            '01 ' // version
+            '01 ' // JPEG
+            '06 ' // name_len
+            '00 ' // reserved
+            '00 90 01 00 ' // size 102400
+            '78 56 34 12 ' // crc32
+            '77 70 2E 6A 70 67 ' // "wp.jpg"
+            '00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00')),
+      );
+    });
+
     test('EBXR 应答解析,magic 不符返回 null', () {
       final ok = EBadgeXferAck.parse(h('45 42 58 52 01 00 00 00'))!;
       expect(ok.succeed, isTrue);
