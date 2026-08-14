@@ -27,6 +27,21 @@ const String _naviCtrlRxUuid = 'FFD2';
 const String _naviDataTxUuid = 'FFD3';
 const String _naviDataRxUuid = 'FFD4';
 
+/// Short-UUID → role, used only to annotate the GATT dump logged right after
+/// service discovery (see [BleManager._logGattTable]). Anything not listed
+/// prints without an annotation — the dump is a debugging aid, so unknown
+/// characteristics must still show up.
+const Map<String, String> _knownCharRoles = {
+  _txUuid: 'command tx (L1)',
+  _rxUuid: 'command rx (L1 notify)',
+  _streamTxUuid: 'stream tx (KS_OPEN/FRAME/CLOSE)',
+  _streamRxUuid: 'stream rx (KS_ACK/CREDIT/REPORT)',
+  _naviCtrlTxUuid: 'navi ctrl tx (L1)',
+  _naviCtrlRxUuid: 'navi ctrl rx (L1 notify)',
+  _naviDataTxUuid: 'navi data tx (raw L2 JPEG)',
+  _naviDataRxUuid: 'navi data rx (raw L2 notify)',
+};
+
 // ---------------------------------------------------------------------------
 // Connection state
 // ---------------------------------------------------------------------------
@@ -335,32 +350,29 @@ class BleManager {
       await _device!.discoverServices();
 
       final services = _device!.servicesList;
+      _logGattTable(services);
       for (final s in services) {
-        debugPrint('BleManager: service ${s.uuid}');
         for (final c in s.characteristics) {
           final uuid = c.uuid.toString().toUpperCase();
-          debugPrint(
-            'BleManager: characteristic ${c.uuid} '
-            'write=${c.properties.write} '
-            'writeWithoutResponse=${c.properties.writeWithoutResponse} '
-            'notify=${c.properties.notify} '
-            'indicate=${c.properties.indicate}',
-          );
           if (uuid.contains(_txUuid)) {
             _txChar = c;
+            debugPrint('BleManager: ✓ found FFC1 (command tx)');
           }
           if (uuid.contains(_rxUuid) &&
               (c.properties.notify || c.properties.indicate)) {
             _rxChar = c;
+            debugPrint('BleManager: ✓ found FFC2 (command rx)');
           }
           // Separate Stream Service characteristics (raw L2 video streaming).
           if (uuid.contains(_streamTxUuid) &&
               (c.properties.write || c.properties.writeWithoutResponse)) {
             _streamTxChar = c;
+            debugPrint('BleManager: ✓ found FFC4 (stream tx)');
           }
           if (uuid.contains(_streamRxUuid) &&
               (c.properties.notify || c.properties.indicate)) {
             _streamRxChar = c;
+            debugPrint('BleManager: ✓ found FFC5 (stream rx)');
           }
           // Navigation Projection Service characteristics.
           if (uuid.contains(_naviCtrlTxUuid) &&
@@ -387,9 +399,13 @@ class BleManager {
       }
 
       if (_txChar == null || _rxChar == null) {
+        final missing = [
+          if (_txChar == null) '$_txUuid (tx)',
+          if (_rxChar == null) '$_rxUuid (rx, needs notify/indicate)',
+        ].join(' + ');
         debugPrint(
-          'BleManager: transfer characteristics not found; '
-          'continuing with GATT connection only',
+          'BleManager: command characteristics not found — missing $missing; '
+          'continuing with GATT connection only (see GATT table above)',
         );
         _setState(BleState.connected);
         return true;
@@ -491,6 +507,7 @@ class BleManager {
 
       _setState(BleState.connected);
       debugPrint('BleManager: ready, mtu=$mtu, '
+          'command=${commandAvailable ? "on" : "off"}, '
           'stream=${streamAvailable ? "on" : "off"}, '
           'naviProj=${naviProjAvailable ? "on" : "off"}');
       return true;
@@ -501,6 +518,60 @@ class BleManager {
       _setState(BleState.disconnected);
       return false;
     }
+  }
+
+  /// Dumps the full discovered GATT table — every service with its
+  /// characteristics, their properties and descriptors. Runs once per connect,
+  /// right after `discoverServices()`, before any characteristic matching, so
+  /// the log shows what the device *actually* exposes even when the expected
+  /// FFC1/FFC2 pair is missing and the connection degrades to GATT-only.
+  ///
+  /// Known UUIDs get a role annotation from [_knownCharRoles]; unknown ones
+  /// print bare, which is the point — this dump is how new firmware
+  /// characteristics get noticed.
+  void _logGattTable(List<BluetoothService> services) {
+    var charCount = 0;
+    for (final s in services) {
+      charCount += s.characteristics.length;
+    }
+    debugPrint('BleManager: ── GATT table ─────────────────────────────────');
+    debugPrint('BleManager: device  $_deviceName ($_deviceId)');
+    debugPrint(
+      'BleManager: ${services.length} service(s), $charCount characteristic(s)',
+    );
+
+    for (final s in services) {
+      debugPrint(
+        'BleManager: ┌ service ${s.uuid} '
+        '(${s.characteristics.length} char, primary=${s.isPrimary})',
+      );
+      for (final c in s.characteristics) {
+        final short = c.uuid.toString().toUpperCase();
+        final role = _knownCharRoles.entries
+            .firstWhere(
+              (e) => short.contains(e.key),
+              orElse: () => const MapEntry('', ''),
+            )
+            .value;
+        final props = <String>[
+          if (c.properties.read) 'read',
+          if (c.properties.write) 'write',
+          if (c.properties.writeWithoutResponse) 'writeNR',
+          if (c.properties.notify) 'notify',
+          if (c.properties.indicate) 'indicate',
+        ];
+        debugPrint(
+          'BleManager: │  char ${c.uuid} '
+          '[${props.isEmpty ? 'none' : props.join(',')}]'
+          '${role.isEmpty ? '' : '  ← $role'}',
+        );
+        for (final d in c.descriptors) {
+          debugPrint('BleManager: │    descriptor ${d.uuid}');
+        }
+      }
+      debugPrint('BleManager: └');
+    }
+    debugPrint('BleManager: ───────────────────────────────────────────────');
   }
 
   /// Gracefully disconnect and clean up.

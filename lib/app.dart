@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
 import 'pages/ebadge/ebadge_app_root.dart';
+import 'pages/ebadge/ebadge_debug_page.dart';
 import 'pages/launcher/app_launcher_page.dart';
 import 'pages/image/image_page.dart';
 import 'pages/danmaku/danmaku_page.dart';
@@ -66,6 +67,12 @@ class HoneyBoxApp extends StatelessWidget {
             break;
           case '/wifi':
             page = WifiPage(
+              deviceName: args?['deviceName'] ?? '',
+              deviceId: args?['deviceId'] ?? '',
+            );
+            break;
+          case '/ebadge-debug':
+            page = EBadgeDebugPage(
               deviceName: args?['deviceName'] ?? '',
               deviceId: args?['deviceId'] ?? '',
             );

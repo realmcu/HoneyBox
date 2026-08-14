@@ -78,6 +78,8 @@ class _DevicePageState extends ConsumerState<DevicePage>
     _ActionItem(icon: Icons.airplay, title: '拍照投屏', route: '/stream'),
     // OTA 升级 — reserved; the internal page is intentionally empty for now.
     _ActionItem(icon: Icons.system_update_alt, title: 'OTA 升级', route: '/ota'),
+    // 协议调试 — eBadge 私有协议(f48affc0 服务)的收发调试台。
+    _ActionItem(icon: Icons.terminal, title: '协议调试', route: '/ebadge-debug'),
   ];
 
   @override
