@@ -116,7 +116,9 @@ class EBadgeTransferSession {
     required Future<EBadgeTransferFail> deviceFailed,
   }) async {
     // ── 1. Offer ────────────────────────────────────────────────────────
-    _to(EBadgeXferStage.waitDecision, '等待用户在设备上确认');
+    // V1.3 §4.7:设备不再弹窗等人点,而是自查存储/内存/忙后自动回 0x11。所以这
+    // 一步的等待通常是毫秒级,只有设备卡住才会走到 §5.5 的 30 s 上限。
+    _to(EBadgeXferStage.waitDecision, '等待设备自检并回复');
     final offer = EBadgeRequest.transferOffer(
       name: name,
       type: type,
@@ -151,7 +153,7 @@ class EBadgeTransferSession {
     }
 
     // ── 3. AP_INFO ─────────────────────────────────────────────────────
-    // §4.7:设备在同意且 AP 就绪后应主动 Notify 0x13。它没主动发时我们补一发
+    // §4.9:设备在同意且 AP 就绪后应主动 Notify 0x13。它没主动发时我们补一发
     // 0x12 去问 —— 协议允许,且比直接判失败更宽容。
     _to(EBadgeXferStage.waitApInfo, '等待设备上报热点信息');
     var apResult = await _await<EBadgeApInfo>(
@@ -175,9 +177,9 @@ class EBadgeTransferSession {
     }
     final ap = apResult as EBadgeApInfo;
     if (ap.proto != 0x01) {
-      // §4.7:TLV_AP_PROTO 在 V1.2 只有 0x01 合法。继续传下去也没意义。
+      // §4.9:TLV_AP_PROTO 只有 0x01 合法。继续传下去也没意义。
       return _fail('设备上报的数据面协议 proto=0x'
-          '${ap.proto.toRadixString(16).padLeft(2, '0')}，V1.2 只支持 0x01 裸 TCP');
+          '${ap.proto.toRadixString(16).padLeft(2, '0')}，只支持 0x01 裸 TCP');
     }
 
     // ── 4. 连热点（§5.5 限 60 s）──────────────────────────────────────

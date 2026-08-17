@@ -7,9 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ebadge_link_provider.dart';
 import '../../services/ebadge_link.dart';
 import '../../services/ebadge_protocol.dart';
+import '../../services/ebadge_stream_session.dart';
 import '../../services/ebadge_transfer_session.dart';
 import '../../services/ebadge_wifi_transport.dart';
 import '../../theme/app_theme.dart';
+import 'ebadge_stream_demo_frames.dart';
 
 /// eBadge 协议调试页。
 ///
@@ -54,6 +56,24 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   bool _xferBusy = false;
   EBadgeXferStage _xferStage = EBadgeXferStage.idle;
   String? _xferDetail;
+
+  /// 同屏预览(§6)会话状态。与传图共用「设备只允许单会话」这条约束(§6.7),
+  /// 但两者是**不同的会话**:推流期间不能发传图 Offer,反之亦然,所以两个按钮
+  /// 互相禁用(见 [_busy])。
+  ///
+  /// `_stream` 非 null 就表示会话还活着 —— 推流没有「跑完」这个终点,靠这个引用
+  /// 才能在用户点「停止」时找到它。
+  EBadgeStreamSession? _stream;
+  EBadgeStreamStage _streamStage = EBadgeStreamStage.idle;
+  String? _streamDetail;
+  bool _streamStarting = false;
+
+  /// 推流帧游标。§6 的载荷由 App 提供,这里按 tick 轮转四张固定测试帧。
+  int _streamFrame = 0;
+
+  /// 任一会话在跑 —— BLE 控制面就那一条,两条链路的握手混在一起,日志会乱到
+  /// 没法看,设备也会回 BUSY。
+  bool get _busy => _xferBusy || _streamStarting || _stream != null;
 
   /// 日志区占屏高比例。0.42 是权衡出来的:再高命令区就装不下两行按钮,
   /// 再低日志一次只能看三四条,来回滚反而更慢。
@@ -109,6 +129,11 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   void dispose() {
     _logSub?.cancel();
     _frameSub?.cancel();
+    // 退页面必须停推流:Timer 和 TCP 连接都不属于 widget 树,不停的话会一直往
+    // 设备推帧,而且进程网络还绑在那张无外网的热点上 —— 表现是「退出调试页后
+    // 全 App 没网」。stop() 内部会解绑。
+    _stream?.stop();
+    _stream = null;
     _logScroll.dispose();
     super.dispose();
   }
@@ -194,7 +219,7 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     if (storage == null) {
       _link.logInfo(
         '提示:尚未获取存储信息',
-        detail: '协议 §4.5 建议先 GET_STORAGE 校验容量,再发 Offer',
+        detail: '协议 §4.7 建议先 GET_STORAGE 校验容量,再发 Offer',
       );
     }
     await _send(
@@ -221,7 +246,7 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// 有网络请求都改走这张无外网的热点,检查更新之类会失败;会话结束(含失败)会
   /// 自动解绑。这也是本按钮做成一次一会话、不允许并发的原因。
   Future<void> _wifiTransfer() async {
-    if (_xferBusy) return;
+    if (_busy) return;
 
     final storage = _storage;
     final body = _demoPayload();
@@ -236,7 +261,8 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     if (storage == null) {
       _link.logInfo(
         '提示:尚未获取存储信息',
-        detail: '协议 §4.5 要求发 Offer 前先 0x19 GET_STORAGE 校验容量',
+        detail: 'V1.3 §4.7 起这不再是硬性前置,设备收 Offer 会自己复检容量;'
+            '先查一次只是能提前给出「空间不足」的提示',
       );
     }
 
@@ -284,6 +310,83 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// 以上 —— 只走一次的话,分块逻辑坏了也看不出来。
   Uint8List _demoPayload() =>
       Uint8List.fromList(List.generate(16 * 1024, (i) => i & 0xFF));
+
+  // ── §6 同屏预览(备用能力,仅协议调试)────────────────────────────────
+
+  /// 期望帧率。10 fps:够看出画面在动,又给协议时序留足余量 —— §6.4 的帧超时是
+  /// 3 s,10 fps 下每帧只占 100 ms 预算,不会因为本机慢而误触发设备侧清理。
+  /// 设备可以回 decision=2 协商成更低的值,会话会照它给的走。
+  static const int _streamFps = 10;
+  static const String _streamName = 'stream_demo.jpg';
+
+  /// 0x08 起一条 §6 同屏预览会话。
+  ///
+  /// **与拍照投屏(`/stream` 那条路径)没有任何关系**,不要混:
+  ///
+  /// | | 握手 | 帧头 | 画面来源 |
+  /// | --- | --- | --- | --- |
+  /// | 拍照投屏 | 自己那套 BLE 命令 | `0xA5 0xA9` 6B | 摄像头 + 原生编码器 |
+  /// | 本按钮(§6) | 0x08 / 0x09 | 'EBXF' 14B | 内嵌的四张固定测试帧 |
+  ///
+  /// 本按钮**不开摄像头、不碰原生编码器**。碰了就会和拍照投屏抢 GL 上下文和编码
+  /// 器实例,而调试台要的恰恰是「排除画面来源这个变量」——画面固定,设备上看到的
+  /// 任何异常都能归因到协议实现。
+  ///
+  /// 推流是**没有终点的状态**,所以本方法只负责起会话;停止走 [_streamStop]。
+  Future<void> _streamStart() async {
+    if (_busy) return;
+
+    setState(() {
+      _streamStarting = true;
+      _streamStage = EBadgeStreamStage.idle;
+      _streamDetail = null;
+      _streamFrame = 0;
+    });
+
+    final session = EBadgeStreamSession(
+      link: _link,
+      wifi: EBadgeWifiTransport(),
+      onStage: (s, detail) {
+        if (!mounted) return;
+        setState(() {
+          _streamStage = s;
+          _streamDetail = detail;
+          // 会话自己走到终态(设备报错、连接断)时要把引用清掉,否则按钮会一直
+          // 停在「停止推流」,而背后已经没有会话可停了。
+          if (s == EBadgeStreamStage.failed || s == EBadgeStreamStage.stopped) {
+            _stream = null;
+          }
+        });
+      },
+    );
+
+    final err = await session.start(
+      name: _streamName,
+      requestedFps: _streamFps,
+      nextFrame: () => EBadgeStreamDemoFrames.at(_streamFrame++),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _streamStarting = false;
+      // 握手失败时 onStage 已经把 _stream 清成 null 了;成功才留住引用。
+      _stream = err == null ? session : null;
+    });
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err), duration: const Duration(seconds: 3)),
+      );
+    }
+  }
+
+  /// 停推流。§6.4 的正常收尾就是 App 侧关 TCP —— 协议没有「结束推流」的 BLE 命令,
+  /// 设备靠 3 s 帧超时或连接断开自行回 Idle。
+  Future<void> _streamStop() async {
+    final s = _stream;
+    if (s == null) return;
+    await s.stop();
+    if (mounted) setState(() => _stream = null);
+  }
 
   /// 0x02 SEND_FILE —— 固定数据的小文件直传模拟(§4.2)。
   ///
@@ -490,6 +593,7 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
         _CmdGrid(children: [
           _XferButton(
             busy: _xferBusy,
+            enabled: !_busy,
             onTap: _wifiTransfer,
           ),
         ]),
@@ -500,6 +604,31 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
           '连设备热点 → TCP 推 EBXF(40B 头)+ 正文 → 收 EBXR → 等 0x15 DONE。'
           '固定传 16 KiB 递增字节,文件名 $_demoFileName。'
           '注意:连热点期间本机所有网络请求都走设备热点(无外网),会话结束自动恢复。',
+        ),
+        const SizedBox(height: 16),
+        const _SectionLabel('同屏预览(§6 全链路,V1.3 新增)'),
+        _CmdGrid(children: [
+          _StreamButton(
+            starting: _streamStarting,
+            streaming: _stream != null,
+            enabled: !_busy || _stream != null,
+            onStart: _streamStart,
+            onStop: _streamStop,
+          ),
+        ]),
+        if (_streamStage != EBadgeStreamStage.idle || _streamStarting)
+          _StreamProgress(stage: _streamStage, detail: _streamDetail),
+        const _Hint(
+          '按 §6.4 时序跑:0x08 OFFER(fps=$_streamFps)→ 0x09 DECISION → '
+          '0x13 AP_INFO → 连热点 → TCP 连续推「14B 流头 + JPEG」直到手动停止。'
+          '与 §5 的区别:流头只有 14 字节且不带文件名,EBXR 应答是可选的,'
+          '设备侧帧间隔超 3 s 就会自行清理会话。',
+        ),
+        const _Hint(
+          '推的是内嵌的 ${EBadgeStreamDemoFrames.count} 张 '
+          '${EBadgeStreamDemoFrames.width}×${EBadgeStreamDemoFrames.height} '
+          '测试帧(白块四格轮转,便于肉眼判断卡帧/丢帧)—— '
+          '本按钮不开摄像头、不碰拍照投屏的编码器,两条链路完全独立。',
         ),
         const SizedBox(height: 16),
         const _SectionLabel('设备上报(只读,由设备主动发起)'),
@@ -993,16 +1122,24 @@ class _CmdButton extends StatelessWidget {
 /// 0x10/0x12 两条、收四条,标不上单一 cmd 号;它还需要一个 [_CmdButton] 没有的
 /// 「进行中禁用」态 —— 设备侧 §5.7 只允许单会话,连点第二次必然被回 BUSY。
 class _XferButton extends StatelessWidget {
-  const _XferButton({required this.busy, required this.onTap});
+  const _XferButton({
+    required this.busy,
+    required this.enabled,
+    required this.onTap,
+  });
 
   final bool busy;
+
+  /// 另一条链路(同屏预览)在跑时也要禁用 —— 设备侧 §5.7 / §6.7 各自只允许单
+  /// 会话,BLE 控制面又只有一条,两边握手交错只会得到一堆 BUSY。
+  final bool enabled;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return FilledButton(
-      onPressed: busy ? null : onTap,
+      onPressed: enabled ? onTap : null,
       style: FilledButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         visualDensity: VisualDensity.compact,
@@ -1115,6 +1252,155 @@ class _XferProgress extends StatelessWidget {
   }
 }
 
+/// 「同屏预览」按钮 —— 一个按钮承担起/停两个动作。
+///
+/// 不拆成两个按钮:推流没有自然终点(§6 里 App 不发结束命令,靠关 TCP 收尾),
+/// 「停止」在没推流时毫无意义,常驻一个灰按钮反而让人以为功能坏了。
+class _StreamButton extends StatelessWidget {
+  const _StreamButton({
+    required this.starting,
+    required this.streaming,
+    required this.enabled,
+    required this.onStart,
+    required this.onStop,
+  });
+
+  /// 正在跑握手(还没进推流)。这段不能中断 —— 中途取消会让设备停在 WaitSta。
+  final bool starting;
+  final bool streaming;
+  final bool enabled;
+  final VoidCallback onStart;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // 推流中按钮改成红色的「停止」:此时它是**破坏性**动作(拆连接、解绑网络),
+    // 和「开始」共用一个主色会让人误点。
+    final stop = streaming;
+    return FilledButton(
+      onPressed: starting ? null : (enabled ? (stop ? onStop : onStart) : null),
+      style: FilledButton.styleFrom(
+        backgroundColor: stop ? cs.error : null,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (starting)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cs.onPrimary,
+              ),
+            )
+          else
+            Icon(stop ? Icons.stop_circle_outlined : Icons.cast_connected,
+                size: 16),
+          const SizedBox(width: 7),
+          Text(
+            starting
+                ? '握手中…'
+                : stop
+                    ? '停止推流'
+                    : '同屏预览(全链路)',
+            style: const TextStyle(fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 同屏预览阶段条。
+///
+/// 与 [_XferProgress] 分开而不把两个枚举塞进一个 widget:[EBadgeStreamStage] 的
+/// [EBadgeStreamStage.streaming] 是个**稳定态**(会一直停在那儿刷帧数),而传图的
+/// 每一阶段都是过渡态。文案上一个要说「4/4 推流中」、一个要说「4/6」,合并后光
+/// 是标号就得挂两套 if。
+class _StreamProgress extends StatelessWidget {
+  const _StreamProgress({required this.stage, this.detail});
+
+  final EBadgeStreamStage stage;
+  final String? detail;
+
+  static const _labels = {
+    EBadgeStreamStage.idle: '准备',
+    EBadgeStreamStage.waitDecision: '1/4 等设备确认(0x09)',
+    EBadgeStreamStage.waitApInfo: '2/4 等热点信息(0x13)',
+    EBadgeStreamStage.joiningAp: '3/4 连接热点',
+    EBadgeStreamStage.streaming: '4/4 推流中',
+    EBadgeStreamStage.stopped: '已停止',
+    EBadgeStreamStage.failed: '已中止',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final failed = stage == EBadgeStreamStage.failed;
+    final live = stage == EBadgeStreamStage.streaming;
+    final color = failed
+        ? cs.error
+        : live
+            ? AppTheme.secondary
+            : cs.primary;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            failed
+                ? Icons.error_outline
+                : live
+                    ? Icons.sensors
+                    : Icons.sync,
+            size: 14,
+            color: color,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _labels[stage] ?? '$stage',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+                if (detail != null && detail!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      detail!,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        height: 1.3,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 设备上报命令一览。这些是 D→H 方向,app 发不了,列出来是为了对照日志里
 /// 收到的 cmd 号 —— 调试时最常问的就是「设备回的这个 0x16 是什么」。
 class _D2hLegend extends StatelessWidget {
@@ -1122,6 +1408,7 @@ class _D2hLegend extends StatelessWidget {
 
   static const _items = [
     (EBadgeCmd.d2hResult, '通用结果'),
+    (EBadgeCmd.d2hJpgStreamDecision, '同屏决定'),
     (EBadgeCmd.d2hTransferDecision, '传图决定'),
     (EBadgeCmd.d2hApInfo, '热点信息'),
     (EBadgeCmd.d2hTransferProgress, '传输进度'),

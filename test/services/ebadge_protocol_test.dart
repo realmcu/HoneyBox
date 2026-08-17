@@ -18,7 +18,7 @@ String hexOf(Uint8List b) => EBadgeCodec.hex(b);
 void main() {
   group('帧编码 (§2.3)', () {
     test('无参数命令 params_len=0 —— GET_AP_INFO 文档示例', () {
-      // §4.7:01 12 80 00 00
+      // §4.9:01 12 80 00 00
       expect(hexOf(EBadgeRequest.getApInfo()), hexOf(h('01 12 80 00 00')));
     });
 
@@ -200,7 +200,7 @@ void main() {
     });
   });
 
-  group('0x10 TRANSFER_OFFER (§4.5)', () {
+  group('0x10 TRANSFER_OFFER (§4.7)', () {
     test('size / crc32 为小端 uint32,replaceId 可省', () {
       final frame = EBadgeRequest.transferOffer(
         name: 'a.jpg',
@@ -238,11 +238,99 @@ void main() {
     });
   });
 
+  group('0x08 / 0x09 同屏预览握手 (§4.5 / §4.6,V1.3 新增)', () {
+    test('OFFER 带 name / type / fps 三个 TLV,且不带 size / crc32', () {
+      final f = EBadgeCodec.decode(EBadgeRequest.jpgStreamOffer(
+        name: 'live.jpg',
+        fps: 20,
+      )).frame!;
+      expect(f.cmd, EBadgeCmd.h2dJpgStreamOffer);
+      // 关键差别:同屏是持续推流,总长在握手时不存在,所以没有 size(0x03 在
+      // 0x10 里是 size,在这里是 fps)、也没有 crc32(0x04)。
+      expect(f.tlvs.map((t) => t.type), [0x01, 0x02, 0x03]);
+      expect(utf8.decode(f.value(EBadgeTlvStreamOffer.name)!), 'live.jpg');
+      expect(f.value(EBadgeTlvStreamOffer.type)![0], EBadgeFileType.jpegStream);
+      expect(f.value(EBadgeTlvStreamOffer.fps)![0], 20);
+      expect(eBadgeValidate(f), isEmpty);
+    });
+
+    test('fps 是 uint8,越界抛异常', () {
+      expect(() => EBadgeRequest.jpgStreamOffer(name: 'a', fps: 0),
+          throwsArgumentError);
+      expect(() => EBadgeRequest.jpgStreamOffer(name: 'a', fps: 256),
+          throwsArgumentError);
+      expect(() => EBadgeRequest.jpgStreamOffer(name: 'a', fps: 255),
+          returnsNormally);
+    });
+
+    test('file_type=0x00 被拒(与 0x10 同一条约束)', () {
+      expect(
+        () => EBadgeRequest.jpgStreamOffer(
+          name: 'a',
+          type: EBadgeFileType.unspecified,
+          fps: 10,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('DECISION 的 2 是「协商」而不是 0x11 那个「超时」', () {
+      // decision=2 + fps=8:设备同意但要降帧率。
+      final f = EBadgeCodec.decode(
+        h('01 09 80 08 00 01 01 00 02 03 01 00 08'),
+      ).frame!;
+      final d = EBadgeStreamDecision.parse(f)!;
+      expect(d.negotiated, isTrue);
+      expect(d.accepted, isFalse); // 协商 ≠ accept,但同样要继续往下走
+      expect(d.fps, 8);
+      // 同一个字节值在两条命令里的名字不同,不能共用 name()。
+      expect(EBadgeDecision.nameForStream(2), 'NEGOTIATE');
+      expect(EBadgeDecision.name(2), 'TIMEOUT');
+    });
+
+    test('effectiveFps:设备给了听设备的,没给沿用请求值', () {
+      final negotiated = EBadgeStreamDecision.parse(EBadgeCodec.decode(
+        h('01 09 80 08 00 01 01 00 02 03 01 00 08'),
+      ).frame!)!;
+      expect(negotiated.effectiveFps(20), 8);
+
+      // decision=1 且不带 fps:按请求的帧率走。
+      final plain = EBadgeStreamDecision.parse(
+        EBadgeCodec.decode(h('01 09 80 04 00 01 01 00 01')).frame!,
+      )!;
+      expect(plain.accepted, isTrue);
+      expect(plain.fps, isNull);
+      expect(plain.effectiveFps(20), 20);
+    });
+
+    test('拒绝时带 §2.6 错误码,摘要里能读到原因', () {
+      final f = EBadgeCodec.decode(
+        h('01 09 80 08 00 01 01 00 00 02 01 00 0A'),
+      ).frame!;
+      final d = EBadgeStreamDecision.parse(f)!;
+      expect(d.accepted, isFalse);
+      expect(d.negotiated, isFalse);
+      expect(d.reason, EBadgeXferError.busy);
+      final s = eBadgeDescribe(f);
+      expect(s, contains('REJECT'));
+      expect(s, contains('BUSY'));
+    });
+
+    test('decision TLV 缺失时 parse 返回 null 而不是崩', () {
+      final f = EBadgeCodec.decode(h('01 09 80 00 00')).frame!;
+      expect(EBadgeStreamDecision.parse(f), isNull);
+      expect(eBadgeDescribe(f), contains('参数缺失'));
+    });
+  });
+
   group('帧解码', () {
-    test('解出 0x04 RESULT:0x00 是失败、0x01 是成功', () {
-      // cmd=0x04,TLV 0x01 result_cmd=0x02,TLV 0x02 result_code=0x01
+    test('解出 0x04 RESULT:V1.3 起 0x00 是成功、0x01 是失败', () {
+      // cmd=0x04,TLV 0x01 result_cmd=0x02,TLV 0x02 result_code=0x00
+      //
+      // 这两个断言的方向在 V1.3 被**对调**了(§2.5)。V1.2 抓的旧日志要反着读:
+      // 方向错了不会报任何错,只会把成功显示成失败。
       final ok = EBadgeCodec.decode(
-        h('01 04 80 08 00 01 01 00 02 02 01 00 01'),
+        h('01 04 80 08 00 01 01 00 02 02 01 00 00'),
       );
       expect(ok.isOk, isTrue);
       final r = EBadgeResult.parse(ok.frame!)!;
@@ -250,9 +338,20 @@ void main() {
       expect(r.succeed, isTrue);
 
       final fail = EBadgeCodec.decode(
-        h('01 04 80 08 00 01 01 00 02 02 01 00 00'),
+        h('01 04 80 08 00 01 01 00 02 02 01 00 01'),
       );
       expect(EBadgeResult.parse(fail.frame!)!.succeed, isFalse);
+    });
+
+    test('V1.3 新增的 0x02 未就绪 / 0x03 忙都不算成功', () {
+      for (final code in ['02', '03']) {
+        final f = EBadgeCodec.decode(
+          h('01 04 80 08 00 01 01 00 12 02 01 00 $code'),
+        ).frame!;
+        expect(EBadgeResult.parse(f)!.succeed, isFalse);
+      }
+      expect(EBadgeResultCode.name(0x02), 'NOT_READY');
+      expect(EBadgeResultCode.name(0x03), 'BUSY');
     });
 
     test('字节不足报 incomplete 且不消耗缓冲', () {
@@ -285,9 +384,10 @@ void main() {
     });
 
     test('未识别 TLV 被保留而非丢帧(§2.1 跳过规则)', () {
-      // 0x04 RESULT 里混入一条 type=0x7E 的未知 TLV
+      // 0x04 RESULT 里混入一条 type=0x7E 的未知 TLV。末字节是 result_code,
+      // V1.3 §2.5 里 0x00 才是成功(V1.2 是 0x01,方向对调过)。
       final r = EBadgeCodec.decode(
-        h('01 04 80 0D 00 01 01 00 02 7E 02 00 AA BB 02 01 00 01'),
+        h('01 04 80 0D 00 01 01 00 02 7E 02 00 AA BB 02 01 00 00'),
       );
       expect(r.isOk, isTrue);
       expect(r.frame!.tlvs.length, 3);
@@ -394,7 +494,7 @@ void main() {
   group('摘要文本', () {
     test('RESULT 摘要带上原命令名', () {
       final f = EBadgeCodec.decode(
-        h('01 04 80 08 00 01 01 00 12 02 01 00 01'),
+        h('01 04 80 08 00 01 01 00 12 02 01 00 00'),
       ).frame!;
       expect(eBadgeDescribe(f), contains('GET_AP_INFO'));
       expect(eBadgeDescribe(f), contains('SUCCEED'));
@@ -409,12 +509,22 @@ void main() {
   group('命令表', () {
     test('保留区间被标记', () {
       expect(EBadgeCmd.isReserved(0x05), isTrue);
+      expect(EBadgeCmd.isReserved(0x07), isTrue);
+      expect(EBadgeCmd.isReserved(0x0A), isTrue);
       expect(EBadgeCmd.isReserved(0x0F), isTrue);
       expect(EBadgeCmd.isReserved(0x1B), isTrue);
       expect(EBadgeCmd.isReserved(0x2F), isTrue);
       expect(EBadgeCmd.isReserved(0x04), isFalse);
       expect(EBadgeCmd.isReserved(0x1A), isFalse);
       expect(EBadgeCmd.isReserved(0x30), isFalse);
+    });
+
+    test('V1.3 把 0x08 / 0x09 从保留段挖出来给了同屏预览', () {
+      // V1.2 的保留段是连续的 0x05–0x0F,这两个字节当时是禁用的。
+      expect(EBadgeCmd.isReserved(0x08), isFalse);
+      expect(EBadgeCmd.isReserved(0x09), isFalse);
+      expect(EBadgeCmd.name(0x08), 'JPG_STREAM_OFFER');
+      expect(EBadgeCmd.name(0x09), 'JPG_STREAM_DECISION');
     });
   });
 
@@ -474,6 +584,65 @@ void main() {
       // 标准测试向量:"123456789" 的 CRC32 = 0xCBF43926
       expect(eBadgeCrc32(utf8.encode('123456789')), 0xCBF43926);
       expect(eBadgeCrc32(const []), 0);
+    });
+  });
+
+  group('同屏预览数据面 (§6.2,V1.3 新增)', () {
+    test('完全复现 §6.2 文档示例头:14B / JPEG Stream / 400B / crc 0x12345678', () {
+      final head = EBadgeStreamHeader.build(
+        size: 400,
+        crc32: 0x12345678,
+      );
+      expect(head.length, 14);
+      expect(
+        hexOf(head),
+        hexOf(h('45 42 58 46 ' // magic EBXF —— 与 §5.2 完全相同
+            '01 ' // version
+            '04 ' // JPEG Stream
+            '90 01 00 00 ' // size 400(本帧 payload)
+            '78 56 34 12')), // crc32(本帧 payload)
+      );
+    });
+
+    test('magic 与 §5.2 同一个,只能靠头长区分两种会话', () {
+      // 这是协议本身的设计,不是实现取巧:两个头的前 5 字节逐字节相同,收发两侧
+      // 必须按会话类型(0x10 Offer 还是 0x08 Offer)决定拿哪个头去解。
+      final stream = EBadgeStreamHeader.build(size: 1, crc32: 0);
+      final xfer = EBadgeXferHeader.build(
+        fileType: EBadgeFileType.jpegStream,
+        name: 'a',
+        size: 1,
+        crc32: 0,
+      );
+      expect(stream.sublist(0, 5), xfer.sublist(0, 5));
+      expect(EBadgeStreamHeader.length, 14);
+      expect(EBadgeXferHeader.length, 40);
+    });
+
+    test('没有 name / name_len 字段 —— 流头到 14 字节就结束', () {
+      // §5.2 的 name_len 在偏移 6,而这里偏移 6 已经是 size 的低字节了。
+      final head = EBadgeStreamHeader.build(size: 0x11223344, crc32: 0);
+      expect(EBadgeCodec.readU32le(head, 6), 0x11223344);
+    });
+
+    test('parse 能把自己发出去的头再读一遍(调试页要核对)', () {
+      final head = EBadgeStreamHeader.build(size: 65535, crc32: 0xAABBCCDD);
+      final p = EBadgeStreamHeader.parse(head)!;
+      expect(p.fileType, EBadgeFileType.jpegStream);
+      expect(p.size, 65535);
+      expect(p.crc32, 0xAABBCCDD);
+    });
+
+    test('magic / version 不符或字节不足都返回 null', () {
+      expect(
+          EBadgeStreamHeader.parse(
+              h('45 42 58 52 01 04 00 00 00 00 00 00 00 00')),
+          isNull); // EBXR 不是 EBXF
+      expect(
+          EBadgeStreamHeader.parse(
+              h('45 42 58 46 02 04 00 00 00 00 00 00 00 00')),
+          isNull); // version=2
+      expect(EBadgeStreamHeader.parse(h('45 42 58 46 01 04 00')), isNull);
     });
   });
 
@@ -590,15 +759,84 @@ void main() {
       expect(check(offer(EBadgeFileType.png)), isEmpty);
     });
 
-    test('RESULT 的 result_code 只允许 0x00 / 0x01 (§2.5)', () {
-      expect(check(h('01 04 80 08 00 01 01 00 02 02 01 00 01')), isEmpty);
+    test('RESULT 的 result_code 只允许 0x00–0x03 (§2.5)', () {
+      // V1.3 把上界从 0x01 抬到 0x03(新增未就绪 / 忙),0x02 / 0x03 不再是违规。
+      for (final code in ['00', '01', '02', '03']) {
+        expect(check(h('01 04 80 08 00 01 01 00 02 02 01 00 $code')), isEmpty);
+      }
       expect(
         check(h('01 04 80 08 00 01 01 00 02 02 01 00 07')).single,
         contains('result_code=0x07'),
       );
     });
 
-    test('DECISION 非 ACCEPT 必须带原因 (§4.6)', () {
+    test('STREAM_OFFER 必须齐 name / type / fps,且 fps≠0 (§4.5)', () {
+      Uint8List offer({String? name, int? type, int? fps}) =>
+          EBadgeCodec.encode(EBadgeCmd.h2dJpgStreamOffer, [
+            if (name != null)
+              EBadgeTlv(EBadgeTlvStreamOffer.name,
+                  Uint8List.fromList(utf8.encode(name))),
+            if (type != null)
+              EBadgeTlv(EBadgeTlvStreamOffer.type, EBadgeCodec.u8(type)),
+            if (fps != null)
+              EBadgeTlv(EBadgeTlvStreamOffer.fps, EBadgeCodec.u8(fps)),
+          ]);
+
+      expect(
+        check(offer(name: 's.jpg', type: EBadgeFileType.jpegStream, fps: 15)),
+        isEmpty,
+      );
+      // 少哪个就报哪个,不能因为第一个缺了就不查后面的。
+      expect(check(offer(type: EBadgeFileType.jpegStream, fps: 15)).single,
+          contains('TLV_XFER_NAME'));
+      expect(check(offer(name: 's.jpg', fps: 15)).single,
+          contains('TLV_XFER_TYPE'));
+      expect(
+        check(offer(name: 's.jpg', type: EBadgeFileType.jpegStream)).single,
+        contains('TLV_XFER_FPS'),
+      );
+      // fps=0 语法合法但语义上是「一帧都不发」。
+      expect(
+        check(offer(name: 's.jpg', type: EBadgeFileType.jpegStream, fps: 0))
+            .single,
+        contains('fps=0'),
+      );
+      expect(
+        check(offer(name: 's.jpg', type: EBadgeFileType.unspecified, fps: 15))
+            .single,
+        contains('不得使用 UNSPECIFIED'),
+      );
+    });
+
+    test('STREAM_DECISION:拒绝要给原因,协商要给帧率 (§4.6)', () {
+      Uint8List dec(int d, {int? reason, int? fps}) =>
+          EBadgeCodec.encode(EBadgeCmd.d2hJpgStreamDecision, [
+            EBadgeTlv(EBadgeTlvStreamDecision.decision, EBadgeCodec.u8(d)),
+            if (reason != null)
+              EBadgeTlv(EBadgeTlvStreamDecision.reason, EBadgeCodec.u8(reason)),
+            if (fps != null)
+              EBadgeTlv(EBadgeTlvStreamDecision.fps, EBadgeCodec.u8(fps)),
+          ]);
+
+      expect(check(dec(EBadgeDecision.accept)), isEmpty);
+      expect(check(dec(EBadgeDecision.reject)).single,
+          contains('缺 TLV_XFER_REASON'));
+      expect(
+        check(dec(EBadgeDecision.reject, reason: EBadgeXferError.busy)),
+        isEmpty,
+      );
+      // 协商却不给新帧率,App 无从下一步。
+      expect(
+        check(dec(EBadgeDecision.negotiate)).single,
+        contains('协商不出帧率'),
+      );
+      expect(check(dec(EBadgeDecision.negotiate, fps: 8)), isEmpty);
+      // 0x11 的 decision=2 是「超时」,0x09 的 2 是「协商」—— 同一字节两种含义,
+      // 所以 3 才是本命令的第一个非法值。
+      expect(check(dec(3)).any((s) => s.contains('decision=3')), isTrue);
+    });
+
+    test('DECISION 非 ACCEPT 必须带原因 (§4.8)', () {
       Uint8List dec(int d, {int? reason}) =>
           EBadgeCodec.encode(EBadgeCmd.d2hTransferDecision, [
             EBadgeTlv(EBadgeTlvDecision.decision, EBadgeCodec.u8(d)),
@@ -616,7 +854,7 @@ void main() {
       expect(check(dec(5)).any((s) => s.contains('decision=5')), isTrue);
     });
 
-    test('AP_INFO 的信道 / proto / security / 密码规则 (§4.7)', () {
+    test('AP_INFO 的信道 / proto / security / 密码规则 (§4.9)', () {
       Uint8List ap({
         int channel = 6,
         int proto = 0x01,
@@ -655,7 +893,7 @@ void main() {
       expect(check(frame).single, contains('进度不可能超过总量'));
     });
 
-    test('DONE 的 file_id 不得为 0 (§4.9)', () {
+    test('DONE 的 file_id 不得为 0 (§4.11)', () {
       Uint8List done(int id) => EBadgeCodec.encode(EBadgeCmd.d2hTransferDone, [
             EBadgeTlv(EBadgeTlvDone.fileId, EBadgeCodec.u16le(id)),
             EBadgeTlv(EBadgeTlvDone.size, EBadgeCodec.u32le(100)),
@@ -673,7 +911,7 @@ void main() {
       expect(check(fail(0x20)).single, contains('不在 §2.6'));
     });
 
-    test('BATTERY 的百分比与充电态取值 (§4.11)', () {
+    test('BATTERY 的百分比与充电态取值 (§4.13)', () {
       Uint8List bat(int pct, int chg) =>
           EBadgeCodec.encode(EBadgeCmd.d2hBattery, [
             EBadgeTlv(EBadgeTlvBattery.percent, EBadgeCodec.u8(pct)),

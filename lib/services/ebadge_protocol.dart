@@ -1,7 +1,20 @@
-/// eBadge 设备通讯协议 V1.2 —— 纯编解码层。
+/// eBadge 设备通讯协议 V1.3 —— 纯编解码层。
 ///
-/// 依据 `D:\DocDev\ebadge\新帕元\eBadge设备通讯协议.md`(文档编号
-/// eBadge-PROT-001,V1.2 定稿)。
+/// 依据 `D:\DocDev\ebadge\新帕元\eBadge设备通讯协议_v1.3.md`(文档编号
+/// eBadge-PROT-001,V1.3 定稿)。
+///
+/// **V1.2 → V1.3 的两处不兼容改动**,升级固件/App 时必须同步,否则症状很隐蔽:
+///
+/// 1. §2.5 通用结果码 **0x00 与 0x01 对调**:V1.2 是 0=失败 1=成功,V1.3 改成
+///    0=成功 1=失败,并新增 0x02 未就绪 / 0x03 忙。方向搞反的表现是「成功显示
+///    为失败」,而不是报错,所以读 V1.2 时期的旧日志要按旧含义解释。
+/// 2. §4.7(原 §4.5)传图交互:设备**不再弹窗等用户点**,而是自查存储/内存/忙
+///    后自动回 0x11 同意或拒绝。「App 必须先 0x19 GET_STORAGE」从硬性前置降级
+///    为建议(设备侧自己会复检)。
+///
+/// V1.3 另新增 §6 同屏预览:0x08/0x09 命令 + 14 字节流帧头(见
+/// [EBadgeStreamHeader])。它与 §5 壁纸传图共用 'EBXF' magic,仅靠头长和会话
+/// 类型区分。
 ///
 /// **本文件与现有 HoneyBox L1/L2 协议栈完全解耦**,这不是洁癖而是必需 ——
 /// 两套协议在字节层根本不兼容:
@@ -73,6 +86,10 @@ class EBadgeCmd {
   static const int h2dSendMsg = 0x03;
   static const int d2hResult = 0x04;
 
+  /// 0x08/0x09:V1.3 新增的同屏预览(JPEG 流)握手,见 §4.5 / §4.6 / §6。
+  static const int h2dJpgStreamOffer = 0x08;
+  static const int d2hJpgStreamDecision = 0x09;
+
   static const int h2dTransferOffer = 0x10;
   static const int d2hTransferDecision = 0x11;
   static const int h2dGetApInfo = 0x12;
@@ -85,15 +102,20 @@ class EBadgeCmd {
   static const int h2dGetStorage = 0x19;
   static const int d2hStorageInfo = 0x1A;
 
-  /// 0x05–0x0F、0x1B–0x2F 为协议保留段,未定义前禁止使用(§3 末行)。
+  /// 0x05–0x07、0x0A–0x0F、0x1B–0x2F 为协议保留段,未定义前禁止使用(§3 末行)。
+  /// V1.2 的保留段是连续的 0x05–0x0F,V1.3 从中挖走 0x08/0x09 给同屏预览。
   static bool isReserved(int cmd) =>
-      (cmd >= 0x05 && cmd <= 0x0F) || (cmd >= 0x1B && cmd <= 0x2F);
+      (cmd >= 0x05 && cmd <= 0x07) ||
+      (cmd >= 0x0A && cmd <= 0x0F) ||
+      (cmd >= 0x1B && cmd <= 0x2F);
 
   static String name(int cmd) => switch (cmd) {
         h2dSetTime => 'SET_TIME',
         h2dSendFile => 'SEND_FILE',
         h2dSendMsg => 'SEND_MSG',
         d2hResult => 'RESULT',
+        h2dJpgStreamOffer => 'JPG_STREAM_OFFER',
+        d2hJpgStreamDecision => 'JPG_STREAM_DECISION',
         h2dTransferOffer => 'TRANSFER_OFFER',
         d2hTransferDecision => 'TRANSFER_DECISION',
         h2dGetApInfo => 'GET_AP_INFO',
@@ -144,7 +166,21 @@ abstract class EBadgeTlvResult {
   static const int resultCode = 0x02; // §2.5
 }
 
-/// 0x10 TRANSFER_OFFER (§4.5)
+/// 0x08 JPG_STREAM_OFFER (§4.5,V1.3 新增)
+abstract class EBadgeTlvStreamOffer {
+  static const int name = 0x01; // 必选,文件名 ≤23B
+  static const int type = 0x02; // 必选,§2.7,不得为 0x00(同屏用 0x04)
+  static const int fps = 0x03; // 必选,uint8 传输帧率
+}
+
+/// 0x09 JPG_STREAM_DECISION (§4.6,V1.3 新增)
+abstract class EBadgeTlvStreamDecision {
+  static const int decision = 0x01; // 0拒绝 1同意 2协商
+  static const int reason = 0x02; // 可选,§2.6
+  static const int fps = 0x03; // 可选,uint8 协商后的帧率
+}
+
+/// 0x10 TRANSFER_OFFER (§4.7)
 abstract class EBadgeTlvOffer {
   static const int name = 0x01; // 必选
   static const int type = 0x02; // 必选,不得为 0x00
@@ -153,49 +189,49 @@ abstract class EBadgeTlvOffer {
   static const int replaceId = 0x05; // 可选,uint16 LE
 }
 
-/// 0x11 TRANSFER_DECISION (§4.6)
+/// 0x11 TRANSFER_DECISION (§4.8)
 abstract class EBadgeTlvDecision {
   static const int decision = 0x01; // 0拒绝 1同意 2超时
   static const int reason = 0x02; // §2.6
 }
 
-/// 0x13 AP_INFO (§4.7)
+/// 0x13 AP_INFO (§4.9)
 abstract class EBadgeTlvApInfo {
   static const int ssid = 0x01;
   static const int password = 0x02; // 开放网络则 length=0
   static const int channel = 0x03; // uint8 1–13
   static const int ipv4 = 0x04; // 4B
   static const int port = 0x05; // uint16 LE
-  static const int proto = 0x06; // 0x01 = 裸 TCP(V1.2 唯一合法值)
+  static const int proto = 0x06; // 0x01 = 裸 TCP(唯一合法值)
   static const int security = 0x07; // 0=Open 1=WPA2-PSK
 }
 
-/// 0x14 TRANSFER_PROGRESS (§4.8)
+/// 0x14 TRANSFER_PROGRESS (§4.10)
 abstract class EBadgeTlvProgress {
   static const int recv = 0x01; // uint32 LE
   static const int total = 0x02; // uint32 LE
 }
 
-/// 0x15 TRANSFER_DONE (§4.9)
+/// 0x15 TRANSFER_DONE (§4.11)
 abstract class EBadgeTlvDone {
   static const int fileId = 0x01; // uint16 LE,非 0
   static const int size = 0x02; // uint32 LE
   static const int name = 0x03; // 设备侧最终文件名
 }
 
-/// 0x16 TRANSFER_FAIL (§4.10)
+/// 0x16 TRANSFER_FAIL (§4.12)
 abstract class EBadgeTlvFail {
   static const int reason = 0x01; // §2.6
   static const int detail = 0x02; // 可选,≤23B
 }
 
-/// 0x18 BATTERY (§4.11)
+/// 0x18 BATTERY (§4.13)
 abstract class EBadgeTlvBattery {
   static const int percent = 0x01; // uint8 0..100
   static const int charge = 0x02; // 0未充 1充电中 2已满
 }
 
-/// 0x1A STORAGE_INFO (§4.12)
+/// 0x1A STORAGE_INFO (§4.14)
 abstract class EBadgeTlvStorage {
   static const int total = 0x01; // uint64 LE
   static const int free = 0x02; // uint64 LE
@@ -208,15 +244,26 @@ abstract class EBadgeTlvStorage {
 // 枚举与码表
 // ---------------------------------------------------------------------------
 
-/// §2.5 通用结果码(0x04 RESULT 使用)。注意 **0x00 是失败、0x01 是成功**,
-/// 与「0 表示 OK」的常见直觉相反。
+/// §2.5 通用结果码(0x04 RESULT 使用)。
+///
+/// **V1.3 把 0x00 / 0x01 的含义对调了**:V1.2 是 0x00=FAILED、0x01=SUCCEED,
+/// V1.3 改成 0x00=SUCCEED、0x01=FAILED(回到「0 表示 OK」的常规直觉),并新增
+/// 0x02 未就绪、0x03 忙。这条改动**没写进修订记录**,但两份文档的 §2.5 表格
+/// 确实相反 —— 以 V1.3 为准。
+///
+/// 读 V1.2 时期抓下来的旧日志时要按旧含义反着解释:方向错了的表现是「成功被
+/// 显示为失败」,不会报任何错。
 abstract class EBadgeResultCode {
-  static const int failed = 0x00;
-  static const int succeed = 0x01;
+  static const int succeed = 0x00;
+  static const int failed = 0x01;
+  static const int notReady = 0x02;
+  static const int busy = 0x03;
 
   static String name(int v) => switch (v) {
-        failed => 'FAILED',
         succeed => 'SUCCEED',
+        failed => 'FAILED',
+        notReady => 'NOT_READY',
+        busy => 'BUSY',
         _ => 'UNKNOWN(0x${v.toRadixString(16)})',
       };
 }
@@ -275,11 +322,17 @@ abstract class EBadgeFileType {
       };
 }
 
-/// 0x11 decision 取值(§4.6)。
+/// decision 取值。0x11 传图确认(§4.8)与 0x09 同屏确认(§4.6)共用 0/1/2 三个
+/// 值,但 **2 的含义按命令不同**:0x11 是「超时」,0x09 是「协商」(设备接受但
+/// 要改帧率,新帧率在 TLV 0x03)。所以名字用 [name] 时要带上命令上下文,见
+/// [nameForStream]。
 abstract class EBadgeDecision {
   static const int reject = 0;
   static const int accept = 1;
   static const int timeout = 2;
+
+  /// 0x09 语境下 2 叫「协商」,和 [timeout] 是同一个字节值。
+  static const int negotiate = 2;
 
   static String name(int v) => switch (v) {
         reject => 'REJECT',
@@ -287,9 +340,16 @@ abstract class EBadgeDecision {
         timeout => 'TIMEOUT',
         _ => 'UNKNOWN($v)',
       };
+
+  static String nameForStream(int v) => switch (v) {
+        reject => 'REJECT',
+        accept => 'ACCEPT',
+        negotiate => 'NEGOTIATE',
+        _ => 'UNKNOWN($v)',
+      };
 }
 
-/// 0x18 charge 取值(§4.11)。
+/// 0x18 charge 取值(§4.13)。
 abstract class EBadgeChargeState {
   static const int notCharging = 0;
   static const int charging = 1;
@@ -640,11 +700,38 @@ class EBadgeRequest {
     ]);
   }
 
-  /// 0x10 TRANSFER_OFFER(§4.5)。
+  /// 0x08 JPG_STREAM_OFFER(§4.5,V1.3 新增)—— 同屏预览握手。
   ///
-  /// 前置条件由调用方保证:必须先 0x19 GET_STORAGE 拿到 free_bytes 并满足
-  /// `free_bytes >= size + 4096`(§2.9 / §4.5)。本函数只拦 [type] == 0x00
-  /// 这条协议硬约束(Offer 不得使用未指定类型)。
+  /// 与 0x10 TRANSFER_OFFER 的关键差别:**不带 size / crc32**。同屏是持续推多
+  /// 帧,总长在握手时根本不存在;每帧自己的长度和校验放在 §6.2 的 14 字节流头里
+  /// (见 [EBadgeStreamHeader])。
+  ///
+  /// [fps] 是期望帧率,设备可以回 decision=2(协商)带一个更低的值。
+  static Uint8List jpgStreamOffer({
+    required String name,
+    int type = EBadgeFileType.jpegStream,
+    required int fps,
+  }) {
+    if (type == EBadgeFileType.unspecified) {
+      throw ArgumentError.value(type, 'type', 'Offer 的 file_type 不得为 0x00');
+    }
+    if (fps < 1 || fps > 0xFF) {
+      throw ArgumentError.value(fps, 'fps', 'fps 是 uint8,取值 1–255');
+    }
+    return EBadgeCodec.encode(EBadgeCmd.h2dJpgStreamOffer, [
+      EBadgeTlv(EBadgeTlvStreamOffer.name,
+          EBadgeCodec.str(name, EBadgeLimits.fileName, 'name')),
+      EBadgeTlv(EBadgeTlvStreamOffer.type, EBadgeCodec.u8(type)),
+      EBadgeTlv(EBadgeTlvStreamOffer.fps, EBadgeCodec.u8(fps)),
+    ]);
+  }
+
+  /// 0x10 TRANSFER_OFFER(§4.7)。
+  ///
+  /// V1.3 起「必须先 0x19 GET_STORAGE」不再是硬性前置 —— 设备收到 Offer 会自己
+  /// 复检 `free_bytes >= size + 4096`(§2.9),不够就直接回 0x16 STORAGE_FULL。
+  /// App 侧先查一次仍然值得做:能在发包前就给出「空间不足」的提示,省掉一轮
+  /// BLE 往返。本函数只拦 [type] == 0x00 这条协议硬约束。
   static Uint8List transferOffer({
     required String name,
     required int type,
@@ -666,15 +753,15 @@ class EBadgeRequest {
     ]);
   }
 
-  /// 0x12 GET_AP_INFO(§4.7)—— 无业务参数,params_len=0。
+  /// 0x12 GET_AP_INFO(§4.9)—— 无业务参数,params_len=0。
   static Uint8List getApInfo() =>
       EBadgeCodec.encode(EBadgeCmd.h2dGetApInfo, const []);
 
-  /// 0x17 GET_BATTERY(§4.11)—— 无参数。
+  /// 0x17 GET_BATTERY(§4.13)—— 无参数。
   static Uint8List getBattery() =>
       EBadgeCodec.encode(EBadgeCmd.h2dGetBattery, const []);
 
-  /// 0x19 GET_STORAGE(§4.12)—— 无参数。
+  /// 0x19 GET_STORAGE(§4.14)—— 无参数。
   static Uint8List getStorage() =>
       EBadgeCodec.encode(EBadgeCmd.h2dGetStorage, const []);
 }
@@ -714,6 +801,40 @@ class EBadgeTransferDecision {
     return EBadgeTransferDecision(
       decision: d[0],
       reason: (r != null && r.isNotEmpty) ? r[0] : null,
+    );
+  }
+}
+
+/// 0x09 JPG_STREAM_DECISION(§4.6,V1.3 新增)
+///
+/// 与 [EBadgeTransferDecision] 分开建模而不加个字段复用:两者的 decision=2
+/// 含义不同(这里是协商、那里是超时),而且本命令多一个协商帧率。塞进同一个类
+/// 会逼调用方每次都判断「我这条是哪个 cmd 来的」。
+class EBadgeStreamDecision {
+  const EBadgeStreamDecision({required this.decision, this.reason, this.fps});
+
+  final int decision;
+  final int? reason;
+
+  /// 设备协商后的帧率。decision=2 时必看;decision=1 时设备也可以带上,表示
+  /// 「同意,并且就按这个帧率来」。
+  final int? fps;
+
+  bool get accepted => decision == EBadgeDecision.accept;
+  bool get negotiated => decision == EBadgeDecision.negotiate;
+
+  /// 实际该用的帧率:设备给了就听设备的,没给就沿用 [requested]。
+  int effectiveFps(int requested) => fps ?? requested;
+
+  static EBadgeStreamDecision? parse(EBadgeFrame f) {
+    final d = f.value(EBadgeTlvStreamDecision.decision);
+    if (d == null || d.isEmpty) return null;
+    final r = f.value(EBadgeTlvStreamDecision.reason);
+    final p = f.value(EBadgeTlvStreamDecision.fps);
+    return EBadgeStreamDecision(
+      decision: d[0],
+      reason: (r != null && r.isNotEmpty) ? r[0] : null,
+      fps: (p != null && p.isNotEmpty) ? p[0] : null,
     );
   }
 }
@@ -864,7 +985,7 @@ class EBadgeStorageInfo {
   final int wpUsed;
   final int fsMargin;
 
-  /// §4.12 定稿判定:`free < need + margin` 即禁止发起 Offer。
+  /// §4.14 定稿判定:`free < need + margin` 即禁止发起 Offer。
   bool canFit(int needBytes) => free >= needBytes + fsMargin;
 
   static EBadgeStorageInfo? parse(EBadgeFrame f) {
@@ -915,6 +1036,15 @@ String eBadgeDescribe(EBadgeFrame f) {
       final reason =
           d.reason == null ? '' : ',reason=${EBadgeXferError.name(d.reason!)}';
       return 'DECISION:${EBadgeDecision.name(d.decision)}$reason';
+
+    case EBadgeCmd.d2hJpgStreamDecision:
+      final s = EBadgeStreamDecision.parse(f);
+      if (s == null) return 'STREAM_DECISION(参数缺失)';
+      final reason =
+          s.reason == null ? '' : ',reason=${EBadgeXferError.name(s.reason!)}';
+      final fps = s.fps == null ? '' : ',fps=${s.fps}';
+      return 'STREAM_DECISION:${EBadgeDecision.nameForStream(s.decision)}'
+          '$reason$fps';
 
     case EBadgeCmd.d2hApInfo:
       final a = EBadgeApInfo.parse(f);
@@ -977,7 +1107,7 @@ class EBadgeViolation {
   String toString() => hint;
 }
 
-/// 检查一帧是否符合 V1.2 的硬性约束,返回全部违规项(空表示合规)。
+/// 检查一帧是否符合 V1.3 的硬性约束,返回全部违规项(空表示合规)。
 ///
 /// **只查协议明文规定的硬约束**,不查「看起来不对」的东西:
 /// 误报会让红字失去意义 —— 一旦调试的人开始习惯性忽略红色,真正的违规也就
@@ -995,8 +1125,8 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
   }
   if (EBadgeCmd.isReserved(f.cmd)) {
     out.add(EBadgeViolation(
-      'cmd=0x${_hx(f.cmd)} 落在保留段 0x05–0x0F / 0x1B–0x2F,未定义前禁止使用'
-      '(§3)',
+      'cmd=0x${_hx(f.cmd)} 落在保留段 0x05–0x07 / 0x0A–0x0F / 0x1B–0x2F,'
+      '未定义前禁止使用(§3)',
     ));
   } else if (EBadgeCmd.name(f.cmd) == 'UNKNOWN') {
     out.add(EBadgeViolation('cmd=0x${_hx(f.cmd)} 不在 §3 命令表内'));
@@ -1061,20 +1191,70 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
           EBadgeLimits.dateString);
       _len(out, f, EBadgeTlvSendFile.fileLength, 'TLV_FILE_LENGTH', 4, '§4.2');
 
+    case EBadgeCmd.h2dJpgStreamOffer:
+      _need(out, f, EBadgeTlvStreamOffer.name, 'TLV_XFER_NAME', '§4.5');
+      _need(out, f, EBadgeTlvStreamOffer.type, 'TLV_XFER_TYPE', '§4.5');
+      _need(out, f, EBadgeTlvStreamOffer.fps, 'TLV_XFER_FPS', '§4.5');
+      _cap(out, f, EBadgeTlvStreamOffer.name, 'TLV_XFER_NAME',
+          EBadgeLimits.fileName);
+      _len(out, f, EBadgeTlvStreamOffer.fps, 'TLV_XFER_FPS', 1, '§4.5');
+      final st = f.value(EBadgeTlvStreamOffer.type);
+      if (st != null && st.isNotEmpty) {
+        if (st[0] == EBadgeFileType.unspecified) {
+          out.add(const EBadgeViolation(
+            'TLV_XFER_TYPE=0x00,Offer 不得使用 UNSPECIFIED(§4.5)',
+          ));
+        } else if (st[0] > EBadgeFileType.text) {
+          out.add(EBadgeViolation(
+            'TLV_XFER_TYPE=0x${_hx(st[0])} 不在 §2.7 文件类型表内',
+          ));
+        }
+      }
+      // fps=0 语法上合法(uint8),语义上是「一帧都不发」,推流握手里没有意义。
+      final sf = f.value(EBadgeTlvStreamOffer.fps);
+      if (sf != null && sf.isNotEmpty && sf[0] == 0) {
+        out.add(const EBadgeViolation('fps=0,推流帧率至少为 1(§4.5)'));
+      }
+
+    case EBadgeCmd.d2hJpgStreamDecision:
+      _need(out, f, EBadgeTlvStreamDecision.decision, 'TLV_XFER_DECISION',
+          '§4.6');
+      _len(out, f, EBadgeTlvStreamDecision.fps, 'TLV_XFER_FPS', 1, '§4.6');
+      final sd = f.value(EBadgeTlvStreamDecision.decision);
+      if (sd != null && sd.isNotEmpty && sd[0] > EBadgeDecision.negotiate) {
+        out.add(EBadgeViolation(
+          'decision=${sd[0]},§4.6 只定义 0(拒绝)/ 1(同意)/ 2(协商)',
+        ));
+      }
+      // 拒绝要给原因,协商要给新帧率 —— 否则 App 无从下一步。
+      if (sd != null && sd.isNotEmpty) {
+        if (sd[0] == EBadgeDecision.reject &&
+            f.value(EBadgeTlvStreamDecision.reason) == null) {
+          out.add(const EBadgeViolation(
+              'decision=REJECT 却缺 TLV_XFER_REASON(§4.6)'));
+        }
+        if (sd[0] == EBadgeDecision.negotiate &&
+            f.value(EBadgeTlvStreamDecision.fps) == null) {
+          out.add(const EBadgeViolation(
+            'decision=NEGOTIATE 却缺 TLV_XFER_FPS,协商不出帧率(§4.6)',
+          ));
+        }
+      }
+
     case EBadgeCmd.h2dTransferOffer:
-      _need(out, f, EBadgeTlvOffer.name, 'TLV_XFER_NAME', '§4.5');
-      _need(out, f, EBadgeTlvOffer.type, 'TLV_XFER_TYPE', '§4.5');
-      _need(out, f, EBadgeTlvOffer.size, 'TLV_XFER_SIZE', '§4.5');
-      _need(out, f, EBadgeTlvOffer.crc32, 'TLV_XFER_CRC32', '§4.5');
+      _need(out, f, EBadgeTlvOffer.name, 'TLV_XFER_NAME', '§4.7');
+      _need(out, f, EBadgeTlvOffer.type, 'TLV_XFER_TYPE', '§4.7');
+      _need(out, f, EBadgeTlvOffer.size, 'TLV_XFER_SIZE', '§4.7');
+      _need(out, f, EBadgeTlvOffer.crc32, 'TLV_XFER_CRC32', '§4.7');
       _cap(out, f, EBadgeTlvOffer.name, 'TLV_XFER_NAME', EBadgeLimits.fileName);
-      _len(out, f, EBadgeTlvOffer.size, 'TLV_XFER_SIZE', 4, '§4.5');
-      _len(out, f, EBadgeTlvOffer.crc32, 'TLV_XFER_CRC32', 4, '§4.5');
-      _len(out, f, EBadgeTlvOffer.replaceId, 'TLV_XFER_REPLACE_ID', 2, '§4.5');
+      _len(out, f, EBadgeTlvOffer.size, 'TLV_XFER_SIZE', 4, '§4.7');
+      _len(out, f, EBadgeTlvOffer.crc32, 'TLV_XFER_CRC32', 4, '§4.7');
+      _len(out, f, EBadgeTlvOffer.replaceId, 'TLV_XFER_REPLACE_ID', 2, '§4.7');
       final ft = f.value(EBadgeTlvOffer.type);
       if (ft != null && ft.isNotEmpty) {
         if (ft[0] == EBadgeFileType.unspecified) {
           out.add(const EBadgeViolation(
-            'TLV_XFER_TYPE=0x00,Offer 不得使用 UNSPECIFIED(§4.5)',
+            'TLV_XFER_TYPE=0x00,Offer 不得使用 UNSPECIFIED(§4.7)',
           ));
         } else if (ft[0] > EBadgeFileType.text) {
           out.add(EBadgeViolation(
@@ -1087,18 +1267,19 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
       _need(out, f, EBadgeTlvResult.resultCmd, 'TLV_RESULT_CMD', '§4.4');
       _need(out, f, EBadgeTlvResult.resultCode, 'TLV_RESULT_CODE', '§4.4');
       final rc = f.value(EBadgeTlvResult.resultCode);
-      if (rc != null && rc.isNotEmpty && rc[0] > EBadgeResultCode.succeed) {
+      if (rc != null && rc.isNotEmpty && rc[0] > EBadgeResultCode.busy) {
         out.add(EBadgeViolation(
-          'result_code=0x${_hx(rc[0])},§2.5 只定义 0x00(失败)/ 0x01(成功)',
+          'result_code=0x${_hx(rc[0])},§2.5 只定义 0x00(成功)/ 0x01(失败)/ '
+          '0x02(未就绪)/ 0x03(忙)',
         ));
       }
 
     case EBadgeCmd.d2hTransferDecision:
-      _need(out, f, EBadgeTlvDecision.decision, 'TLV_DECISION', '§4.6');
+      _need(out, f, EBadgeTlvDecision.decision, 'TLV_DECISION', '§4.8');
       final d = f.value(EBadgeTlvDecision.decision);
       if (d != null && d.isNotEmpty && d[0] > EBadgeDecision.timeout) {
         out.add(EBadgeViolation(
-          'decision=${d[0]},§4.6 只定义 0(拒绝)/ 1(同意)/ 2(超时)',
+          'decision=${d[0]},§4.8 只定义 0(拒绝)/ 1(同意)/ 2(超时)',
         ));
       }
       // 拒绝/超时必须带原因,否则上层无法给用户解释为什么失败。
@@ -1106,67 +1287,67 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
           d.isNotEmpty &&
           d[0] != EBadgeDecision.accept &&
           f.value(EBadgeTlvDecision.reason) == null) {
-        out.add(const EBadgeViolation('decision 非 ACCEPT 却缺 TLV_REASON(§4.6)'));
+        out.add(const EBadgeViolation('decision 非 ACCEPT 却缺 TLV_REASON(§4.8)'));
       }
 
     case EBadgeCmd.d2hApInfo:
-      _need(out, f, EBadgeTlvApInfo.ssid, 'TLV_SSID', '§4.7');
-      _need(out, f, EBadgeTlvApInfo.channel, 'TLV_CHANNEL', '§4.7');
-      _need(out, f, EBadgeTlvApInfo.ipv4, 'TLV_IPV4', '§4.7');
-      _need(out, f, EBadgeTlvApInfo.port, 'TLV_PORT', '§4.7');
+      _need(out, f, EBadgeTlvApInfo.ssid, 'TLV_SSID', '§4.9');
+      _need(out, f, EBadgeTlvApInfo.channel, 'TLV_CHANNEL', '§4.9');
+      _need(out, f, EBadgeTlvApInfo.ipv4, 'TLV_IPV4', '§4.9');
+      _need(out, f, EBadgeTlvApInfo.port, 'TLV_PORT', '§4.9');
       _cap(out, f, EBadgeTlvApInfo.ssid, 'TLV_SSID', EBadgeLimits.apSsid);
       _cap(out, f, EBadgeTlvApInfo.password, 'TLV_PASSWORD',
           EBadgeLimits.apPassword);
-      _len(out, f, EBadgeTlvApInfo.ipv4, 'TLV_IPV4', 4, '§4.7');
-      _len(out, f, EBadgeTlvApInfo.port, 'TLV_PORT', 2, '§4.7');
+      _len(out, f, EBadgeTlvApInfo.ipv4, 'TLV_IPV4', 4, '§4.9');
+      _len(out, f, EBadgeTlvApInfo.port, 'TLV_PORT', 2, '§4.9');
       final ch = f.value(EBadgeTlvApInfo.channel);
       if (ch != null && ch.isNotEmpty && (ch[0] < 1 || ch[0] > 13)) {
-        out.add(EBadgeViolation('channel=${ch[0]} 越界,应在 1–13(§4.7)'));
+        out.add(EBadgeViolation('channel=${ch[0]} 越界,应在 1–13(§4.9)'));
       }
       final proto = f.value(EBadgeTlvApInfo.proto);
       if (proto != null && proto.isNotEmpty && proto[0] != 0x01) {
         out.add(EBadgeViolation(
-          'proto=0x${_hx(proto[0])},V1.2 唯一合法值是 0x01 裸 TCP(§4.7)',
+          'proto=0x${_hx(proto[0])},唯一合法值是 0x01 裸 TCP(§4.9)',
         ));
       }
       final sec = f.value(EBadgeTlvApInfo.security);
       if (sec != null && sec.isNotEmpty && sec[0] > 1) {
         out.add(EBadgeViolation(
-            'security=${sec[0]},只定义 0=Open / 1=WPA2-PSK(§4.7)'));
+            'security=${sec[0]},只定义 0=Open / 1=WPA2-PSK(§4.9)'));
       }
       // 非开放网络必须给密码,否则 app 连不上热点。
       final pwd = f.value(EBadgeTlvApInfo.password);
       if (sec != null && sec.isNotEmpty && sec[0] == 1) {
         if (pwd == null || pwd.isEmpty) {
-          out.add(const EBadgeViolation('security=WPA2-PSK 却没给密码(§4.7)'));
+          out.add(const EBadgeViolation('security=WPA2-PSK 却没给密码(§4.9)'));
         } else if (pwd.length < 8) {
-          out.add(EBadgeViolation('WPA2-PSK 密码只有 ${pwd.length}B,至少 8B(§4.7)'));
+          out.add(EBadgeViolation('WPA2-PSK 密码只有 ${pwd.length}B,至少 8B(§4.9)'));
         }
       }
 
     case EBadgeCmd.d2hTransferProgress:
-      _need(out, f, EBadgeTlvProgress.recv, 'TLV_RECV', '§4.8');
-      _need(out, f, EBadgeTlvProgress.total, 'TLV_TOTAL', '§4.8');
-      _len(out, f, EBadgeTlvProgress.recv, 'TLV_RECV', 4, '§4.8');
-      _len(out, f, EBadgeTlvProgress.total, 'TLV_TOTAL', 4, '§4.8');
+      _need(out, f, EBadgeTlvProgress.recv, 'TLV_RECV', '§4.10');
+      _need(out, f, EBadgeTlvProgress.total, 'TLV_TOTAL', '§4.10');
+      _len(out, f, EBadgeTlvProgress.recv, 'TLV_RECV', 4, '§4.10');
+      _len(out, f, EBadgeTlvProgress.total, 'TLV_TOTAL', 4, '§4.10');
       final p = EBadgeProgress.parse(f);
       if (p != null && p.recv > p.total) {
         out.add(EBadgeViolation('recv=${p.recv} > total=${p.total},进度不可能超过总量'));
       }
 
     case EBadgeCmd.d2hTransferDone:
-      _need(out, f, EBadgeTlvDone.fileId, 'TLV_FILE_ID', '§4.9');
-      _need(out, f, EBadgeTlvDone.size, 'TLV_SIZE', '§4.9');
-      _len(out, f, EBadgeTlvDone.fileId, 'TLV_FILE_ID', 2, '§4.9');
-      _len(out, f, EBadgeTlvDone.size, 'TLV_SIZE', 4, '§4.9');
+      _need(out, f, EBadgeTlvDone.fileId, 'TLV_FILE_ID', '§4.11');
+      _need(out, f, EBadgeTlvDone.size, 'TLV_SIZE', '§4.11');
+      _len(out, f, EBadgeTlvDone.fileId, 'TLV_FILE_ID', 2, '§4.11');
+      _len(out, f, EBadgeTlvDone.size, 'TLV_SIZE', 4, '§4.11');
       _cap(out, f, EBadgeTlvDone.name, 'TLV_NAME', EBadgeLimits.fileName);
       final id = f.value(EBadgeTlvDone.fileId);
       if (id != null && id.length >= 2 && EBadgeCodec.readU16le(id) == 0) {
-        out.add(const EBadgeViolation('file_id=0,协议要求非 0(§4.9)'));
+        out.add(const EBadgeViolation('file_id=0,协议要求非 0(§4.11)'));
       }
 
     case EBadgeCmd.d2hTransferFail:
-      _need(out, f, EBadgeTlvFail.reason, 'TLV_REASON', '§4.10');
+      _need(out, f, EBadgeTlvFail.reason, 'TLV_REASON', '§4.12');
       _cap(out, f, EBadgeTlvFail.detail, 'TLV_DETAIL', EBadgeLimits.failDetail);
       final rs = f.value(EBadgeTlvFail.reason);
       if (rs != null &&
@@ -1177,27 +1358,27 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
       }
 
     case EBadgeCmd.d2hBattery:
-      _need(out, f, EBadgeTlvBattery.percent, 'TLV_PERCENT', '§4.11');
-      _need(out, f, EBadgeTlvBattery.charge, 'TLV_CHARGE', '§4.11');
+      _need(out, f, EBadgeTlvBattery.percent, 'TLV_PERCENT', '§4.13');
+      _need(out, f, EBadgeTlvBattery.charge, 'TLV_CHARGE', '§4.13');
       final pc = f.value(EBadgeTlvBattery.percent);
       if (pc != null && pc.isNotEmpty && pc[0] > 100) {
-        out.add(EBadgeViolation('percent=${pc[0]},应在 0–100(§4.11)'));
+        out.add(EBadgeViolation('percent=${pc[0]},应在 0–100(§4.13)'));
       }
       final cg = f.value(EBadgeTlvBattery.charge);
       if (cg != null && cg.isNotEmpty && cg[0] > EBadgeChargeState.full) {
         out.add(EBadgeViolation(
-          'charge=${cg[0]},只定义 0(未充)/ 1(充电中)/ 2(已满)(§4.11)',
+          'charge=${cg[0]},只定义 0(未充)/ 1(充电中)/ 2(已满)(§4.13)',
         ));
       }
 
     case EBadgeCmd.d2hStorageInfo:
-      _need(out, f, EBadgeTlvStorage.total, 'TLV_TOTAL', '§4.12');
-      _need(out, f, EBadgeTlvStorage.free, 'TLV_FREE', '§4.12');
-      _len(out, f, EBadgeTlvStorage.total, 'TLV_TOTAL', 8, '§4.12');
-      _len(out, f, EBadgeTlvStorage.free, 'TLV_FREE', 8, '§4.12');
-      _len(out, f, EBadgeTlvStorage.wpCount, 'TLV_WP_COUNT', 2, '§4.12');
-      _len(out, f, EBadgeTlvStorage.wpUsed, 'TLV_WP_USED', 8, '§4.12');
-      _len(out, f, EBadgeTlvStorage.fsMargin, 'TLV_FS_MARGIN', 4, '§4.12');
+      _need(out, f, EBadgeTlvStorage.total, 'TLV_TOTAL', '§4.14');
+      _need(out, f, EBadgeTlvStorage.free, 'TLV_FREE', '§4.14');
+      _len(out, f, EBadgeTlvStorage.total, 'TLV_TOTAL', 8, '§4.14');
+      _len(out, f, EBadgeTlvStorage.free, 'TLV_FREE', 8, '§4.14');
+      _len(out, f, EBadgeTlvStorage.wpCount, 'TLV_WP_COUNT', 2, '§4.14');
+      _len(out, f, EBadgeTlvStorage.wpUsed, 'TLV_WP_USED', 8, '§4.14');
+      _len(out, f, EBadgeTlvStorage.fsMargin, 'TLV_FS_MARGIN', 4, '§4.14');
       final s = EBadgeStorageInfo.parse(f);
       if (s != null) {
         if (s.free > s.total) {
@@ -1271,7 +1452,7 @@ void _cap(
 }
 
 // ---------------------------------------------------------------------------
-// Wi-Fi 数据面 (§5.2 / §5.3)
+// Wi-Fi 数据面 (§5.2 / §5.3 / §6.2)
 // ---------------------------------------------------------------------------
 
 /// §5.2 TCP 上传固定头。
@@ -1304,6 +1485,51 @@ abstract class EBadgeXferHeader {
     // 16..40 = name,前 name_len 有效,其余保持 0x00 填充
     h.setRange(16, 16 + nameBytes.length, nameBytes);
     return h;
+  }
+}
+
+/// §6.2 同屏预览的 TCP 流帧头(**14 字节**,V1.3 新增)。
+///
+/// 与 [EBadgeXferHeader] 的 magic **完全相同**('EBXF'),仅靠头长区分:
+/// 40B = §5 壁纸单文件,14B = §6 同屏多帧。所以收发两侧必须按会话类型
+/// (0x10 Offer 还是 0x08 Offer)决定用哪个头去解 —— 拿 magic 判断不出来。
+/// 这是协议本身的设计,不是这里的实现取巧。
+///
+/// 字段上的差别:没有 name / name_len / reserved,`size` 与 `crc32` 是**本帧
+/// payload** 的长度和校验(不是整个流的),因为流没有总长。
+abstract class EBadgeStreamHeader {
+  static const int length = 14;
+
+  /// magic 'EBXF' —— 与 §5.2 同一个。
+  static const List<int> magic = EBadgeXferHeader.magic;
+
+  static Uint8List build({
+    int fileType = EBadgeFileType.jpegStream,
+    required int size,
+    required int crc32,
+  }) {
+    final h = Uint8List(length);
+    h.setRange(0, 4, magic);
+    h[4] = kEBadgeVersion;
+    h[5] = fileType & 0xFF;
+    h.setRange(6, 10, EBadgeCodec.u32le(size));
+    h.setRange(10, 14, EBadgeCodec.u32le(crc32));
+    return h;
+  }
+
+  /// 解回 (fileType, size, crc32);magic/version 不符或长度不足返回 null。
+  /// 调试页要能把自己发出去的头再读一遍核对,所以 build 之外也给个 parse。
+  static ({int fileType, int size, int crc32})? parse(Uint8List b) {
+    if (b.length < length) return null;
+    for (var i = 0; i < 4; i++) {
+      if (b[i] != magic[i]) return null;
+    }
+    if (b[4] != kEBadgeVersion) return null;
+    return (
+      fileType: b[5],
+      size: EBadgeCodec.readU32le(b, 6),
+      crc32: EBadgeCodec.readU32le(b, 10),
+    );
   }
 }
 

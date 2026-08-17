@@ -24,7 +24,7 @@ class EBadgeWifiTransport {
 
   final MethodChannel _ch;
 
-  /// §4.7 定稿默认值。AP_INFO 一般会带真值，这里只作兜底。
+  /// §4.9 定稿默认值。AP_INFO 一般会带真值，这里只作兜底。
   static const String defaultIpv4 = '192.168.4.1';
   static const int defaultPort = 9000;
 
