@@ -43,11 +43,11 @@ const List<AppEntry> kAppCatalog = <AppEntry>[
     icon: Icons.watch_outlined,
     accent: Color(0xFF2E7D6B),
     deviceFilter: 'Watch',
-    implemented: false,
+    implemented: true,
   ),
   AppEntry(
     id: AppId.dashboard,
-    title: '仪表盘',
+    title: 'Dashboard',
     subtitle: '高德地图模拟导航与仪表投屏',
     icon: Icons.dashboard_outlined,
     accent: Color(0xFFB0603A),

@@ -35,8 +35,6 @@ class AppLauncherPage extends ConsumerWidget {
               Navigator.pushNamed(context, v);
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: '/settings', child: Text('设置')),
-              PopupMenuItem(value: '/cache', child: Text('缓存管理')),
               PopupMenuItem(value: '/chip-config', child: Text('芯片配置')),
               PopupMenuItem(value: _kUpdateAction, child: Text('检查更新')),
             ],
