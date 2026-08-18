@@ -32,4 +32,16 @@ void main() {
     await tester.pumpWidget(wrap(const AppLauncherPage()));
     expect(find.widgetWithText(AppBar, '选择应用'), findsOneWidget);
   });
+
+  testWidgets('主页面菜单只显示全局功能', (tester) async {
+    await tester.pumpWidget(wrap(const AppLauncherPage()));
+
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+
+    expect(find.text('芯片配置'), findsOneWidget);
+    expect(find.text('检查更新'), findsOneWidget);
+    expect(find.text('设置'), findsNothing);
+    expect(find.text('缓存管理'), findsNothing);
+  });
 }
