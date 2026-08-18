@@ -23,10 +23,9 @@ void main() {
     }
   });
 
-  testWidgets('未实现应用显示"预览"角标', (tester) async {
+  testWidgets('入口应用不显示"预览"角标', (tester) async {
     await tester.pumpWidget(wrap(const AppLauncherPage()));
-    final unimplemented = kAppCatalog.where((e) => !e.implemented).length;
-    expect(find.text('预览'), findsNWidgets(unimplemented));
+    expect(find.text('预览'), findsNothing);
   });
 
   testWidgets('AppBar 标题为"选择应用"', (tester) async {

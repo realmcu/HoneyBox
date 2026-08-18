@@ -18,11 +18,15 @@ void main() {
       }
     });
 
-    test('ebadge and dashboard are implemented, watch is not', () {
-      final map = {for (final e in kAppCatalog) e.id: e.implemented};
-      expect(map[AppId.ebadge], isTrue);
-      expect(map[AppId.watch], isFalse);
-      expect(map[AppId.dashboard], isTrue);
+    test('uses the product names eBadge, Watch, Dashboard', () {
+      expect(
+        kAppCatalog.map((e) => e.title).toList(),
+        ['eBadge', 'Watch', 'Dashboard'],
+      );
+    });
+
+    test('all launcher applications are implemented', () {
+      expect(kAppCatalog.every((e) => e.implemented), isTrue);
     });
 
     test('device filters are the exact spec values', () {
