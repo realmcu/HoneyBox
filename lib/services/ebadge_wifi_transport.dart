@@ -122,8 +122,8 @@ class EBadgeWifiTransport {
           );
         }
       },
-      onError: (Object e) {
-        if (!ackDone.isCompleted) ackDone.completeError(e);
+      onError: (Object _) {
+        if (!ackDone.isCompleted) ackDone.complete(null);
       },
       // 设备关连接时若还没攒够 8 字节,说明它没打算回应答(§5.2 校验失败会直接
       // close),用 null 表示「无应答」而不是挂死等超时。
@@ -164,6 +164,8 @@ class EBadgeWifiTransport {
       return EBadgeWifiResult.error(
         '${e.message ?? "超时"}（协议 §5.5 限 ${ackTimeout.inSeconds}s）',
       );
+    } on SocketException {
+      return const EBadgeWifiResult.error('设备未回 EBXR 应答就关闭了连接');
     } catch (e) {
       return EBadgeWifiResult.error('上传失败：$e');
     } finally {

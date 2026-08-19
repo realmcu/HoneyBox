@@ -279,7 +279,7 @@ void main() {
       );
 
       expect(r.succeed, isFalse);
-      expect(r.error, isNotNull);
+      expect(r.error, contains('未回 EBXR'));
     });
 
     test('应答迟迟不来时按 ackTimeout 超时,错误里带上协议条款', () async {
