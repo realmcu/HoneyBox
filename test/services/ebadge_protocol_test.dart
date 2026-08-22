@@ -528,6 +528,102 @@ void main() {
     });
   });
 
+  group('0xFF DEBUG(协议外的私有命令)', () {
+    test('0xFF 不落在 §3 的保留段里 —— 这是敢占它的前提', () {
+      // 协议只保留了 0x05–0x07 / 0x0A–0x0F / 0x1B–0x2F;0x30–0xFF 整段未涉及。
+      // 这条断言在于:哪天协议扩了保留段,这里会先红,而不是等设备回错。
+      expect(EBadgeCmd.isReserved(0xFF), isFalse);
+      expect(EBadgeCmd.name(0xFF), 'DEBUG');
+    });
+
+    test('只带 subcmd 时的线上字节 —— 首个 TLV 固定 01 01 00 <val>', () {
+      // 01 FF 80 04 00 | 01 01 00 01
+      expect(
+        hexOf(EBadgeRequest.debug(0x01)),
+        hexOf(h('01 FF 80 04 00 01 01 00 01')),
+      );
+    });
+
+    test('subcmd 可以是任意非零 uint8', () {
+      expect(
+        hexOf(EBadgeRequest.debug(0x7F)),
+        hexOf(h('01 FF 80 04 00 01 01 00 7F')),
+      );
+      expect(
+        hexOf(EBadgeRequest.debug(0xFF)),
+        hexOf(h('01 FF 80 04 00 01 01 00 FF')),
+      );
+    });
+
+    test('载荷 TLV 的 type 从 0x02 起顺序递增', () {
+      final f = EBadgeRequest.debug(0x03, values: [
+        [0xAA],
+        [0xBB, 0xCC],
+      ]);
+      // subcmd(4B) + 载荷1(3+1) + 载荷2(3+2) = 13B 参数区
+      expect(
+        hexOf(f),
+        hexOf(h('01 FF 80 0D 00 01 01 00 03 02 01 00 AA 03 02 00 BB CC')),
+      );
+    });
+
+    test('载荷可以多于两条,type 一直往上加', () {
+      final f = EBadgeRequest.debug(0x01, values: [
+        [0x01],
+        [0x02],
+        [0x03],
+        [0x04],
+      ]);
+      final d = EBadgeCodec.decode(f).frame!;
+      expect(d.tlvs.map((t) => t.type), [0x01, 0x02, 0x03, 0x04, 0x05]);
+    });
+
+    test('subcmd=0 被拦 —— 约定从 0x01 起', () {
+      expect(() => EBadgeRequest.debug(0), throwsArgumentError);
+    });
+
+    test('subcmd 超出 uint8 被拦', () {
+      expect(() => EBadgeRequest.debug(0x100), throwsArgumentError);
+    });
+
+    test('自己发的 DEBUG 帧不该被判违规', () {
+      // 0xFF 走的是 EBadgeCmd.name != 'UNKNOWN' 这条路,所以不会被「不在命令表
+      // 内」误报;这条断言就是钉住这一点。
+      final d = EBadgeCodec.decode(EBadgeRequest.debug(0x01)).frame!;
+      expect(eBadgeValidate(d), isEmpty);
+    });
+
+    test('缺 subcmd / subcmd 长度不对 / subcmd=0 都报违规', () {
+      // 手工造帧:0xFF 但参数区为空
+      final none = EBadgeCodec.decode(h('01 FF 80 00 00')).frame!;
+      expect(eBadgeValidate(none).single.hint, contains('缺 subcmd'));
+
+      // subcmd 给了 2 字节
+      final long =
+          EBadgeCodec.decode(h('01 FF 80 05 00 01 02 00 01 02')).frame!;
+      expect(eBadgeValidate(long).single.hint, contains('长度 2B'));
+
+      final zero = EBadgeCodec.decode(h('01 FF 80 04 00 01 01 00 00')).frame!;
+      expect(eBadgeValidate(zero).single.hint, contains('从 0x01 起'));
+    });
+
+    test('摘要读出 subcmd,并把载荷按十六进制列出来', () {
+      final d = EBadgeCodec.decode(
+        EBadgeRequest.debug(0x0A, values: [
+          [0xDE, 0xAD]
+        ]),
+      ).frame!;
+      final s = eBadgeDescribe(d);
+      expect(s, contains('subcmd=0x0A'));
+      expect(s, contains('DE AD'));
+    });
+
+    test('无载荷时摘要不拖多余的逗号', () {
+      final d = EBadgeCodec.decode(EBadgeRequest.debug(0x01)).frame!;
+      expect(eBadgeDescribe(d), 'DEBUG:subcmd=0x01');
+    });
+  });
+
   group('Wi-Fi 数据面 (§5)', () {
     test('EBXF 头 40 字节,magic 与小端字段就位', () {
       final head = EBadgeXferHeader.build(

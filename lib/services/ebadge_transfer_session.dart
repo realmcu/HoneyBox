@@ -54,6 +54,28 @@ class EBadgeTransferSession {
   EBadgeXferStage _stage = EBadgeXferStage.idle;
   EBadgeXferStage get stage => _stage;
 
+  /// 本机通过 TCP 写出的正文字节数 / 正文总长。失败时要靠它答「到底传了多少」。
+  int _sent = 0;
+  int _total = 0;
+
+  /// 设备通过 BLE 0x14 PROGRESS 说它自己收到的字节数。null = 一次都没报过。
+  ///
+  /// 单独记设备侧的数,是因为**两个数字的差**才是这类故障最有诊断力的事实:
+  /// 本机写完 16K 而设备只认 4K,说明后面的数据丢在 Wi-Fi 或设备的接收缓冲上;
+  /// 两边都是 16K 却还失败,那就是 CRC/入库的问题,和链路无关。只看一边永远分不出。
+  int? _deviceRecv;
+
+  /// 上传阶段的进度摘要,失败时原样带进失败文本 —— [_fail] 不能把它覆盖掉。
+  String get progressText {
+    if (_total <= 0) return '未开始传输正文';
+    final pct = (_sent / _total * 100).toStringAsFixed(1);
+    final mine = '本机已发 $_sent/$_total B（$pct%）';
+    final dev = _deviceRecv;
+    if (dev == null) return '$mine；设备未上报 0x14 进度';
+    if (dev == _sent) return '$mine；设备确认收到 $dev B';
+    return '$mine；设备只确认收到 $dev B（差 ${_sent - dev} B）';
+  }
+
   void _to(EBadgeXferStage s, [String? detail]) {
     _stage = s;
     onStage?.call(s, detail);
@@ -89,6 +111,24 @@ class EBadgeTransferSession {
       if (!failed.isCompleted) failed.complete(f);
     });
 
+    // 0x14 PROGRESS 同样整个会话期间都订阅:设备可能在 TCP 写完之后、入库阶段才
+    // 补报,也可能在写到一半时就停止上报。只在 uploading 阶段订阅会漏掉这两种,
+    // 而它们恰恰是最需要这个数字的场景。
+    final progSub = link.frames
+        .where((f) => f.cmd == EBadgeCmd.d2hTransferProgress)
+        .map(EBadgeProgress.parse)
+        .where((p) => p != null)
+        .cast<EBadgeProgress>()
+        .listen((p) {
+      _deviceRecv = p.recv;
+      // 设备报的 total 更权威(它按 Offer 里的 size 算),但只在本机还没开始记账时
+      // 才采信 —— 上传中途拿它覆盖会让百分比来回跳。
+      if (_total <= 0 && p.total > 0) _total = p.total;
+      if (_stage == EBadgeXferStage.uploading) {
+        _to(EBadgeXferStage.uploading, progressText);
+      }
+    });
+
     try {
       final crc = eBadgeCrc32(body);
       return await _run(
@@ -101,6 +141,7 @@ class EBadgeTransferSession {
       );
     } finally {
       await failSub.cancel();
+      await progSub.cancel();
       // 无论成功失败都要解绑进程网络。漏掉这一步,App 之后所有网络请求都会往一张
       // 已经消失的网上发 —— 表现为「突然完全没网」,且和本功能看不出关联。
       await wifi.leave();
@@ -195,7 +236,8 @@ class EBadgeTransferSession {
             '${ap.isOpen ? "Open" : "WPA2-PSK"} ch=${ap.channel}');
 
     // ── 5. TCP 上传（§5.5 限 120 s）────────────────────────────────────
-    _to(EBadgeXferStage.uploading, '0 / ${body.length}B');
+    _total = body.length;
+    _to(EBadgeXferStage.uploading, progressText);
     final up = await wifi.upload(
       ip: ap.ipv4,
       port: ap.port,
@@ -203,10 +245,15 @@ class EBadgeTransferSession {
       fileType: type,
       body: body,
       crc32: crc,
-      onProgress: (sent, total) =>
-          _to(EBadgeXferStage.uploading, '$sent / $total B'),
+      onProgress: (sent, total) {
+        _sent = sent;
+        _total = total;
+        _to(EBadgeXferStage.uploading, progressText);
+      },
     );
     link.logInfo('TCP 上传结束', detail: up.describe());
+    // up.describe() 里已经带了 40B 头是否发出、正文写了多少;这里再拼上设备侧的
+    // 0x14 数字,两边一对照才能定位是「没发出去」还是「发出去了设备没收到」。
     if (!up.succeed) return _fail('数据面上传失败：${up.describe()}');
 
     // ── 6. 等 BLE DONE ─────────────────────────────────────────────────
@@ -226,10 +273,16 @@ class EBadgeTransferSession {
     return null;
   }
 
+  /// 记日志 + 切到 failed,返回失败原因。
+  ///
+  /// **一旦开始传正文就把进度拼进去**:原来这里直接把 [_to] 的 detail 覆盖成一句
+  /// 错误文本,而上一条 detail 恰好是「已发多少字节」—— 最有用的线索正好在最需要
+  /// 它的时刻被擦掉,页面上只剩「未应答 EBXR」。
   String _fail(String msg) {
-    link.logError('传图中止', detail: msg);
-    _to(EBadgeXferStage.failed, msg);
-    return msg;
+    final full = _total > 0 ? '$msg\n$progressText' : msg;
+    link.logError('传图中止', detail: full);
+    _to(EBadgeXferStage.failed, full);
+    return full;
   }
 
   /// 等一个 D→H 帧。三方竞速：目标帧到了、设备回了 0x16 FAIL、或超时。

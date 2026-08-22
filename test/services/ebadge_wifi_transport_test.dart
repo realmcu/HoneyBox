@@ -279,7 +279,121 @@ void main() {
       );
 
       expect(r.succeed, isFalse);
-      expect(r.error, contains('未回 EBXR'));
+      // 报的是「设备中途关连接」而不是笼统的「未回 EBXR」:设备一连上就 destroy,
+      // 我们的正文根本没写完,这两种要分开 —— 前者查设备为什么拒收,后者查固件
+      // 为什么不回应答。
+      expect(
+        r.failure,
+        anyOf(
+          EBadgeWifiFailure.closedWhileSending,
+          EBadgeWifiFailure.ackMissing,
+        ),
+      );
+      expect(r.error, contains('关闭了连接'));
+      // 关键:错误文本里必须有「传了多少」,这是排查的第一手线索。
+      expect(r.error, contains('/64 B'));
+      expect(r.totalBytes, 64);
+    });
+
+    test('失败时带上已写字节数 —— 不能只给一句「未应答」', () async {
+      // 收下 40B 头 + 前 1000B 正文后就掐连接,什么也不回。
+      server.listen((socket) {
+        var seen = 0;
+        socket.listen((data) {
+          seen += data.length;
+          if (seen >= 40 + 1000) socket.destroy();
+        });
+      });
+
+      final r = await EBadgeWifiTransport().upload(
+        ip: server.address.address,
+        port: server.port,
+        name: 'a.bin',
+        fileType: EBadgeFileType.bin,
+        body: body(64 * 1024),
+        crc32: 0,
+        chunkSize: 1000,
+        ackTimeout: const Duration(seconds: 5),
+      );
+
+      expect(r.succeed, isFalse);
+      expect(r.failure, EBadgeWifiFailure.closedWhileSending);
+      expect(r.headerSent, isTrue, reason: '40B 头是先写出去的');
+      expect(r.totalBytes, 64 * 1024);
+      // 具体写了多少视内核缓冲而定,但一定是「开了头、没写完」。
+      expect(r.bytesSent, lessThan(64 * 1024));
+      expect(r.progressText, contains('40B 头已发'));
+      expect(r.error, contains('§5.2'), reason: '要指向设备校验失败这条线索');
+    });
+
+    test('应答只回了 3 字节 → 报「应答被截断」并附原始字节', () async {
+      // EBXR 要 8 字节,这里只回 4 字节的 magic 就关连接。
+      final received = serve(
+        Uint8List.fromList([0x45, 0x42, 0x58, 0x52]),
+        40 + 16,
+      );
+
+      final r = await EBadgeWifiTransport().upload(
+        ip: server.address.address,
+        port: server.port,
+        name: 'a.bin',
+        fileType: EBadgeFileType.bin,
+        body: body(16),
+        crc32: 0,
+        ackTimeout: const Duration(seconds: 3),
+      );
+
+      await received;
+      expect(r.succeed, isFalse);
+      expect(r.failure, EBadgeWifiFailure.ackTruncated);
+      expect(r.error, contains('只回了 4 字节'));
+      // 原始字节必须原样带出来 —— 「不是 EBXR」远不如「它回的是 45 42 58 52」有用。
+      expect(r.error, contains('45 42 58 52'));
+      expect(r.bytesSent, 16, reason: '正文是写完了的,锅在应答');
+    });
+
+    test('回够 8 字节但 magic 不对 → 报「不是 EBXR」并附原始字节', () async {
+      // 'EBXF' 而不是 'EBXR' —— 固件把请求头的 magic 抄过来了,很常见的错。
+      final received = serve(
+        Uint8List.fromList([0x45, 0x42, 0x58, 0x46, 1, 0, 0, 0]),
+        40 + 16,
+      );
+
+      final r = await EBadgeWifiTransport().upload(
+        ip: server.address.address,
+        port: server.port,
+        name: 'a.bin',
+        fileType: EBadgeFileType.bin,
+        body: body(16),
+        crc32: 0,
+        ackTimeout: const Duration(seconds: 3),
+      );
+
+      await received;
+      expect(r.succeed, isFalse);
+      expect(r.failure, EBadgeWifiFailure.ackMalformed);
+      expect(r.error, contains('45 42 58 46'));
+      expect(r.error, contains('45 42 58 52'), reason: '要告诉人正确的 magic 是什么');
+    });
+
+    test('连不上时如实说「0 字节发出」,不假装传了什么', () async {
+      final port = server.port;
+      await server.close();
+
+      final r = await EBadgeWifiTransport().upload(
+        ip: '127.0.0.1',
+        port: port,
+        name: 'a.bin',
+        fileType: EBadgeFileType.bin,
+        body: body(2048),
+        crc32: 0,
+        connectTimeout: const Duration(milliseconds: 500),
+      );
+
+      expect(r.failure, EBadgeWifiFailure.connect);
+      expect(r.headerSent, isFalse);
+      expect(r.bytesSent, 0);
+      expect(r.progressText, contains('0 字节发出'));
     });
 
     test('应答迟迟不来时按 ackTimeout 超时,错误里带上协议条款', () async {
@@ -321,9 +435,12 @@ void main() {
 
   group('EBadgeWifiResult.describe', () {
     test('区分链路失败与设备判失败', () {
-      const link = EBadgeWifiResult.error('TCP 连接失败');
+      const link = EBadgeWifiResult.fail(
+        EBadgeWifiFailure.connect,
+        detail: 'TCP 连接失败',
+      );
       expect(link.succeed, isFalse);
-      expect(link.describe(), 'TCP 连接失败');
+      expect(link.describe(), contains('TCP 连接失败'));
 
       final ok = EBadgeWifiResult.ok(
         EBadgeXferAck.parse(
@@ -340,6 +457,49 @@ void main() {
       );
       expect(bad.succeed, isFalse);
       expect(bad.describe(), contains('0x05'));
+    });
+
+    test('每种 failure 都给出可区分的原因文本,不能都是「未应答 EBXR」', () {
+      final texts = <String>{};
+      for (final f in EBadgeWifiFailure.values) {
+        if (f == EBadgeWifiFailure.none) continue;
+        final r = EBadgeWifiResult.fail(
+          f,
+          bytesSent: 100,
+          totalBytes: 200,
+          headerSent: true,
+          ackRaw: Uint8List.fromList([0x45, 0x42]),
+        );
+        expect(r.error, isNotNull);
+        texts.add(r.error!);
+      }
+      // 8 个枚举值去掉 none 还剩 7 种,每种文本都不同 —— 一旦有人把两种失败合并成
+      // 同一句话,这里就会红。
+      expect(texts.length, EBadgeWifiFailure.values.length - 1);
+    });
+
+    test('progressText 分得清「头都没发」和「头发了正文卡在 0」', () {
+      const noHeader = EBadgeWifiResult.fail(
+        EBadgeWifiFailure.closedWhileSending,
+        totalBytes: 1024,
+      );
+      expect(noHeader.progressText, contains('40B EBXF 头都没写出去'));
+
+      const zeroBody = EBadgeWifiResult.fail(
+        EBadgeWifiFailure.closedWhileSending,
+        totalBytes: 1024,
+        headerSent: true,
+      );
+      expect(zeroBody.progressText, contains('40B 头已发'));
+      expect(zeroBody.progressText, contains('0/1024 B'));
+
+      const half = EBadgeWifiResult.fail(
+        EBadgeWifiFailure.ackTimeout,
+        bytesSent: 512,
+        totalBytes: 1024,
+        headerSent: true,
+      );
+      expect(half.progressText, contains('512/1024 B（50.0%）'));
     });
   });
 }

@@ -499,6 +499,20 @@ Uint8List _packJpegHeader(int width, int height, int jpegLength) {
   return buf;
 }
 
+/// Wrap already-encoded JFIF [jpeg] bytes in the 16-byte device container (see
+/// [_packJpegHeader]). Split out from [buildImageJpegBin] so a caller that
+/// already holds the encoded JPEG can switch the container on and off without
+/// paying for the DCT again — the eBadge debug page's "带 header" toggle does
+/// exactly that, and re-encoding per toggle would also break its guarantee that
+/// both variants wrap the *same* image bytes.
+Uint8List wrapImageJpegBin(Uint8List jpeg, int width, int height) {
+  final Uint8List header = _packJpegHeader(width, height, jpeg.length);
+  final out = Uint8List(header.length + jpeg.length);
+  out.setRange(0, header.length, header);
+  out.setRange(header.length, out.length, jpeg);
+  return out;
+}
+
 /// Encode [rgba] to the device image container: the 16-byte header (see
 /// [_packJpegHeader]) followed by baseline-4:2:0 JPEG bytes. This is what the
 /// image page sends when quality < 100 (quality == 100 keeps the RGB565 path).
@@ -508,13 +522,11 @@ Uint8List buildImageJpegBin(
   int height, {
   required int quality,
 }) {
-  final Uint8List jpeg =
-      encodeBaselineJpegYuv420(rgba, width, height, quality: quality);
-  final Uint8List header = _packJpegHeader(width, height, jpeg.length);
-  final out = Uint8List(header.length + jpeg.length);
-  out.setRange(0, header.length, header);
-  out.setRange(header.length, out.length, jpeg);
-  return out;
+  return wrapImageJpegBin(
+    encodeBaselineJpegYuv420(rgba, width, height, quality: quality),
+    width,
+    height,
+  );
 }
 
 /// True when [bin] is a JPEG image container produced by [buildImageJpegBin]:

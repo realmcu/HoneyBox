@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +12,8 @@ import '../../services/ebadge_protocol.dart';
 import '../../services/ebadge_stream_session.dart';
 import '../../services/ebadge_transfer_session.dart';
 import '../../services/ebadge_wifi_transport.dart';
+import '../../services/image_jpeg.dart';
+import '../../services/raster.dart';
 import '../../theme/app_theme.dart';
 import 'ebadge_stream_demo_frames.dart';
 
@@ -56,6 +60,16 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   bool _xferBusy = false;
   EBadgeXferStage _xferStage = EBadgeXferStage.idle;
   String? _xferDetail;
+
+  /// 传图正文是否套那 16 字节设备图片头(`8B gui header + 4B 长度 + 4B 对齐`)。
+  ///
+  /// 做成开关而不是写死,是因为「设备到底要不要这层头」目前只能靠实测定论:图片页
+  /// 走的是带头那条路且显示正常,但调试页早先发裸 JFIF 时设备收下了却不显示。留一个
+  /// 开关,同一张图、同一份 JPEG 字节,两种封装各传一次就能把结论钉死 —— 改代码重编
+  /// 再传对比,中间变量太多。
+  ///
+  /// 默认带头:与图片页(`image_page`,quality<100)发出去的字节结构一致。
+  bool _xferWithHeader = true;
 
   /// 同屏预览(§6)会话状态。与传图共用「设备只允许单会话」这条约束(§6.7),
   /// 但两者是**不同的会话**:推流期间不能发传图 Offer,反之亦然,所以两个按钮
@@ -239,8 +253,11 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// Offer → Decision → AP_INFO → 连热点 → TCP 推 EBXF → 收 EBXR → 等 0x15 DONE
   /// 整条链路跑完,时序编排在 [EBadgeTransferSession] 里。
   ///
-  /// **传的是固定的合成数据**,不选相册 —— 调试台要的是可重复的基准,固定数据下
-  /// CRC32 每次都一样,设备回 XFER_ERR_VERIFY 就一定是链路问题而非文件问题。
+  /// **传的是示例图转出的 466×466 JPEG**,按设备图片格式封装(16B 头 + 裸 JFIF,
+  /// 见 [_demoPayload]),不选相册 —— 调试台要的是可重复的基准:同一张图、同一档
+  /// 质量,编码结果逐字节一致,CRC32 固定,设备回 XFER_ERR_VERIFY 就一定是链路问题
+  /// 而非文件问题。用真 JPEG 而不是合成字节,是因为设备收下之后还要解码上屏 ——
+  /// 递增字节能过 CRC 但解不出图,那样这条链路只测到一半。
   ///
   /// **副作用要知道**:连上设备热点期间原生侧会 `bindProcessToNetwork`,本进程所
   /// 有网络请求都改走这张无外网的热点,检查更新之类会失败;会话结束(含失败)会
@@ -248,14 +265,37 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   Future<void> _wifiTransfer() async {
     if (_busy) return;
 
+    // 编码要几百毫秒,先把按钮禁掉再去编 —— 否则这段时间里还能连点。
+    setState(() {
+      _xferBusy = true;
+      _xferStage = EBadgeXferStage.idle;
+      _xferDetail = '正在编码 $_demoImageSize×$_demoImageSize JPEG…';
+    });
+
+    final Uint8List body;
+    try {
+      body = await _demoPayload();
+    } catch (e) {
+      _link.logError('测试图编码失败', detail: '$e');
+      if (mounted) {
+        setState(() {
+          _xferBusy = false;
+          _xferStage = EBadgeXferStage.failed;
+          _xferDetail = '测试图编码失败：$e';
+        });
+      }
+      return;
+    }
+    if (!mounted) return;
+
     final storage = _storage;
-    final body = _demoPayload();
     if (storage != null && !storage.canFit(body.length)) {
       _link.logError(
         '本地前置校验失败,未发起传图',
         detail: '协议 §2.9 要求 free ≥ size + ${EBadgeLimits.fsMargin};'
             '当前 free=${storage.free} size=${body.length}',
       );
+      setState(() => _xferBusy = false);
       return;
     }
     if (storage == null) {
@@ -266,11 +306,11 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
       );
     }
 
-    setState(() {
-      _xferBusy = true;
-      _xferStage = EBadgeXferStage.idle;
-      _xferDetail = null;
-    });
+    _link.logInfo(
+      '测试图已就绪',
+      detail: '$_demoFileName ${body.length}B ${_payloadShape(body)} '
+          'file_type=${EBadgeFileType.name(_demoFileType)}',
+    );
 
     final session = EBadgeTransferSession(
       link: _link,
@@ -287,29 +327,170 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     try {
       final err = await session.run(
         name: _demoFileName,
-        type: EBadgeFileType.bin,
+        type: _demoFileType,
         body: body,
       );
       if (!mounted) return;
-      final msg = err ?? '传图完成';
+      // 失败文本现在是「原因 + 已传字节数」两行,SnackBar 默认只给一行、3 秒就走。
+      // 完整内容留在上方的 _XferProgress 里(可选中复制),这里只给一句提示 + 更长
+      // 的停留时间,免得人还没读完就消失了。
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+        SnackBar(
+          content: Text(err == null ? '传图完成' : '传图失败,详情见上方进度框'),
+          duration: Duration(seconds: err == null ? 3 : 5),
+          backgroundColor:
+              err == null ? null : Theme.of(context).colorScheme.error,
+        ),
       );
     } finally {
       if (mounted) setState(() => _xferBusy = false);
     }
   }
 
-  static const String _demoFileName = 'wifi_demo.bin';
-
-  /// 固定的测试载荷。
+  /// 把即将上传的测试图正文导出到本地，用于在电脑上验证「转换对不对」。
   ///
-  /// 用递增字节而非全零:全零的数据一旦被截断或错位,CRC32 仍可能凑巧对得上,
-  /// 而递增序列任何一段错位都会立刻反映在校验值上。16 KiB 也刻意大于
-  /// [EBadgeWifiTransport.upload] 默认的 8 KiB 分块,好让进度回调真的走两次
-  /// 以上 —— 只走一次的话,分块逻辑坏了也看不出来。
-  Uint8List _demoPayload() =>
-      Uint8List.fromList(List.generate(16 * 1024, (i) => i & 0xFF));
+  /// 导出的是 [_demoPayload] 的**同一份字节**（同一个缓存实例），不是重新编一次
+  /// —— 重编虽然结果相同，但那就变成「验证另一份数据」了，万一编码器有不确定性
+  /// 就正好漏掉。日志里同时记下长度和 CRC32，和传图时 Offer/EBXF 用的是同一个
+  /// 数：文件的 CRC 与日志对得上，才能断定电脑上打开的就是设备收到的那份。
+  Future<void> _saveDemoPayload() async {
+    if (_busy) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    final Uint8List body;
+    try {
+      body = await _demoPayload();
+    } catch (e) {
+      _link.logError('测试图编码失败', detail: '$e');
+      messenger.showSnackBar(SnackBar(content: Text('编码失败：$e')));
+      return;
+    }
+
+    final crc = eBadgeCrc32(body);
+    final crcHex = '0x${crc.toRadixString(16).padLeft(8, '0')}';
+    _link.logInfo(
+      '导出测试图正文',
+      detail: '$_demoFileName ${body.length}B crc32=$crcHex '
+          '${_payloadShape(body)}',
+    );
+
+    try {
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: '导出 Wi-Fi 传图测试正文',
+        fileName: _demoFileName,
+        bytes: body,
+      );
+      if (path == null) {
+        messenger.showSnackBar(const SnackBar(content: Text('已取消导出')));
+        return;
+      }
+      // Android/iOS 下 file_picker 自己落盘并返回路径；桌面端只给路径，要自己写。
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        await File(path).writeAsBytes(body, flush: true);
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('已导出 $_demoFileName（${body.length}B）')),
+      );
+    } catch (e) {
+      _link.logError('导出测试图失败', detail: '$e');
+      messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    }
+  }
+
+  /// 文件名跟着封装走:带头时正文是设备的 `.bin` 容器(与图片页、`file_cache.dart`
+  /// 的 `image.bin` 一致),不带头时才是真正的 `.jpg` 文件。
+  String get _demoFileName =>
+      _xferWithHeader ? 'wifi_demo.bin' : 'wifi_demo.jpg';
+
+  /// Offer / EBXF 头里报的 file_type,同样跟着封装走。
+  ///
+  /// 带头时报 [EBadgeFileType.bin]:正文外面套了 gui header,已经不是一个 JFIF
+  /// 文件,报 jpeg(0x01) 等于让设备按裸 JPEG 去解最前面那 16 字节。不带头时正文
+  /// 就是 JFIF,报 jpeg 才名副其实。
+  ///
+  /// **这个对应关系待与固件确认** —— 如果固件是靠 file_type=0x01 把文件路由给图片
+  /// 解码器(而不是看容器里 offset 1 的 type),那带头时也得报 jpeg。传图日志里会
+  /// 原样打出当前用的值,两种组合都能试。
+  int get _demoFileType =>
+      _xferWithHeader ? EBadgeFileType.bin : EBadgeFileType.jpeg;
+
+  /// 测试图的边长。466 是设备圆屏的物理分辨率(见图片页的 `_sizePresets`),
+  /// 传别的尺寸设备还得自己缩放,那就把「缩放对不对」也混进这条链路的变量里了。
+  static const int _demoImageSize = 466;
+
+  /// JPEG 质量。60 = 项目里各发送页统一的「MED / 一般画质」档(见轮播页和视频页的
+  /// `_qualityPresets`),调试台跟着用同一个数,好让这里测出来的体积和画质与实际
+  /// 业务发送路径可比。
+  static const int _demoJpegQuality = 60;
+
+  /// 正文结构的一行描述,传图和导出共用。
+  ///
+  /// 把「带没带头」写进日志是必须的:两种封装的字节数只差 16,单看长度分不出来,
+  /// 而排查时最要紧的恰恰是「这一次发的到底是哪种」。
+  String _payloadShape(Uint8List body) {
+    const spec = '$_demoImageSize×$_demoImageSize q=$_demoJpegQuality '
+        'baseline 4:2:0';
+    if (!_xferWithHeader) return '= 裸 JFIF($spec),无 16B 头';
+    return '= 16B 头 + ${body.length - kJpegHeaderBytes}B JPEG($spec)';
+  }
+
+  static const String _demoImageAsset =
+      'assets/example/img/badge-preset-image-1.png';
+
+  /// 编码好的**裸 JFIF** 正文缓存(不含 16B 头)。
+  ///
+  /// 缓存的是裸流而不是整包:带头/不带头两种封装共用同一份 JPEG 字节,切换开关只是
+  /// 套不套那 16 字节,不用重跑 DCT。这既省掉几百毫秒,更重要的是保证两次传输比的
+  /// 是**同一张图**,否则「换了封装就好了」有可能只是因为重编出了别的字节。
+  ///
+  /// 必须缓存:[encodeBaselineJpegYuv420] 是纯 Dart 的 DCT,466×466 要跑几百毫秒,
+  /// 每次点按钮都重编会让 UI 明显卡一下,而且**每次编码结果都一样** —— 调试台要的
+  /// 就是这个可重复性:CRC32 固定,设备回 XFER_ERR_VERIFY 就一定是链路问题,不是
+  /// 文件问题。
+  Uint8List? _demoJpeg;
+
+  /// 取(必要时先生成)测试用的 466×466 图片正文。
+  ///
+  /// [_xferWithHeader] 为真时返回 [buildImageJpegBin] 那种**带 16 字节设备头的
+  /// 容器**,和图片页(`image_page`,quality<100 那条路)发给设备的字节结构一致:
+  ///
+  ///   0..7    8B gui header(offset 1 = 0x0C 标记 JPEG,2..5 是宽高 LE)
+  ///   8..11   JPEG 数据长度(uint32 LE)
+  ///   12..15  对齐字节(全 0)
+  ///   16..    baseline 4:2:0 裸 JFIF 字节
+  ///
+  /// 为假时只返回上面第 16 字节往后的那段,即裸 JFIF(SOI…EOI)。
+  ///
+  /// 两种都留着是因为协议 §5.2 只说 payload 是「原始文件字节」,没说清「原始文件」
+  /// 指裸 JPEG 还是设备自己那套 `.bin` 容器 —— 固件按 offset 1 的 type 分支找
+  /// RGB565 还是 JPEG,那就该带头;但这一点未与固件对齐前,实测比推断可靠。
+  Future<Uint8List> _demoPayload() async {
+    final jpeg = _demoJpeg ??= await _encodeDemoJpeg();
+    if (!_xferWithHeader) return jpeg;
+    return wrapImageJpegBin(jpeg, _demoImageSize, _demoImageSize);
+  }
+
+  /// 把示例图编成 466×466 的裸 JFIF。只在首次(或改了尺寸/质量后)跑一次。
+  Future<Uint8List> _encodeDemoJpeg() async {
+    final bytes = await DefaultAssetBundle.of(context).load(_demoImageAsset);
+    final src = await decodeUiImage(bytes.buffer.asUint8List());
+    try {
+      // cover 居中裁切:示例图不是正方形,拉伸会让圆屏上的画面变形。
+      final rgba = await cropResizeToRgba(
+        src,
+        targetW: _demoImageSize,
+        targetH: _demoImageSize,
+      );
+      return encodeBaselineJpegYuv420(
+        rgba.rgba,
+        _demoImageSize,
+        _demoImageSize,
+        quality: _demoJpegQuality,
+      );
+    } finally {
+      src.dispose();
+    }
+  }
 
   // ── §6 同屏预览(备用能力,仅协议调试)────────────────────────────────
 
@@ -419,6 +600,28 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
       return;
     }
     await _link.sendRaw(body, '$name 正文(§4.2 固定示例)');
+  }
+
+  /// 0xFF DEBUG —— 私有调试命令,参数由弹窗现填。
+  ///
+  /// 做成表单而不是一格一个固定 subcmd 的按钮:subcmd 的含义是固件私下定的,
+  /// 今天 0x01 是「进工厂模式」,换一版可能就变了。写死成按钮等于把一份会过期
+  /// 的映射表刻进 App;让人当场填,反倒永远不会过期。
+  Future<void> _sendDebug() async {
+    final form = await showDialog<_DebugForm>(
+      context: context,
+      builder: (_) => const _DebugCmdDialog(),
+    );
+    if (form == null) return;
+    try {
+      await _send(
+        EBadgeRequest.debug(form.subcmd, values: form.values),
+        'subcmd=0x${form.subcmd.toRadixString(16).toUpperCase().padLeft(2, '0')}'
+        '${form.values.isEmpty ? "(无载荷)" : "，${form.values.length} 条载荷"}',
+      );
+    } on ArgumentError catch (e) {
+      _link.logError('DEBUG 参数非法', detail: e.message.toString());
+    }
   }
 
   static String _two(int v) => v.toString().padLeft(2, '0');
@@ -596,13 +799,29 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
             enabled: !_busy,
             onTap: _wifiTransfer,
           ),
+          _XferSaveButton(
+            enabled: !_busy,
+            onTap: _saveDemoPayload,
+          ),
         ]),
+        _XferHeaderToggle(
+          withHeader: _xferWithHeader,
+          enabled: !_busy,
+          onChanged: (v) => setState(() => _xferWithHeader = v),
+        ),
         if (_xferStage != EBadgeXferStage.idle || _xferBusy)
           _XferProgress(stage: _xferStage, detail: _xferDetail),
         const _Hint(
           '按 §5.4 完整时序跑:0x10 Offer → 0x11 同意 → 0x13 AP_INFO → '
           '连设备热点 → TCP 推 EBXF(40B 头)+ 正文 → 收 EBXR → 等 0x15 DONE。'
-          '固定传 16 KiB 递增字节,文件名 $_demoFileName。'
+          '传的是示例图转出的 $_demoImageSize×$_demoImageSize baseline 4:2:0 JPEG'
+          '(q=$_demoJpegQuality)。上面的开关决定正文封装:带头 = 8B gui header + '
+          '4B JPEG 长度 + 4B 对齐 + 裸 JFIF(与图片页一致,file_type 报 BIN);'
+          '不带头 = 只发裸 JFIF(file_type 报 JPEG)。两种共用同一份 JPEG 字节,'
+          '切换不会重编,所以两次传输比的是同一张图。'
+          '首次点按要先编码,约几百毫秒;之后复用同一份,CRC32 每次一致。'
+          '「导出测试图」存的就是当前开关下要发的那份字节 —— 带头时在电脑上看图'
+          '要先跳过前 16 字节。'
           '注意:连热点期间本机所有网络请求都走设备热点(无外网),会话结束自动恢复。',
         ),
         const SizedBox(height: 16),
@@ -629,6 +848,26 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
           '${EBadgeStreamDemoFrames.width}×${EBadgeStreamDemoFrames.height} '
           '测试帧(白块四格轮转,便于肉眼判断卡帧/丢帧)—— '
           '本按钮不开摄像头、不碰拍照投屏的编码器,两条链路完全独立。',
+        ),
+        const SizedBox(height: 16),
+        const _SectionLabel('私有调试(协议文档之外)'),
+        _CmdGrid(children: [
+          _CmdButton(
+            cmd: EBadgeCmd.h2dDebug,
+            name: 'DEBUG',
+            icon: Icons.bug_report_outlined,
+            onTap: _sendDebug,
+          ),
+        ]),
+        const _Hint(
+          '0xFF 不在协议 §3 的命令表里,是厂商私有的调试通道 —— 首个 TLV 固定为 '
+          'type=0x01 / len=1 的 subcmd(从 0x01 起),后面可选跟若干条载荷 TLV,'
+          'type 从 0x02 顺序递增。',
+        ),
+        const _Hint(
+          'subcmd 的含义由固件决定,协议文档里查不到,换固件版本可能整套改变 —— '
+          '所以这里不预置按钮,每次现填。设备不认的 subcmd 通常没有任何回应,'
+          '不回包不代表发送失败,对照日志里的发送字节确认本机组包正确即可。',
         ),
         const SizedBox(height: 16),
         const _SectionLabel('设备上报(只读,由设备主动发起)'),
@@ -1033,6 +1272,56 @@ class _SectionLabel extends StatelessWidget {
 
 /// 命令区里的一段说明文字。按钮名(SEND_FILE)说不清「按下去会发生什么」,
 /// 而这里的命令都会真往设备里写数据,后果得先讲明白。
+/// 「带 16B 设备头」开关。
+///
+/// 用 [SwitchListTile] 的紧凑版而不是两个单选按钮:这是个二元选择,而且两种取值都
+/// 要能一眼看出当前是哪个 —— 排查时最怕的就是不知道刚才那一发到底带没带头,所以
+/// 副标题直接把两种封装的字节结构写出来,不用回头翻代码或文档。
+class _XferHeaderToggle extends StatelessWidget {
+  const _XferHeaderToggle({
+    required this.withHeader,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final bool withHeader;
+
+  /// 会话进行中禁止切换:正文在 [EBadgeTransferSession.run] 开始前就取好了,中途
+  /// 改这个开关不会影响已发出的字节,却会让界面和日志说的不是同一件事。
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: SwitchListTile(
+        value: withHeader,
+        onChanged: enabled ? onChanged : null,
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: Text(
+          withHeader ? '带 16B 设备头(.bin 容器)' : '不带头(裸 JFIF)',
+          style: const TextStyle(fontSize: 12.5, color: AppTheme.textPrimary),
+        ),
+        subtitle: Text(
+          withHeader
+              ? '8B gui header + 4B JPEG 长度 + 4B 对齐 + JFIF，与图片页一致；'
+                  'file_type 报 BIN'
+              : '只发 SOI…EOI，不套容器；file_type 报 JPEG',
+          style: const TextStyle(
+            fontSize: 11,
+            height: 1.3,
+            color: AppTheme.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Hint extends StatelessWidget {
   const _Hint(this.text);
   final String text;
@@ -1167,6 +1456,37 @@ class _XferButton extends StatelessWidget {
   }
 }
 
+/// 把测试图正文存到本地的按钮。
+///
+/// 和传图按钮并排放在一格里,是因为它验证的是同一份字节:传图失败或设备不显示时,
+/// 先把这份正文导到电脑上打开看一眼 —— 图本身是好的,就说明锅在链路或设备解码器;
+/// 图打不开或花屏,才是本机编码的问题。少了这一步,两边只能互相猜。
+class _XferSaveButton extends StatelessWidget {
+  const _XferSaveButton({required this.enabled, required this.onTap});
+
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: enabled ? onTap : null,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.download_outlined, size: 16),
+          SizedBox(width: 7),
+          Text('导出测试图', style: TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
 /// 传图阶段条。
 ///
 /// 只显示当前阶段而不做成六格进度条:阶段之间的耗时差了两个数量级(等用户确认
@@ -1176,6 +1496,12 @@ class _XferProgress extends StatelessWidget {
 
   final EBadgeXferStage stage;
   final String? detail;
+
+  static const _detailStyle = TextStyle(
+    fontSize: 11,
+    height: 1.3,
+    color: AppTheme.textSecondary,
+  );
 
   static const _labels = {
     EBadgeXferStage.idle: '准备',
@@ -1234,14 +1560,12 @@ class _XferProgress extends StatelessWidget {
                 if (detail != null && detail!.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      detail!,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        height: 1.3,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
+                    // 失败时用 SelectableText:这段文本里有已发字节数、EBXR 原始
+                    // 字节、协议条款号,是要贴进问题单发给固件的东西 —— 不能选中
+                    // 就只能照着屏幕抄,抄错一个字节整条线索就废了。
+                    child: failed
+                        ? SelectableText(detail!, style: _detailStyle)
+                        : Text(detail!, style: _detailStyle),
                   ),
               ],
             ),
@@ -1523,6 +1847,193 @@ class _SendMsgDialogState extends State<_SendMsgDialog> {
         padding: const EdgeInsets.only(bottom: 8),
         child: TextField(
           controller: c,
+          decoration: InputDecoration(
+            labelText: label,
+            isDense: true,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+      );
+}
+
+// ---------------------------------------------------------------------------
+// 0xFF DEBUG 表单
+// ---------------------------------------------------------------------------
+
+class _DebugForm {
+  const _DebugForm(this.subcmd, this.values);
+
+  final int subcmd;
+
+  /// 可选载荷,每个元素是一条 TLV 的完整 value(可为多字节)。
+  final List<List<int>> values;
+}
+
+/// 0xFF DEBUG 的参数弹窗:一个 subcmd + 任意条载荷。
+///
+/// 载荷统一按**十六进制字节串**输入(`0A 1B` 或 `0a1b`),不提供「按十进制/
+/// 字符串填」的开关:私有调试命令的参数就是一串字节,给它套上类型选择只会多一步
+/// 猜测 —— 到底填的是 uint16 小端还是两个 uint8,只有固件那边知道。
+class _DebugCmdDialog extends StatefulWidget {
+  const _DebugCmdDialog();
+
+  @override
+  State<_DebugCmdDialog> createState() => _DebugCmdDialogState();
+}
+
+class _DebugCmdDialogState extends State<_DebugCmdDialog> {
+  /// 默认 1 —— 需求里 val 从 0x1 开始,也是最常按的那一个。
+  final _subcmd = TextEditingController(text: '01');
+
+  /// 载荷输入框。初始为空:载荷是可选的,大多数 subcmd 只需要一个命令号。
+  final _values = <TextEditingController>[];
+
+  String? _error;
+
+  @override
+  void dispose() {
+    _subcmd.dispose();
+    for (final c in _values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  /// 解析一段十六进制字节串。允许空格分隔或连写,大小写不限。
+  /// 返回 null 表示格式不对(错误信息写进 [_error])。
+  List<int>? _parseHex(String s, String field) {
+    final compact = s.replaceAll(RegExp(r'[\s,]'), '');
+    if (compact.isEmpty) return const [];
+    if (compact.length.isOdd) {
+      _error = '$field:十六进制位数为奇数,一个字节要两位';
+      return null;
+    }
+    final out = <int>[];
+    for (var i = 0; i < compact.length; i += 2) {
+      final b = int.tryParse(compact.substring(i, i + 2), radix: 16);
+      if (b == null) {
+        _error = '$field:「${compact.substring(i, i + 2)}」不是十六进制';
+        return null;
+      }
+      out.add(b);
+    }
+    return out;
+  }
+
+  void _submit() {
+    setState(() => _error = null);
+
+    final sc = _parseHex(_subcmd.text, 'subcmd');
+    if (sc == null) {
+      setState(() {});
+      return;
+    }
+    if (sc.length != 1) {
+      setState(() => _error = 'subcmd 固定 1 字节(len=1),当前 ${sc.length} 字节');
+      return;
+    }
+    if (sc[0] == 0) {
+      setState(() => _error = 'subcmd 从 0x01 起,不能是 0x00');
+      return;
+    }
+
+    final vals = <List<int>>[];
+    for (var i = 0; i < _values.length; i++) {
+      final v = _parseHex(_values[i].text, '载荷 ${i + 1}');
+      if (v == null) {
+        setState(() {});
+        return;
+      }
+      // 空输入框直接跳过,而不是发一条 len=0 的 TLV:用户加了框又没填,意图是
+      // 「不发这条」,不是「发个空的」。
+      if (v.isEmpty) continue;
+      vals.add(v);
+    }
+
+    Navigator.pop(context, _DebugForm(sc[0], vals));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('0xFF DEBUG'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _hexField(_subcmd, 'subcmd(type 0x01, len 1)'),
+            for (var i = 0; i < _values.length; i++)
+              Row(
+                children: [
+                  Expanded(
+                    child: _hexField(
+                      _values[i],
+                      '载荷 ${i + 1}(type 0x'
+                      '${(0x02 + i).toRadixString(16).toUpperCase().padLeft(2, '0')}'
+                      ')',
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '删除',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() {
+                      // 删中间一条会让后面所有载荷的 type 前移一位 —— 这是刻意
+                      // 的:type 由位置决定(0x02 起递增),不是输入框自带的属性。
+                      _values.removeAt(i).dispose();
+                    }),
+                    icon: const Icon(Icons.remove_circle_outline, size: 18),
+                  ),
+                ],
+              ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () =>
+                    setState(() => _values.add(TextEditingController())),
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('加一条载荷'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+            const Text(
+              '按十六进制填,空格可省:0A 或 0a1b。载荷可多字节,'
+              'type 按顺序从 0x02 递增。',
+              style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _error!,
+                  style: TextStyle(fontSize: 12, color: cs.error),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('发送')),
+      ],
+    );
+  }
+
+  Widget _hexField(TextEditingController c, String label) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: TextField(
+          controller: c,
+          // 等宽字体:调试时要逐字节核对,变宽字体下 0 和 O 看着一样。
+          style: const TextStyle(fontFamily: 'monospace'),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\s]')),
+          ],
           decoration: InputDecoration(
             labelText: label,
             isDense: true,

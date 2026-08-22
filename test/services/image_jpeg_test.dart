@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:honeybox/services/image_jpeg.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -119,6 +120,89 @@ void main() {
     final hi = encodeBaselineJpegYuv420(rgba, 64, 64, quality: 95);
     final lo = encodeBaselineJpegYuv420(rgba, 64, 64, quality: 20);
     expect(lo.length, lessThan(hi.length));
+  });
+
+  // eBadge 协议调试页的 Wi-Fi 传图正文就是这个规格(466×466 / q=60),而
+  // 466 = 29×16 + 2,最后一行一列 MCU 要靠边缘像素复制补齐。设备侧是硬件 JPEG
+  // 解码器,补齐算错它只会直接拒收,所以这条尺寸单独钉一次。
+  test('debug-page transfer payload: 466x466 @ q60 is decodable by dart:ui',
+      () async {
+    const int size = 466;
+    final jpeg = encodeBaselineJpegYuv420(_gradient(size, size), size, size,
+        quality: 60);
+
+    final parsed = _walk(jpeg, 0);
+    expect(parsed.endsWithEoi, isTrue);
+    final sof = parsed.sof0!;
+    expect((sof[1] << 8) | sof[2], size);
+    expect((sof[3] << 8) | sof[4], size);
+    // Y 分量必须是 2×2 采样(4:2:0)—— 设备的硬件解码器只吃这个。
+    // SOF0 载荷:precision(1) h(2) w(2) ncomp(1) 然后每分量 id(1) HV(1) Tq(1),
+    // 所以第一个分量的 HV 在 [7],[6] 是它的 id。
+    expect(sof[6], 1, reason: '第一个分量应为 Y(id=1)');
+    expect(sof[7], 0x22);
+
+    // 真正解一次:marker 结构对不代表熵编码段对。dart:ui 用的是平台 JPEG 解码器,
+    // 和设备侧同类,能解出 466×466 才说明这份正文是真图而不只是格式合法的字节。
+    final codec = await ui.instantiateImageCodec(jpeg);
+    final frame = await codec.getNextFrame();
+    try {
+      expect(frame.image.width, size);
+      expect(frame.image.height, size);
+    } finally {
+      frame.image.dispose();
+      codec.dispose();
+    }
+  });
+
+  // 协议调试页的 Wi-Fi 传图正文用的就是这个容器(不再是裸 JFIF):设备固件按
+  // offset 1 的 type 分支去找 RGB565 还是 JPEG,少了这 16 字节它拿到一个直接以
+  // FFD8 开头的流,只会当成坏数据 —— 现象是文件收下了、CRC 也对,但画面出不来。
+  // 所以这里把「16B 头 + 可解码 JPEG」这个组合整体钉住。
+  test('debug-page payload is the 16B container, and its JPEG still decodes',
+      () async {
+    const int size = 466;
+    final bin =
+        buildImageJpegBin(_gradient(size, size), size, size, quality: 60);
+
+    // 前 16 字节:type=0x0C、宽高 LE、长度字段与实际 JPEG 长度一致、对齐位全 0。
+    final hdr = ByteData.sublistView(bin, 0, kJpegHeaderBytes);
+    expect(hdr.getUint8(1), 0x0C, reason: 'type=12 设备据此走 JPEG 分支');
+    expect(hdr.getUint16(2, Endian.little), size);
+    expect(hdr.getUint16(4, Endian.little), size);
+    expect(hdr.getUint32(8, Endian.little), bin.length - kJpegHeaderBytes,
+        reason: '长度字段必须等于实际 JPEG 字节数');
+    expect(hdr.getUint32(12, Endian.little), 0, reason: '对齐字节全 0');
+
+    // 剥掉头之后必须还是一份真图 —— 结构对不代表熵编码段对。
+    final payload = imageJpegPayload(bin)!;
+    final parsed = _walk(payload, 0);
+    expect(parsed.endsWithEoi, isTrue);
+    expect(parsed.sof0![7], 0x22, reason: 'Y 必须 2×2(4:2:0)');
+
+    final codec = await ui.instantiateImageCodec(payload);
+    final frame = await codec.getNextFrame();
+    try {
+      expect(frame.image.width, size);
+      expect(frame.image.height, size);
+    } finally {
+      frame.image.dispose();
+      codec.dispose();
+    }
+  });
+
+  // 调试页的「带 header」开关靠 wrapImageJpegBin 在同一份已编码 JPEG 上套/不套
+  // 容器,而不是按开关重编两次。这条钉住「套壳 == 直接 build」,否则开关一拨就等于
+  // 换了张图,那种情况下「加了头就好了」的结论根本不成立。
+  test('wrapImageJpegBin equals buildImageJpegBin on the same pixels', () {
+    const w = 466, h = 466;
+    final rgba = _gradient(w, h);
+    final jpeg = encodeBaselineJpegYuv420(rgba, w, h, quality: 60);
+    final wrapped = wrapImageJpegBin(jpeg, w, h);
+    final built = buildImageJpegBin(rgba, w, h, quality: 60);
+    expect(wrapped, orderedEquals(built));
+    // 而且套壳只是加了 16 字节前缀,裸 JFIF 本身一字节没动。
+    expect(imageJpegPayload(wrapped), orderedEquals(jpeg));
   });
 
   test('isImageJpegBin / imageJpegPayload round-trip the container', () {

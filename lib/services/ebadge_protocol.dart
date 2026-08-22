@@ -102,6 +102,16 @@ class EBadgeCmd {
   static const int h2dGetStorage = 0x19;
   static const int d2hStorageInfo = 0x1A;
 
+  /// 0xFF DEBUG —— **协议文档里没有这条命令**,是厂商私有的调试通道。
+  ///
+  /// 之所以敢占 0xFF:§3 只把 0x05–0x07 / 0x0A–0x0F / 0x1B–0x2F 声明为保留段,
+  /// 0x30–0xFF 整段既没定义也没保留,属于协议未涉及的空间。挑最高位 0xFF 是为了
+  /// 离将来可能的官方扩展(通常往低位递增)尽量远。
+  ///
+  /// **只用于协议调试页**。它不进任何业务链路 —— 设备侧的行为由固件私下约定,
+  /// 换一版固件同一个 subcmd 可能干完全不同的事,所以不能被产品功能依赖。
+  static const int h2dDebug = 0xFF;
+
   /// 0x05–0x07、0x0A–0x0F、0x1B–0x2F 为协议保留段,未定义前禁止使用(§3 末行)。
   /// V1.2 的保留段是连续的 0x05–0x0F,V1.3 从中挖走 0x08/0x09 给同屏预览。
   static bool isReserved(int cmd) =>
@@ -127,6 +137,7 @@ class EBadgeCmd {
         d2hBattery => 'BATTERY',
         h2dGetStorage => 'GET_STORAGE',
         d2hStorageInfo => 'STORAGE_INFO',
+        h2dDebug => 'DEBUG',
         _ => isReserved(cmd) ? 'RESERVED' : 'UNKNOWN',
       };
 }
@@ -238,6 +249,18 @@ abstract class EBadgeTlvStorage {
   static const int wpCount = 0x03; // uint16 LE
   static const int wpUsed = 0x04; // uint64 LE
   static const int fsMargin = 0x05; // uint32 LE,固定回 4096
+}
+
+/// 0xFF DEBUG(协议外的私有调试命令,见 [EBadgeCmd.h2dDebug])
+///
+/// type 0x01 是 subcmd,len 固定 1;后面可以再跟若干条**可选**的载荷 TLV,
+/// type 从 0x02 起递增。载荷的含义由 subcmd 决定 —— 这是有意留白:调试命令的
+/// 参数格式会跟着固件改,在 App 里给它定死结构只会每次都要改代码。
+abstract class EBadgeTlvDebug {
+  static const int subcmd = 0x01; // len=1,uint8,从 0x01 起
+
+  /// 可选载荷的起始 type。第 n 条(n 从 0 算)载荷的 type 为 `valueBase + n`。
+  static const int valueBase = 0x02;
 }
 
 // ---------------------------------------------------------------------------
@@ -764,6 +787,31 @@ class EBadgeRequest {
   /// 0x19 GET_STORAGE(§4.14)—— 无参数。
   static Uint8List getStorage() =>
       EBadgeCodec.encode(EBadgeCmd.h2dGetStorage, const []);
+
+  /// 0xFF DEBUG —— 协议外的私有调试命令。
+  ///
+  /// 帧形状:`01 FF 80 <len LE> | 01 01 00 <subcmd> [| <type> <len LE> <val>…]`。
+  /// 第一条 TLV 固定是 type=0x01 / len=1 的 subcmd;[values] 里每个元素追加一条
+  /// TLV,type 从 [EBadgeTlvDebug.valueBase] 起顺序递增。
+  ///
+  /// [values] 收 `List<int>` 而不是 `Uint8List`:调试时最常填的就是一两个字节的
+  /// 魔数,`[0x0A]` 比 `Uint8List.fromList([0x0A])` 好写太多;每个元素本身就是
+  /// 一条 TLV 的完整 value(想发 4 字节就给 4 个 int)。
+  ///
+  /// 只校验 [subcmd] 的取值范围 —— 载荷该长什么样由固件说了算,App 这层不猜。
+  static Uint8List debug(int subcmd, {List<List<int>> values = const []}) {
+    if (subcmd < 0x01 || subcmd > 0xFF) {
+      throw ArgumentError.value(subcmd, 'subcmd', 'subcmd 是 uint8,从 0x01 起');
+    }
+    return EBadgeCodec.encode(EBadgeCmd.h2dDebug, [
+      EBadgeTlv(EBadgeTlvDebug.subcmd, EBadgeCodec.u8(subcmd)),
+      for (var i = 0; i < values.length; i++)
+        EBadgeTlv(
+          EBadgeTlvDebug.valueBase + i,
+          Uint8List.fromList(values[i]),
+        ),
+    ]);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1087,6 +1135,18 @@ String eBadgeDescribe(EBadgeFrame f) {
       return 'STORAGE:总 ${mib(s.total)} 可用 ${mib(s.free)} '
           '壁纸 ${s.wpCount} 张占 ${mib(s.wpUsed)} margin=${s.fsMargin}';
 
+    case EBadgeCmd.h2dDebug:
+      final sc = f.value(EBadgeTlvDebug.subcmd);
+      final head = (sc == null || sc.isEmpty)
+          ? 'DEBUG(缺 subcmd)'
+          : 'DEBUG:subcmd=0x${sc[0].toRadixString(16).toUpperCase().padLeft(2, '0')}';
+      // 载荷逐条按十六进制列出:私有命令没有语义可解,原始字节才是有用的。
+      final rest = f.tlvs.where((t) => t.type != EBadgeTlvDebug.subcmd);
+      if (rest.isEmpty) return head;
+      return '$head,${rest.map((t) => '0x'
+          '${t.type.toRadixString(16).toUpperCase().padLeft(2, '0')}='
+          '${EBadgeCodec.hex(t.value, max: 16)}').join(' ')}';
+
     default:
       return '${f.cmdName}:${f.tlvs.length} 条 TLV';
   }
@@ -1399,6 +1459,19 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
         out.add(EBadgeViolation(
           '${f.cmdName} 是无参数命令,却带了 ${f.tlvs.length} 条 TLV(§4)',
         ));
+      }
+
+    // 0xFF DEBUG 是协议外的私有命令,没有条款可依 —— 这里只查它自己那条约定:
+    // 首个 TLV 必须是 type=0x01、len=1 的 subcmd。后续载荷一概不查,因为它们的
+    // 格式由固件定,查了就是猜。
+    case EBadgeCmd.h2dDebug:
+      final sc = f.value(EBadgeTlvDebug.subcmd);
+      if (sc == null) {
+        out.add(const EBadgeViolation('DEBUG 缺 subcmd(type 0x01)'));
+      } else if (sc.length != 1) {
+        out.add(EBadgeViolation('DEBUG subcmd 长度 ${sc.length}B,约定为 1B'));
+      } else if (sc[0] == 0x00) {
+        out.add(const EBadgeViolation('DEBUG subcmd=0x00,约定从 0x01 起'));
       }
   }
 
