@@ -331,11 +331,12 @@ void main() {
       );
       if (r.failure == EBadgeWifiFailure.closedWhileSending) {
         expect(r.bytesSent, lessThan(r.totalBytes));
+        expect(r.error, contains('§5.2'), reason: '写入中断要指向设备校验失败线索');
       } else {
         expect(r.bytesSent, r.totalBytes);
+        expect(r.error, contains('一个字节都没回'));
       }
       expect(r.progressText, contains('40B 头已发'));
-      expect(r.error, contains('§5.2'), reason: '要指向设备校验失败这条线索');
     });
 
     test('应答只回了 3 字节 → 报「应答被截断」并附原始字节', () async {
