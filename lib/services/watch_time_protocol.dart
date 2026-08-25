@@ -44,8 +44,8 @@ class WatchTimeProtocol {
       0x04,
       (seconds >> 24) & 0xFF,
       (seconds >> 16) & 0xFF,
-      (seconds >>  8) & 0xFF,
-       seconds        & 0xFF,
+      (seconds >> 8) & 0xFF,
+      seconds & 0xFF,
     ]);
   }
 }
