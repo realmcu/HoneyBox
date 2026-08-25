@@ -100,7 +100,7 @@ class WatchHealthSnapshot {
   final List<WatchSportRecord> sportRecords;
   final List<WatchSleepRecord> sleepRecords;
 
-  DateTime get _today => DateTime(syncedAt.year, syncedAt.month, syncedAt.day);
+  DateTime get _today => DateTime.utc(syncedAt.year, syncedAt.month, syncedAt.day);
 
   Iterable<WatchSportRecord> get _todaySport =>
       sportRecords.where((record) => _sameDate(record.timestamp, _today));

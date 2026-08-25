@@ -4,14 +4,13 @@ import 'package:honeybox/services/watch_health_protocol.dart';
 /// Two activity buckets on 2026-07-30 (08:00 and 08:15 local) plus a sleep
 /// run spanning the previous midnight.
 ///
-/// Timestamps are built from local `DateTime`s so the fixture stays stable
-/// regardless of the machine's timezone -- version 1 decodes UTC epoch seconds
-/// and converts to local before anything downstream sees them.
+/// Timestamps use `DateTime.utc()` to match the wire format: `_readTimestamp()`
+/// returns UTC-flagged `DateTime` objects (`isUtc: true`).
 WatchHealthSnapshot watchHealthFixture() => WatchHealthSnapshot.fromRecords(
       syncedAt: DateTime(2026, 7, 30, 12),
       sportRecords: [
         WatchSportRecord(
-          timestamp: DateTime(2026, 7, 30, 8),
+          timestamp: DateTime.utc(2026, 7, 30, 8),
           mode: WatchSportMode.run,
           steps: 600,
           caloriesDeciKcal: 125,
@@ -20,7 +19,7 @@ WatchHealthSnapshot watchHealthFixture() => WatchHealthSnapshot.fromRecords(
           hasHeartRate: true,
         ),
         WatchSportRecord(
-          timestamp: DateTime(2026, 7, 30, 8, 15),
+          timestamp: DateTime.utc(2026, 7, 30, 8, 15),
           mode: WatchSportMode.invalid,
           steps: 400,
           caloriesDeciKcal: 75,
@@ -31,15 +30,15 @@ WatchHealthSnapshot watchHealthFixture() => WatchHealthSnapshot.fromRecords(
       ],
       sleepRecords: [
         WatchSleepRecord(
-          timestamp: DateTime(2026, 7, 29, 23),
+          timestamp: DateTime.utc(2026, 7, 29, 23),
           state: WatchSleepState.deep,
         ),
         WatchSleepRecord(
-          timestamp: DateTime(2026, 7, 30, 1),
+          timestamp: DateTime.utc(2026, 7, 30, 1),
           state: WatchSleepState.light,
         ),
         WatchSleepRecord(
-          timestamp: DateTime(2026, 7, 30, 3),
+          timestamp: DateTime.utc(2026, 7, 30, 3),
           state: WatchSleepState.wake,
         ),
       ],
