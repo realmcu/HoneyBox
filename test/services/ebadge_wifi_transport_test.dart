@@ -317,11 +317,23 @@ void main() {
       );
 
       expect(r.succeed, isFalse);
-      expect(r.failure, EBadgeWifiFailure.closedWhileSending);
       expect(r.headerSent, isTrue, reason: '40B 头是先写出去的');
       expect(r.totalBytes, 64 * 1024);
-      // 具体写了多少视内核缓冲而定,但一定是「开了头、没写完」。
-      expect(r.bytesSent, lessThan(64 * 1024));
+      // flush 只保证数据进入本机内核缓冲。慢机器可能在正文写完前观察到 RST，
+      // 快机器（包括 CI Linux）也可能先把 64 KiB 全交给内核，随后才看到断线。
+      // 两种时序都合法，但 failure 必须与本机实际写入进度一致。
+      expect(
+        r.failure,
+        anyOf(
+          EBadgeWifiFailure.closedWhileSending,
+          EBadgeWifiFailure.ackMissing,
+        ),
+      );
+      if (r.failure == EBadgeWifiFailure.closedWhileSending) {
+        expect(r.bytesSent, lessThan(r.totalBytes));
+      } else {
+        expect(r.bytesSent, r.totalBytes);
+      }
       expect(r.progressText, contains('40B 头已发'));
       expect(r.error, contains('§5.2'), reason: '要指向设备校验失败这条线索');
     });
