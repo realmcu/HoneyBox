@@ -1,0 +1,11 @@
+﻿# Source code - always LF
+*.dart    text eol=lf
+*.sh      text eol=lf
+*.ps1     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+
+# Binary / generated - detect auto
+*.png     binary
+*.jpg     binary
+*.jks     binary

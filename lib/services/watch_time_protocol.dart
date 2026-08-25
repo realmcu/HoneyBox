@@ -28,13 +28,14 @@ class WatchTimeProtocol {
     // DO NOT use DateTime(localTime.year, ...) — that applies the device
     // timezone a second time.
     final seconds = DateTime.utc(
-      localTime.year,
-      localTime.month,
-      localTime.day,
-      localTime.hour,
-      localTime.minute,
-      localTime.second,
-    ).millisecondsSinceEpoch ~/ 1000;
+          localTime.year,
+          localTime.month,
+          localTime.day,
+          localTime.hour,
+          localTime.minute,
+          localTime.second,
+        ).millisecondsSinceEpoch ~/
+        1000;
 
     return Uint8List.fromList([
       BleCmd.watchTime,
