@@ -47,8 +47,7 @@ void main() {
     final item = event.items.single;
     expect(
       item.timestamp,
-      DateTime.fromMillisecondsSinceEpoch(0x12345678 * 1000, isUtc: true)
-          .toLocal(),
+      DateTime.fromMillisecondsSinceEpoch(0x12345678 * 1000, isUtc: true),
     );
     expect(item.steps, 0x1122);
     expect(item.distanceMeters, 0x3344);

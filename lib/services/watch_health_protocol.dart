@@ -297,14 +297,13 @@ class WatchHealthProtocol {
     return WatchHealthMarkerEvent(marker, value[0]);
   }
 
-  /// Unix epoch seconds, big-endian. Records are UTC on the wire.
+  /// Wall clock seconds, big-endian (1970 epoch, value = what the watch shows).
   static DateTime _readTimestamp(Uint8List bytes, int offset) {
     final seconds = (bytes[offset] << 24) |
         (bytes[offset + 1] << 16) |
         (bytes[offset + 2] << 8) |
         bytes[offset + 3];
-    return DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true)
-        .toLocal();
+    return DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true);
   }
 
   static int _readU16(Uint8List bytes, int offset) =>
