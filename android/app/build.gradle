@@ -29,7 +29,7 @@ final boolean hasReleaseSigning = [
 android {
     namespace = "com.honeygui.honeybox"
     compileSdk = 36
-    ndkVersion = flutter.ndkVersion
+     // ndkVersion = flutter.ndkVersion  ← app 模块无 native 代码，继承 mapfeature 的 NDK
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
