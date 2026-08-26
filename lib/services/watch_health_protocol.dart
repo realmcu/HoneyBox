@@ -12,7 +12,7 @@ import 'ble_cmd_registry.dart';
 ///   - SPORT_REQ carries a 1-byte Data type; it used to be empty.
 ///   - syncStart / more / syncEnd carry that same Data type byte; they used to
 ///     be required to be empty.
-///   - Sport records are 18 flat big-endian bytes keyed by Unix timestamp,
+///   - Sport records are 18 flat big-endian bytes keyed by wall clock seconds,
 ///     replacing 8-byte bitfields keyed by "packed date + 15-minute slot".
 ///   - Per-sample heart rate (key 0x0D) is gone. Version 1 only carries a
 ///     per-bucket AVERAGE bpm inside the sport record, valid when
