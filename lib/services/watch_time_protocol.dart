@@ -12,6 +12,7 @@ class WatchTimeProtocol {
 
   static const int minimumYear = 1970;
   static const int maximumYear = 2106;
+  static const int maximumWallClockSeconds = 0xFFFFFFFF;
 
   static Uint8List buildSetTime(DateTime localTime) {
     if (localTime.year < minimumYear || localTime.year > maximumYear) {
@@ -36,6 +37,14 @@ class WatchTimeProtocol {
           localTime.second,
         ).millisecondsSinceEpoch ~/
         1000;
+
+    if (seconds < 0 || seconds > maximumWallClockSeconds) {
+      throw ArgumentError.value(
+        localTime,
+        'localTime',
+        'Watch time must fit in unsigned 32-bit wall clock seconds',
+      );
+    }
 
     return Uint8List.fromList([
       BleCmd.watchTime,

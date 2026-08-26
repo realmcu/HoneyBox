@@ -30,6 +30,29 @@ void main() {
       expect(frame.sublist(5), [0xB0, 0xCF, 0x3B, 0x7F]);
     });
 
+    test('supports the maximum unsigned 32-bit timestamp', () {
+      final frame = WatchTimeProtocol.buildSetTime(
+        DateTime(2106, 2, 7, 6, 28, 15),
+      );
+
+      expect(frame.sublist(5), [0xFF, 0xFF, 0xFF, 0xFF]);
+    });
+
+    test('rejects timestamps beyond the unsigned 32-bit range', () {
+      expect(
+        () => WatchTimeProtocol.buildSetTime(
+          DateTime(2106, 2, 7, 6, 28, 16),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => WatchTimeProtocol.buildSetTime(
+          DateTime(2106, 12, 31, 23, 59, 59),
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('rejects years outside the protocol range', () {
       expect(
         () => WatchTimeProtocol.buildSetTime(DateTime(1969, 12, 31)),
