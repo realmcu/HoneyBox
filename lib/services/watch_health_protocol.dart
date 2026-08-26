@@ -86,11 +86,10 @@ abstract class WatchSportMode {
 
 /// One 15-minute activity bucket.
 ///
-/// [timestamp] is the bucket's END and flush time, matching the FlashDB record
-/// exactly. The statistical window is `(timestamp - bucketMinutes, timestamp]`.
-/// Buckets roll with device uptime and are NOT aligned to wall-clock
-/// 00/15/30/45 boundaries -- never treat this as a start time, and never apply
-/// a timezone or 15-minute shift to it.
+/// [timestamp] is the natural-quarter bucket start, matching the FlashDB record
+/// exactly. The statistical window is `[timestamp, timestamp + bucketMinutes)`.
+/// Both complete and partial buckets align to wall-clock 00/15/30/45 boundaries;
+/// use the timestamp directly for date/hour grouping without shifting it.
 class WatchSportItem {
   const WatchSportItem({
     required this.timestamp,
@@ -125,8 +124,8 @@ class WatchSportItem {
 
   /// Set when the device flushed early (shutdown, unbind, low battery, forced
   /// debug flush). [bucketMinutes] stays 15 regardless -- it describes the
-  /// statistical model, not how long this record actually sampled. Do not try
-  /// to derive a real start time from it.
+  /// logical interval, not how long this record actually sampled. The actual
+  /// sampling start/end cannot be derived from the wire record.
   final bool partialBucket;
 
   double get caloriesKcal => caloriesDeciKcal / 10;

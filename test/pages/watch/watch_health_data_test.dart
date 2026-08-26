@@ -111,6 +111,29 @@ void main() {
     expect(trend.points.where((point) => point.steps > 0), hasLength(2));
   });
 
+  test('attributes the bucket closed at midnight to the preceding day', () {
+    final midnightSnapshot = WatchHealthSnapshot.fromRecords(
+      syncedAt: DateTime(2026, 8, 27, 12),
+      sportRecords: [
+        WatchSportRecord(
+          timestamp: DateTime(2026, 8, 26, 23, 45),
+          mode: WatchSportMode.walk,
+          steps: 321,
+          caloriesDeciKcal: 20,
+          distanceMeters: 210,
+        ),
+      ],
+      sleepRecords: const [],
+    );
+
+    expect(midnightSnapshot.steps, 0);
+    final trend = midnightSnapshot.trend(WatchHealthPeriod.week);
+    expect(trend.points[trend.points.length - 2].label, '8/26');
+    expect(trend.points[trend.points.length - 2].steps, 321);
+    expect(trend.points.last.label, '8/27');
+    expect(trend.points.last.steps, 0);
+  });
+
   test('exposes null values instead of inventing unavailable data', () {
     final empty = WatchHealthSnapshot.fromRecords(
       syncedAt: DateTime(2026, 7, 30),

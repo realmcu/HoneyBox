@@ -4,9 +4,9 @@ enum WatchHealthPeriod { day, week, month }
 
 /// One 15-minute activity bucket, as stored after a version 1 sync.
 ///
-/// [timestamp] is the bucket's end/flush time and is authoritative -- version 0
-/// used to reconstruct it from a packed date plus a 15-minute slot index, which
-/// forced everything downstream to think in intra-day slots.
+/// [timestamp] is the natural-quarter bucket start and is authoritative. The
+/// record describes `[timestamp, timestamp + 15 minutes)`, including when a
+/// partial bucket contains samples for only part of that logical interval.
 class WatchSportRecord {
   const WatchSportRecord({
     required this.timestamp,
