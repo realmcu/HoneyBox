@@ -15,6 +15,10 @@ import '../../services/ebadge_wifi_transport.dart';
 import '../../services/image_jpeg.dart';
 import '../../services/raster.dart';
 import '../../theme/app_theme.dart';
+import '../shared/file_send_layout.dart';
+import 'ebadge_debug_config.dart';
+import 'ebadge_demo_presets.dart';
+import 'ebadge_stream_camera_source.dart';
 import 'ebadge_stream_demo_frames.dart';
 
 /// eBadge 协议调试页。
@@ -53,23 +57,24 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   EBadgeApInfo? _apInfo;
 
   bool _attaching = true;
-  bool _autoScroll = true;
+
+  /// 会被记住的那几个选择(封装开关 / 测试图档位 / 帧源 / 自动滚动)。
+  ///
+  /// 合成一个对象而不是四个散字段:这几项要一起存盘,散着放就得在每个 setState
+  /// 后面各写一遍保存调用,漏一处就是「这一项记不住」——而那种 bug 只有下次进
+  /// 页面才看得出来。[_updateConfig] 是唯一的写入口。
+  EBadgeDebugConfig _cfg = const EBadgeDebugConfig();
+
+  /// 配置是否已从磁盘读回。读盘是异步的,而界面在那之前就得画出来 —— 用默认值先画,
+  /// 读回后再 setState 刷一次。这个标志用来挡住**回写**:载入前任何一次 setState
+  /// 若触发保存,就会把默认值覆盖到用户上次存的配置上。
+  bool _cfgLoaded = false;
 
   /// 传图会话状态。设备侧只允许单会话(§5.7 非 Idle 收到新 Offer 回 BUSY),
   /// 所以按钮期间要禁用,不能靠用户自觉不连点。
   bool _xferBusy = false;
   EBadgeXferStage _xferStage = EBadgeXferStage.idle;
   String? _xferDetail;
-
-  /// 传图正文是否套那 16 字节设备图片头(`8B gui header + 4B 长度 + 4B 对齐`)。
-  ///
-  /// 做成开关而不是写死,是因为「设备到底要不要这层头」目前只能靠实测定论:图片页
-  /// 走的是带头那条路且显示正常,但调试页早先发裸 JFIF 时设备收下了却不显示。留一个
-  /// 开关,同一张图、同一份 JPEG 字节,两种封装各传一次就能把结论钉死 —— 改代码重编
-  /// 再传对比,中间变量太多。
-  ///
-  /// 默认带头:与图片页(`image_page`,quality<100)发出去的字节结构一致。
-  bool _xferWithHeader = true;
 
   /// 同屏预览(§6)会话状态。与传图共用「设备只允许单会话」这条约束(§6.7),
   /// 但两者是**不同的会话**:推流期间不能发传图 Offer,反之亦然,所以两个按钮
@@ -82,8 +87,21 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   String? _streamDetail;
   bool _streamStarting = false;
 
-  /// 推流帧游标。§6 的载荷由 App 提供,这里按 tick 轮转四张固定测试帧。
+  /// 推流帧游标。§6 的载荷由 App 提供,内置源按 tick 轮转四张固定测试帧,摄像头源
+  /// 则按取到的帧数累加(取不到不加,所以这个数就是**真正推出去的帧数**)。
   int _streamFrame = 0;
+
+  /// 摄像头帧源。懒建 —— 不选摄像头就完全不碰相机(也就不会申请权限)。
+  EBadgeStreamCameraSource? _camera;
+
+  /// 改一项配置:立刻反映到界面,并异步存盘。
+  ///
+  /// 存盘不 await —— 用户按下开关和这个开关生效之间不该插进一次文件 IO;失败也无需
+  /// 处理(见 [EBadgeDebugConfigStore])。载入完成前不写,免得默认值盖掉存档。
+  void _updateConfig(EBadgeDebugConfig next) {
+    setState(() => _cfg = next);
+    if (_cfgLoaded) EBadgeDebugConfigStore.save(next);
+  }
 
   /// 任一会话在跑 —— BLE 控制面就那一条,两条链路的握手混在一起,日志会乱到
   /// 没法看,设备也会回 BUSY。
@@ -114,10 +132,19 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     if (!mounted) return;
     final link = _link;
 
+    // 先读配置,不等 BLE —— attach() 可能要几秒(甚至连不上),而这几个开关的历史值
+    // 与设备连不连上无关。放在 attach 之后的话,连接失败时界面就永远停在默认档。
+    final cfg = await EBadgeDebugConfigStore.load();
+    if (!mounted) return;
+    setState(() {
+      _cfg = cfg;
+      _cfgLoaded = true;
+    });
+
     _logSub = link.onLogChanged.listen((_) {
       if (!mounted) return;
       setState(() {});
-      if (_autoScroll) _scrollToBottom();
+      if (_cfg.autoScroll) _scrollToBottom();
     });
 
     _frameSub = link.frames.listen((f) {
@@ -148,6 +175,10 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     // 全 App 没网」。stop() 内部会解绑。
     _stream?.stop();
     _stream = null;
+    // 相机也必须交还:它是原生单例,不关的话「拍照投屏」页再进去会打不开,而且
+    // 后台一直开着相机既耗电又会亮指示灯。
+    _camera?.close();
+    _camera = null;
     _logScroll.dispose();
     super.dispose();
   }
@@ -254,10 +285,10 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// 整条链路跑完,时序编排在 [EBadgeTransferSession] 里。
   ///
   /// **传的是示例图转出的 466×466 JPEG**,按设备图片格式封装(16B 头 + 裸 JFIF,
-  /// 见 [_demoPayload]),不选相册 —— 调试台要的是可重复的基准:同一张图、同一档
-  /// 质量,编码结果逐字节一致,CRC32 固定,设备回 XFER_ERR_VERIFY 就一定是链路问题
-  /// 而非文件问题。用真 JPEG 而不是合成字节,是因为设备收下之后还要解码上屏 ——
-  /// 递增字节能过 CRC 但解不出图,那样这条链路只测到一半。
+  /// 见 [_demoPayload]),不选相册 —— 调试台要的是可重复的基准:选定档位后编码结果
+  /// 逐字节一致,CRC32 固定,设备回 XFER_ERR_VERIFY 就一定是链路问题而非文件问题。
+  /// 用真 JPEG 而不是合成字节,是因为设备收下之后还要解码上屏 —— 递增字节能过 CRC
+  /// 但解不出图,那样这条链路只测到一半。体积档位见 [kEBadgeDemoPresets]。
   ///
   /// **副作用要知道**:连上设备热点期间原生侧会 `bindProcessToNetwork`,本进程所
   /// 有网络请求都改走这张无外网的热点,检查更新之类会失败;会话结束(含失败)会
@@ -269,7 +300,10 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     setState(() {
       _xferBusy = true;
       _xferStage = EBadgeXferStage.idle;
-      _xferDetail = '正在编码 $_demoImageSize×$_demoImageSize JPEG…';
+      // 首次编某档要几百毫秒,提示里带上档位和预估体积 —— 选了「最大 ~115K」时
+      // 等得明显更久,不说清会让人以为卡住了。
+      _xferDetail = '正在编码 ${_demoPreset.label} '
+          '$_demoImageSize×$_demoImageSize q=${_demoPreset.quality} JPEG…';
     });
 
     final Uint8List body;
@@ -397,10 +431,13 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     }
   }
 
-  /// 文件名跟着封装走:带头时正文是设备的 `.bin` 容器(与图片页、`file_cache.dart`
-  /// 的 `image.bin` 一致),不带头时才是真正的 `.jpg` 文件。
+  /// 文件名跟着封装和档位走:带头时正文是设备的 `.bin` 容器(与图片页、
+  /// `file_cache.dart` 的 `image.bin` 一致),不带头时才是真正的 `.jpg` 文件。
+  ///
+  /// 名字里带上档位标签,是因为设备侧文件是按名字落盘的:几个档位轮着传时,同名会
+  /// 互相覆盖,分不清屏上显示的是哪一次的结果。
   String get _demoFileName =>
-      _xferWithHeader ? 'wifi_demo.bin' : 'wifi_demo.jpg';
+      'wifi_demo_${_demoPreset.slug}.${_cfg.xferWithHeader ? 'bin' : 'jpg'}';
 
   /// Offer / EBXF 头里报的 file_type,同样跟着封装走。
   ///
@@ -412,47 +449,47 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// 解码器(而不是看容器里 offset 1 的 type),那带头时也得报 jpeg。传图日志里会
   /// 原样打出当前用的值,两种组合都能试。
   int get _demoFileType =>
-      _xferWithHeader ? EBadgeFileType.bin : EBadgeFileType.jpeg;
+      _cfg.xferWithHeader ? EBadgeFileType.bin : EBadgeFileType.jpeg;
 
-  /// 测试图的边长。466 是设备圆屏的物理分辨率(见图片页的 `_sizePresets`),
-  /// 传别的尺寸设备还得自己缩放,那就把「缩放对不对」也混进这条链路的变量里了。
-  static const int _demoImageSize = 466;
+  /// 测试图的边长,各档位共用 —— 见 [kEBadgeDemoImageSize]。
+  static const int _demoImageSize = kEBadgeDemoImageSize;
 
-  /// JPEG 质量。60 = 项目里各发送页统一的「MED / 一般画质」档(见轮播页和视频页的
-  /// `_qualityPresets`),调试台跟着用同一个数,好让这里测出来的体积和画质与实际
-  /// 业务发送路径可比。
-  static const int _demoJpegQuality = 60;
+  /// 当前档位。
+  EBadgeDemoPreset get _demoPreset => kEBadgeDemoPresets[_cfg.demoPresetIndex];
 
   /// 正文结构的一行描述,传图和导出共用。
   ///
   /// 把「带没带头」写进日志是必须的:两种封装的字节数只差 16,单看长度分不出来,
-  /// 而排查时最要紧的恰恰是「这一次发的到底是哪种」。
+  /// 而排查时最要紧的恰恰是「这一次发的到底是哪种」。档位同理 —— 日志里必须能看出
+  /// 这一行说的是哪张图、哪档质量。
   String _payloadShape(Uint8List body) {
-    const spec = '$_demoImageSize×$_demoImageSize q=$_demoJpegQuality '
+    final p = _demoPreset;
+    final spec = '${p.label} $_demoImageSize×$_demoImageSize q=${p.quality} '
         'baseline 4:2:0';
-    if (!_xferWithHeader) return '= 裸 JFIF($spec),无 16B 头';
+    if (!_cfg.xferWithHeader) return '= 裸 JFIF($spec),无 16B 头';
     return '= 16B 头 + ${body.length - kJpegHeaderBytes}B JPEG($spec)';
   }
 
-  static const String _demoImageAsset =
-      'assets/example/img/badge-preset-image-1.png';
-
-  /// 编码好的**裸 JFIF** 正文缓存(不含 16B 头)。
+  /// 编码好的**裸 JFIF** 正文缓存,按档位分开存(key = [EBadgeDemoPreset.slug])。
   ///
   /// 缓存的是裸流而不是整包:带头/不带头两种封装共用同一份 JPEG 字节,切换开关只是
   /// 套不套那 16 字节,不用重跑 DCT。这既省掉几百毫秒,更重要的是保证两次传输比的
   /// 是**同一张图**,否则「换了封装就好了」有可能只是因为重编出了别的字节。
   ///
+  /// 按档位缓存而不是只留一份:调试时常在几个档位之间来回切(小图能过、大图不能过
+  /// 这类对比),只存一份的话每次切回来都要重编。
+  ///
   /// 必须缓存:[encodeBaselineJpegYuv420] 是纯 Dart 的 DCT,466×466 要跑几百毫秒,
   /// 每次点按钮都重编会让 UI 明显卡一下,而且**每次编码结果都一样** —— 调试台要的
   /// 就是这个可重复性:CRC32 固定,设备回 XFER_ERR_VERIFY 就一定是链路问题,不是
   /// 文件问题。
-  Uint8List? _demoJpeg;
+  final Map<String, Uint8List> _demoJpegCache = <String, Uint8List>{};
 
-  /// 取(必要时先生成)测试用的 466×466 图片正文。
+  /// 取(必要时先生成)当前档位的图片正文。
   ///
-  /// [_xferWithHeader] 为真时返回 [buildImageJpegBin] 那种**带 16 字节设备头的
-  /// 容器**,和图片页(`image_page`,quality<100 那条路)发给设备的字节结构一致:
+  /// [EBadgeDebugConfig.xferWithHeader] 为真时返回 [buildImageJpegBin] 那种**带 16
+  /// 字节设备头的容器**,和图片页(`image_page`,quality<100 那条路)发给设备的字节
+  /// 结构一致:
   ///
   ///   0..7    8B gui header(offset 1 = 0x0C 标记 JPEG,2..5 是宽高 LE)
   ///   8..11   JPEG 数据长度(uint32 LE)
@@ -465,14 +502,15 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// 指裸 JPEG 还是设备自己那套 `.bin` 容器 —— 固件按 offset 1 的 type 分支找
   /// RGB565 还是 JPEG,那就该带头;但这一点未与固件对齐前,实测比推断可靠。
   Future<Uint8List> _demoPayload() async {
-    final jpeg = _demoJpeg ??= await _encodeDemoJpeg();
-    if (!_xferWithHeader) return jpeg;
+    final p = _demoPreset;
+    final jpeg = _demoJpegCache[p.slug] ??= await _encodeDemoJpeg(p);
+    if (!_cfg.xferWithHeader) return jpeg;
     return wrapImageJpegBin(jpeg, _demoImageSize, _demoImageSize);
   }
 
-  /// 把示例图编成 466×466 的裸 JFIF。只在首次(或改了尺寸/质量后)跑一次。
-  Future<Uint8List> _encodeDemoJpeg() async {
-    final bytes = await DefaultAssetBundle.of(context).load(_demoImageAsset);
+  /// 把 [p] 指定的示例图编成 466×466 的裸 JFIF。每个档位只在首次选中时跑一次。
+  Future<Uint8List> _encodeDemoJpeg(EBadgeDemoPreset p) async {
+    final bytes = await DefaultAssetBundle.of(context).load(p.asset);
     final src = await decodeUiImage(bytes.buffer.asUint8List());
     try {
       // cover 居中裁切:示例图不是正方形,拉伸会让圆屏上的画面变形。
@@ -485,7 +523,7 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
         rgba.rgba,
         _demoImageSize,
         _demoImageSize,
-        quality: _demoJpegQuality,
+        quality: p.quality,
       );
     } finally {
       src.dispose();
@@ -502,16 +540,18 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
 
   /// 0x08 起一条 §6 同屏预览会话。
   ///
-  /// **与拍照投屏(`/stream` 那条路径)没有任何关系**,不要混:
+  /// **与拍照投屏(`/stream` 那条路径)是两套协议**,不要混:
   ///
   /// | | 握手 | 帧头 | 画面来源 |
   /// | --- | --- | --- | --- |
   /// | 拍照投屏 | 自己那套 BLE 命令 | `0xA5 0xA9` 6B | 摄像头 + 原生编码器 |
-  /// | 本按钮(§6) | 0x08 / 0x09 | 'EBXF' 14B | 内嵌的四张固定测试帧 |
+  /// | 本按钮(§6) | 0x08 / 0x09 | 'EBXF' 14B | 内置测试帧 **或** 摄像头 |
   ///
-  /// 本按钮**不开摄像头、不碰原生编码器**。碰了就会和拍照投屏抢 GL 上下文和编码
-  /// 器实例,而调试台要的恰恰是「排除画面来源这个变量」——画面固定,设备上看到的
-  /// 任何异常都能归因到协议实现。
+  /// 帧源可选(见 [EBadgeStreamSource]):内置帧排除画面变量,摄像头压真实负载。选
+  /// 摄像头时会复用拍照投屏那套原生编码器的 JPEG 分支([EBadgeStreamCameraSource])
+  /// —— 原生 `CameraEncoder` 是单例,而这两页是设备页下的并列入口、不会同时存活,
+  /// 所以是「轮流用」而不是「抢」。协议部分两边始终独立:握手、帧头、会话形态都不
+  /// 一样。
   ///
   /// 推流是**没有终点的状态**,所以本方法只负责起会话;停止走 [_streamStop]。
   Future<void> _streamStart() async {
@@ -523,6 +563,23 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
       _streamDetail = null;
       _streamFrame = 0;
     });
+
+    // 帧源要在握手之前准备好:ticker 里的 nextFrame 是同步回调,帧还没就绪只能一路
+    // 跳过,设备那边 3 s 收不到帧就自己把会话清了(§6.4),看起来就像握手成功后立刻
+    // 掉线 —— 那会把「帧源没准备好」误报成协议问题。
+    final String? srcErr = await _prepareStreamSource();
+    if (!mounted) return;
+    if (srcErr != null) {
+      setState(() {
+        _streamStarting = false;
+        _streamDetail = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(srcErr), duration: const Duration(seconds: 4)),
+      );
+      return;
+    }
+    setState(() => _streamDetail = null);
 
     final session = EBadgeStreamSession(
       link: _link,
@@ -538,13 +595,18 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
             _stream = null;
           }
         });
+        // 会话自己挂掉时相机也要交还 —— 否则退不出页面的话相机一直开着耗电,
+        // 而且下次点开始会走到「已有会话」分支。
+        if (s == EBadgeStreamStage.failed || s == EBadgeStreamStage.stopped) {
+          _camera?.close();
+        }
       },
     );
 
     final err = await session.start(
       name: _streamName,
       requestedFps: _streamFps,
-      nextFrame: () => EBadgeStreamDemoFrames.at(_streamFrame++),
+      nextFrame: _nextStreamFrame,
     );
 
     if (!mounted) return;
@@ -554,9 +616,53 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
       _stream = err == null ? session : null;
     });
     if (err != null) {
+      await _camera?.close();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(err), duration: const Duration(seconds: 3)),
       );
+    }
+  }
+
+  /// 按当前帧源做好推流前的准备。返回 null 表示就绪,否则是失败原因。
+  Future<String?> _prepareStreamSource() async {
+    switch (_cfg.streamSource) {
+      case EBadgeStreamSource.builtin:
+        if (EBadgeStreamDemoFrames.ready) return null;
+        setState(() => _streamDetail = '正在编码 '
+            '${EBadgeStreamDemoFrames.count} 张 '
+            '${EBadgeStreamDemoFrames.width}×${EBadgeStreamDemoFrames.height} '
+            '测试帧…');
+        try {
+          await EBadgeStreamDemoFrames.prepare();
+          return null;
+        } catch (e) {
+          return '测试帧编码失败：$e';
+        }
+      case EBadgeStreamSource.camera:
+        setState(() => _streamDetail = '正在打开摄像头（'
+            '${EBadgeStreamCameraSource.size}×${EBadgeStreamCameraSource.size} '
+            'JPEG q=${EBadgeStreamCameraSource.quality}）…');
+        final cam = _camera ??= EBadgeStreamCameraSource()
+          ..onChanged = () {
+            if (mounted) setState(() {});
+          };
+        return cam.open(fps: _streamFps);
+    }
+  }
+
+  /// 这一 tick 要推的帧。返回 null 会话就跳过本 tick(§6.2 的 size 是 payload
+  /// 长度,推空帧没有意义)。
+  Uint8List? _nextStreamFrame() {
+    switch (_cfg.streamSource) {
+      case EBadgeStreamSource.builtin:
+        return EBadgeStreamDemoFrames.at(_streamFrame++);
+      case EBadgeStreamSource.camera:
+        // 取不到就跳过,**不重推上一帧** —— 见 takeLatest 的文档:重推会让相机卡死
+        // 和相机正常在设备屏上长得一样。
+        final f = _camera?.takeLatest();
+        if (f != null) _streamFrame++;
+        return f;
     }
   }
 
@@ -566,6 +672,8 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     final s = _stream;
     if (s == null) return;
     await s.stop();
+    // 相机跟着交还:开着不推是纯耗电,而且下次开始要重新按 fps 起编码。
+    await _camera?.close();
     if (mounted) setState(() => _stream = null);
   }
 
@@ -692,9 +800,9 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
                     count: _link.log.length,
                     violationCount:
                         _link.log.where((e) => e.hasViolation).length,
-                    autoScroll: _autoScroll,
+                    autoScroll: _cfg.autoScroll,
                     onAutoScrollChanged: (v) {
-                      setState(() => _autoScroll = v);
+                      _updateConfig(_cfg.copyWith(autoScroll: v));
                       if (v) _scrollToBottom();
                     },
                   ),
@@ -804,24 +912,41 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
             onTap: _saveDemoPayload,
           ),
         ]),
-        _XferHeaderToggle(
-          withHeader: _xferWithHeader,
+        _XferPresetRow(
+          index: _cfg.demoPresetIndex,
           enabled: !_busy,
-          onChanged: (v) => setState(() => _xferWithHeader = v),
+          onChanged: (i) => _updateConfig(
+              _cfg.copyWith(demoPresetSlug: kEBadgeDemoPresets[i].slug)),
+        ),
+        _XferHeaderToggle(
+          withHeader: _cfg.xferWithHeader,
+          enabled: !_busy,
+          onChanged: (v) => _updateConfig(_cfg.copyWith(xferWithHeader: v)),
         ),
         if (_xferStage != EBadgeXferStage.idle || _xferBusy)
           _XferProgress(stage: _xferStage, detail: _xferDetail),
         const _Hint(
           '按 §5.4 完整时序跑:0x10 Offer → 0x11 同意 → 0x13 AP_INFO → '
-          '连设备热点 → TCP 推 EBXF(40B 头)+ 正文 → 收 EBXR → 等 0x15 DONE。'
-          '传的是示例图转出的 $_demoImageSize×$_demoImageSize baseline 4:2:0 JPEG'
-          '(q=$_demoJpegQuality)。上面的开关决定正文封装:带头 = 8B gui header + '
-          '4B JPEG 长度 + 4B 对齐 + 裸 JFIF(与图片页一致,file_type 报 BIN);'
-          '不带头 = 只发裸 JFIF(file_type 报 JPEG)。两种共用同一份 JPEG 字节,'
-          '切换不会重编,所以两次传输比的是同一张图。'
-          '首次点按要先编码,约几百毫秒;之后复用同一份,CRC32 每次一致。'
-          '「导出测试图」存的就是当前开关下要发的那份字节 —— 带头时在电脑上看图'
-          '要先跳过前 16 字节。'
+          '连设备热点 → TCP 推 EBXF(40B 头)+ 正文 → 收 EBXR → 等 0x15 DONE。',
+        ),
+        _Hint(
+          '「测试图体积」选的是同一尺寸($_demoImageSize×$_demoImageSize)下不同'
+          '字节量的正文,从 ~6K 到 ~115K —— 尺寸各档一致,差的只有体积,所以'
+          '「小的能过、大的过不去」直接指向字节数/分块/超时,不会和分辨率混在一起。'
+          '各档独立缓存,来回切不重编;当前档为 ${_demoPreset.label}'
+          '(q=${_demoPreset.quality})。'
+          '文件名带档位标识,几档轮着传不会在设备上互相覆盖。',
+        ),
+        const _Hint(
+          '下面的开关决定正文封装:不带头(默认)= 只发裸 JFIF(file_type 报 JPEG),'
+          '与 §5.2 字面上的「原始文件字节」一致;带头 = 8B gui header + '
+          '4B JPEG 长度 + 4B 对齐 + 裸 JFIF(与图片页一致,file_type 报 BIN)。'
+          '同一档的两种封装共用同一份 JPEG 字节,切换不会重编,所以两次传输比的是'
+          '同一张图。首次点按要先编码,约几百毫秒;之后复用同一份,CRC32 每次一致。'
+          '「导出测试图」存的就是当前档位 + 当前开关下要发的那份字节 —— 带头时'
+          '在电脑上看图要先跳过前 16 字节。'
+          '本区的档位与开关(以及下方帧源、日志自动滚动)会记住,下次进来沿用 ——'
+          '调试要反复进出页面,每次回到默认档很容易把上一轮的结论套到这一轮上。'
           '注意:连热点期间本机所有网络请求都走设备热点(无外网),会话结束自动恢复。',
         ),
         const SizedBox(height: 16),
@@ -835,6 +960,18 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
             onStop: _streamStop,
           ),
         ]),
+        _StreamSourceRow(
+          source: _cfg.streamSource,
+          enabled: !_busy,
+          onChanged: (s) {
+            _updateConfig(_cfg.copyWith(streamSource: s));
+            // 切回内置帧就把相机交还 —— 留着开只是耗电,而且相机指示灯亮着会让人
+            // 以为还在用摄像头推。
+            if (s == EBadgeStreamSource.builtin) _camera?.close();
+          },
+        ),
+        if (_cfg.streamSource == EBadgeStreamSource.camera && _camera != null)
+          _StreamCameraPanel(source: _camera!),
         if (_streamStage != EBadgeStreamStage.idle || _streamStarting)
           _StreamProgress(stage: _streamStage, detail: _streamDetail),
         const _Hint(
@@ -843,11 +980,31 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
           '与 §5 的区别:流头只有 14 字节且不带文件名,EBXR 应答是可选的,'
           '设备侧帧间隔超 3 s 就会自行清理会话。',
         ),
+        _Hint(
+          _cfg.streamSource == EBadgeStreamSource.builtin
+              ? '推的是现场生成的 ${EBadgeStreamDemoFrames.count} 张 '
+                  '${EBadgeStreamDemoFrames.width}×'
+                  '${EBadgeStreamDemoFrames.height} '
+                  '测试帧(黑底 + 半幅白块四格轮转并印帧号,便于肉眼判断卡帧/丢帧)。'
+                  '画面固定、每帧体积固定,设备屏上任何异常都能归因到协议实现。'
+                  '首次点按要先编这四帧(纯 Dart 编码,约几百毫秒),之后复用。'
+              : '推的是摄像头实时画面,'
+                  '${EBadgeStreamCameraSource.size}×'
+                  '${EBadgeStreamCameraSource.size} JPEG '
+                  '(q=${EBadgeStreamCameraSource.quality},每帧独立成一个完整 '
+                  'JFIF,设备可逐帧解)。画面和每帧体积都在变,压的是真实负载下的'
+                  '时序 —— 这是固定帧测不出来的。只保留最新一帧,推不及的会被顶掉'
+                  '(「顶掉」数不是故障:相机按 fps 一直产,设备协商的 fps 可能更低,'
+                  '差额就落在这里),所以延迟不会越攒越大。',
+        ),
         const _Hint(
-          '推的是内嵌的 ${EBadgeStreamDemoFrames.count} 张 '
-          '${EBadgeStreamDemoFrames.width}×${EBadgeStreamDemoFrames.height} '
-          '测试帧(白块四格轮转,便于肉眼判断卡帧/丢帧)—— '
-          '本按钮不开摄像头、不碰拍照投屏的编码器,两条链路完全独立。',
+          '尺寸三条链路统一 ${EBadgeStreamCameraSource.size}×'
+          '${EBadgeStreamCameraSource.size} —— §6.2 的流头不带宽高,设备只能按 '
+          'JPEG 自身的 SOF 解,发别的尺寸就会把「设备缩放对不对」也混成变量。'
+          '摄像头帧源复用的是拍照投屏那套原生编码器的 JPEG 分支(GL 阶段把裁切/'
+          '旋转/缩放烘进输出,所以 466 不必是相机支持的尺寸);两页不会同时存活,'
+          '退页面或停推流都会把相机交还。'
+          '注意:不能用 H.264 —— 那是带 SPS/PPS 和帧间依赖的码流,单帧拿出来解不开。',
         ),
         const SizedBox(height: 16),
         const _SectionLabel('私有调试(协议文档之外)'),
@@ -1270,13 +1427,59 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-/// 命令区里的一段说明文字。按钮名(SEND_FILE)说不清「按下去会发生什么」,
-/// 而这里的命令都会真往设备里写数据,后果得先讲明白。
+/// 测试图档位选择行。用共享的 [PresetChip],与各发送页的尺寸/质量档长一样。
+class _XferPresetRow extends StatelessWidget {
+  const _XferPresetRow({
+    required this.index,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final int index;
+
+  /// 会话进行中禁止切换:正文在 [EBadgeTransferSession.run] 开始前就取好了,中途
+  /// 换档不会影响已发出的字节,却会让界面和日志说的不是同一件事。
+  final bool enabled;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '测试图体积',
+            style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (int i = 0; i < kEBadgeDemoPresets.length; i++)
+                PresetChip(
+                  label: kEBadgeDemoPresets[i].label,
+                  selected: i == index,
+                  onTap: enabled ? () => onChanged(i) : null,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 「带 16B 设备头」开关。
 ///
 /// 用 [SwitchListTile] 的紧凑版而不是两个单选按钮:这是个二元选择,而且两种取值都
 /// 要能一眼看出当前是哪个 —— 排查时最怕的就是不知道刚才那一发到底带没带头,所以
 /// 副标题直接把两种封装的字节结构写出来,不用回头翻代码或文档。
+///
+/// 取值由 [EBadgeDebugConfig.xferWithHeader] 持有并持久化,默认**不带头** ——
+/// 见那里的文档。
 class _XferHeaderToggle extends StatelessWidget {
   const _XferHeaderToggle({
     required this.withHeader,
@@ -1322,6 +1525,109 @@ class _XferHeaderToggle extends StatelessWidget {
   }
 }
 
+/// §6 帧源选择行。复用传图那边的 [PresetChip],两处「选一档」长得一样。
+class _StreamSourceRow extends StatelessWidget {
+  const _StreamSourceRow({
+    required this.source,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final EBadgeStreamSource source;
+
+  /// 会话进行中禁止切换:帧源是在 [EBadgeStreamSession.start] 之前准备好的,
+  /// 中途换源会让界面说的和实际推的不是一回事。
+  final bool enabled;
+  final ValueChanged<EBadgeStreamSource> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '帧源',
+            style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final s in EBadgeStreamSource.values)
+                PresetChip(
+                  label: s.label,
+                  selected: s == source,
+                  onTap: enabled ? () => onChanged(s) : null,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 摄像头帧源的本机预览 + 帧计数。
+///
+/// 预览是**必要的**而不是装饰:没有它，设备屏上画面不对时分不清是「相机没拍到东西」
+/// 还是「协议/解码有问题」。计数同理 —— 产帧、推帧、丢帧三个数放一起,才能看出瓶颈
+/// 在相机侧还是推送侧。
+class _StreamCameraPanel extends StatelessWidget {
+  const _StreamCameraPanel({required this.source});
+
+  final EBadgeStreamCameraSource source;
+
+  @override
+  Widget build(BuildContext context) {
+    final info = source.camera;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (info != null && info.textureId >= 0)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 120,
+                height: 120,
+                // GL 阶段已经把旋转/裁切/缩放烘进纹理,输出就是 1:1 的 466×466,
+                // 所以直接按正方形铺,不用再套 AspectRatio 换算。
+                child: Texture(textureId: info.textureId),
+              ),
+            ),
+          if (source.error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '相机错误：${source.error}',
+                style: const TextStyle(fontSize: 11.5, color: AppTheme.error),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              '编出 ${source.produced} 帧 / 推出 ${source.consumed} 帧 / '
+              '顶掉 ${source.dropped} 帧，最近一帧 '
+              '${formatFileSize(source.lastBytes)}',
+              style: const TextStyle(
+                fontSize: 11,
+                height: 1.3,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 命令区里的一段说明文字。按钮名(SEND_FILE)说不清「按下去会发生什么」,
+/// 而这里的命令都会真往设备里写数据,后果得先讲明白。
 class _Hint extends StatelessWidget {
   const _Hint(this.text);
   final String text;
