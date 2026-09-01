@@ -70,6 +70,35 @@ class EBadgeStreamSession {
   StreamSubscription<EBadgeFrame>? _failSub;
   bool _stopping = false;
 
+  /// `nextFrame` 返回 null 的次数 —— **帧源饿死**的直接读数。
+  ///
+  /// 这个数只有会话层能统计:传输层看不到「本 tick 压根没取到画面」这件事(那种
+  /// tick 根本不会调 sendFrame)。而它恰恰是排查帧间隔超时的第一个分岔 —— 它在涨
+  /// 就说明问题在相机侧,协议侧再怎么查都是白费。
+  int _emptyTicks = 0;
+  int get emptyTicks => _emptyTicks;
+
+  /// 因为上一帧还在写而整个跳过的 tick 数(连取帧都没取)。
+  ///
+  /// 与 [EBadgeStreamTransport.framesSkipped] 是两个数,不能合:那个是「取了帧但
+  /// 写不出去」,这个是「知道写不出去所以没取」。两者相加才是背压吃掉的总 tick 数。
+  int _busyTicks = 0;
+  int get busyTicks => _busyTicks;
+
+  /// 会话期间累计的警告数(帧间隔超时之类)。会话不会因此中止。
+  int _warnings = 0;
+  int get warnings => _warnings;
+
+  /// 最后一条警告的原文,以及它的归因。
+  ///
+  /// 留在这里(而不是只发进日志)是因为**日志会滚过去**:1 fps 下几十秒就把它顶出
+  /// 可见区,而拖滑条的人正需要一直盯着「上次警告是哪一侧的问题」来决定动哪个旋钮。
+  String? _lastWarning;
+  String? get lastWarning => _lastWarning;
+
+  EBadgeGapCause? _lastCause;
+  EBadgeGapCause? get lastCause => _lastCause;
+
   void _to(EBadgeStreamStage s, [String? detail]) {
     _stage = s;
     onStage?.call(s, detail);
@@ -121,29 +150,94 @@ class EBadgeStreamSession {
     _to(EBadgeStreamStage.streaming, 'fps=$_fps，已推 0 帧');
     _ticker = Timer.periodic(period, (_) async {
       if (_stage != EBadgeStreamStage.streaming) return;
-      final frame = nextFrame();
-      if (frame == null || frame.isEmpty) return;
-      final e = await tcp.sendFrame(frame);
-      if (e != null) {
-        _abort(e);
+      // 上一帧还在写就别取帧了:取了也只会被 sendFrame 丢掉,而内置源取一次就把
+      // 游标推进一格,白跳帧号会让「设备屏上的序号该不该连续」变得没法判断。
+      if (tcp.sending) {
+        _busyTicks++;
         return;
       }
-      _to(
-        EBadgeStreamStage.streaming,
-        'fps=$_fps，已推 ${tcp.framesSent} 帧 / ${tcp.bytesSent}B'
-        '${tcp.lastAck == null ? "" : "，EBXR=${tcp.lastAck!.succeed ? "成功" : "失败"}"}',
-      );
+      final frame = nextFrame();
+      if (frame == null || frame.isEmpty) {
+        // 帧源这一 tick 没画面。记下来 —— 这是「帧间隔为什么会超 3 s」的头号成因,
+        // 而它在传输层完全看不见(这种 tick 根本走不到 sendFrame)。
+        _emptyTicks++;
+        return;
+      }
+      final r = await tcp.sendFrame(frame);
+
+      // 只有实证才拆会话:设备关了连接、socket 写失败。
+      if (r.error != null) {
+        _abort(r.error!);
+        return;
+      }
+
+      // 警告只记日志,会话继续 —— 「间隔超了 3 s」是 App 自己推算的,设备既没回
+      // 0x16 也没关连接。按推测拆掉一条其实还活着的会话,会把真正要观察的现象
+      // (超时之后设备到底怎么反应)抹掉。
+      if (r.warning != null) {
+        _warnings++;
+        _lastWarning = r.warning;
+        _lastCause = r.diagnosis;
+        link.logInfo('同屏预览警告：${r.warning}', detail: _diagnosticSnapshot());
+      }
+
+      _to(EBadgeStreamStage.streaming, _progressText());
     });
     return null;
   }
+
+  /// 进度行。除了「推了多少」,还要能看出**瓶颈在哪一侧** —— 这几个数放在一起才有
+  /// 诊断价值:单看「已推 N 帧」不动,相机卡死和设备不读长得一模一样。
+  String _progressText() {
+    final b = StringBuffer('fps=$_fps');
+    // 实测帧间隔 vs 协商帧率:两者的差距就是这条链路真实能力的读数。
+    final gap = tcp.lastGap;
+    if (gap != null) b.write('（实测 ${gap.inMilliseconds}ms/帧）');
+    b.write('，已推 ${tcp.framesSent} 帧 / ${tcp.bytesSent}B');
+    // 实时带宽紧跟帧数:两者一起才能分开「帧少但每帧大」和「帧多但每帧小」——
+    // 同样的 KB/s 下这两种情况对设备解码的压力完全不同。
+    b.write('，${EBadgeStreamTransport.formatBps(tcp.bandwidthBps)}');
+    if (tcp.framesSkipped > 0) b.write('，跳 ${tcp.framesSkipped} 帧');
+    if (_emptyTicks > 0) b.write('，源空 $_emptyTicks 次');
+    if (_warnings > 0) b.write('，警告 $_warnings 次');
+    if (tcp.lastAck != null) {
+      b.write('，EBXR=${tcp.lastAck!.succeed ? "成功" : "失败"}');
+    }
+    return b.toString();
+  }
+
+  /// 警告随行的现场快照。
+  ///
+  /// 警告本身只说「间隔超了」,而处置取决于哪一侧的问题。把四个计数一起落进日志 ——
+  /// 日志会滚过去,事后回看时进度行早就被后续的覆盖掉了,只有这一行留着当时的现场。
+  String _diagnosticSnapshot() => '已推 ${tcp.framesSent} 帧 / '
+      '跳 ${tcp.framesSkipped} 帧 / 源空 $_emptyTicks 次 / '
+      '忙跳 $_busyTicks tick / 间隔超时累计 ${tcp.gapWarnings} 次 / '
+      // 带宽是警告现场里最能定性的一项:警告时它还在正常量级 ⇒ 帧在发、是设备不认;
+      // 掉到 0 ⇒ 确实断流了。事后回看时这个数已经变了,只有这一行留着当时的值。
+      '带宽 ${EBadgeStreamTransport.formatBps(tcp.bandwidthBps)}';
 
   /// 主动停止推流并清理。§6.4 的正常收尾:App 退出预览 → close TCP。
   Future<void> stop() async {
     if (_stopping) return;
     _stopping = true;
     final sent = tcp.framesSent;
+    // 快照要在 _cleanup 之前取:close() 之后这些计数还在,但把总结留到清理后再拼
+    // 容易在将来某次「顺手把计数也归零」的改动里悄悄变空。
+    final snapshot = _diagnosticSnapshot();
+    // 带宽总结也必须在清理前取,而且取的是**均值和峰值**不是瞬时值:瞬时值按「现在
+    // 往前推 3 s」算,停下来的这一刻它正在往 0 掉,拿它当总结等于每次都报 0。
+    final avg = EBadgeStreamTransport.formatBps(tcp.averageBandwidthBps);
+    final peak = EBadgeStreamTransport.formatBps(tcp.peakBandwidthBps);
+    final wire = tcp.wireBytesSent;
     await _cleanup();
-    _to(EBadgeStreamStage.stopped, '已停止，共推 $sent 帧');
+    // 停下来时把整场的账一起报出来 —— 有警告的那次会话最需要事后回看,而进度行
+    // 只留最后一瞬的状态。
+    _to(
+      EBadgeStreamStage.stopped,
+      '已停止，共推 $sent 帧 / $wire B（均 $avg，峰 $peak）'
+      '${_warnings == 0 ? "" : "（期间 $_warnings 次警告：$snapshot）"}',
+    );
     _stopping = false;
   }
 

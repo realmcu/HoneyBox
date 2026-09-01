@@ -10,6 +10,7 @@ import '../../providers/ebadge_link_provider.dart';
 import '../../services/ebadge_link.dart';
 import '../../services/ebadge_protocol.dart';
 import '../../services/ebadge_stream_session.dart';
+import '../../services/ebadge_stream_transport.dart';
 import '../../services/ebadge_transfer_session.dart';
 import '../../services/ebadge_wifi_transport.dart';
 import '../../services/image_jpeg.dart';
@@ -139,6 +140,9 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     setState(() {
       _cfg = cfg;
       _cfgLoaded = true;
+      // 上次选的是摄像头就把帧源对象建出来 —— 建出来才有面板,有面板才有滑条,而
+      // 帧率**只有在推流之前**能调。等到点「开始推流」时才建就太晚了。
+      if (cfg.streamSource == EBadgeStreamSource.camera) _ensureCamera();
     });
 
     _logSub = link.onLogChanged.listen((_) {
@@ -532,10 +536,19 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
 
   // ── §6 同屏预览(备用能力,仅协议调试)────────────────────────────────
 
-  /// 期望帧率。10 fps:够看出画面在动,又给协议时序留足余量 —— §6.4 的帧超时是
-  /// 3 s,10 fps 下每帧只占 100 ms 预算,不会因为本机慢而误触发设备侧清理。
+  /// 0x08 OFFER 里请求的帧率,**跟着帧源走**。
+  ///
+  /// - 内置帧:固定 [EBadgeStreamSource.defaultFps](1 fps)。四帧轮转是给肉眼数
+  ///   帧号用的,调快只剩一片闪烁,这个源没有「可调帧率」的需求。
+  /// - 摄像头:用滑条调出来的 [EBadgeDebugConfig.cameraFps](1–40)。它的用途就是
+  ///   加压,而压到哪一档才出问题正是要找的东西。
+  ///
   /// 设备可以回 decision=2 协商成更低的值,会话会照它给的走。
-  static const int _streamFps = 10;
+  int get _streamFps => switch (_cfg.streamSource) {
+        EBadgeStreamSource.builtin => EBadgeStreamSource.builtin.defaultFps,
+        EBadgeStreamSource.camera => _cfg.cameraFps,
+      };
+
   static const String _streamName = 'stream_demo.jpg';
 
   /// 0x08 起一条 §6 同屏预览会话。
@@ -552,6 +565,8 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// —— 原生 `CameraEncoder` 是单例,而这两页是设备页下的并列入口、不会同时存活,
   /// 所以是「轮流用」而不是「抢」。协议部分两边始终独立:握手、帧头、会话形态都不
   /// 一样。
+  ///
+  /// 请求的帧率也跟着帧源走(见 [_streamFps] / [EBadgeStreamSource.defaultFps])。
   ///
   /// 推流是**没有终点的状态**,所以本方法只负责起会话;停止走 [_streamStop]。
   Future<void> _streamStart() async {
@@ -642,12 +657,33 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
       case EBadgeStreamSource.camera:
         setState(() => _streamDetail = '正在打开摄像头（'
             '${EBadgeStreamCameraSource.size}×${EBadgeStreamCameraSource.size} '
-            'JPEG q=${EBadgeStreamCameraSource.quality}）…');
-        final cam = _camera ??= EBadgeStreamCameraSource()
-          ..onChanged = () {
-            if (mounted) setState(() {});
-          };
-        return cam.open(fps: _streamFps);
+            'JPEG q=${_cfg.cameraQuality}）…');
+        return _ensureCamera()
+            .open(fps: _streamFps, jpegQuality: _cfg.cameraQuality);
+    }
+  }
+
+  /// 拿到摄像头帧源对象,没有就建一个。
+  ///
+  /// **构造不碰硬件** —— 相机只在 [EBadgeStreamCameraSource.open] 里才真打开(权限
+  /// 也是那时候才申请)。所以选中帧源就能提前建好,让滑条面板露出来,而不会因此点亮
+  /// 相机指示灯或弹权限框。
+  EBadgeStreamCameraSource _ensureCamera() =>
+      _camera ??= EBadgeStreamCameraSource()
+        ..onChanged = () {
+          if (mounted) setState(() {});
+        };
+
+  /// 滑条改了质量:推流中也立刻下发,不用重开会话。
+  ///
+  /// 相机还没开(没在推流)时只存配置 —— 下次 [_prepareStreamSource] 会带上它。
+  Future<void> _applyCameraQuality(int q) async {
+    _updateConfig(_cfg.copyWith(cameraQuality: q));
+    final err = await _camera?.setQuality(q);
+    if (err != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err), duration: const Duration(seconds: 3)),
+      );
     }
   }
 
@@ -962,21 +998,51 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
         ]),
         _StreamSourceRow(
           source: _cfg.streamSource,
+          cameraFps: _cfg.cameraFps,
           enabled: !_busy,
           onChanged: (s) {
             _updateConfig(_cfg.copyWith(streamSource: s));
             // 切回内置帧就把相机交还 —— 留着开只是耗电,而且相机指示灯亮着会让人
-            // 以为还在用摄像头推。
-            if (s == EBadgeStreamSource.builtin) _camera?.close();
+            // 以为还在用摄像头推。反过来切到摄像头时把对象建出来(不开硬件),
+            // 滑条面板才会立刻出现 —— 帧率必须在开始推流之前调。
+            if (s == EBadgeStreamSource.builtin) {
+              _camera?.close();
+            } else {
+              _ensureCamera();
+            }
           },
         ),
         if (_cfg.streamSource == EBadgeStreamSource.camera && _camera != null)
-          _StreamCameraPanel(source: _camera!),
+          _StreamCameraPanel(
+            source: _camera!,
+            fps: _cfg.cameraFps,
+            quality: _cfg.cameraQuality,
+            // 推流中(含握手阶段)锁掉帧率:它已经进了 0x08 OFFER。
+            fpsEnabled: !_busy && _stream == null && !_streamStarting,
+            onFpsChanged: (v) => _updateConfig(_cfg.copyWith(cameraFps: v)),
+            onQualityChanged: _applyCameraQuality,
+          ),
         if (_streamStage != EBadgeStreamStage.idle || _streamStarting)
           _StreamProgress(stage: _streamStage, detail: _streamDetail),
-        const _Hint(
+        // 带宽条只在真的推起来之后才有意义:握手阶段一个字节都没出去,显示「—」
+        // 只会让人以为链路有问题。
+        if (_stream != null && _streamStage == EBadgeStreamStage.streaming)
+          _StreamBandwidth(tcp: _stream!.tcp),
+        // 警告独立成一条,不混进进度框:进度框在推流中每帧都重写,警告会被下一帧
+        // 覆盖掉 —— 而它恰恰是需要留在眼前的那一条。
+        if (_stream?.lastWarning != null)
+          _StreamWarning(
+            text: _stream!.lastWarning!,
+            cause: _stream!.lastCause,
+            count: _stream!.warnings,
+          ),
+        _Hint(
           '按 §6.4 时序跑:0x08 OFFER(fps=$_streamFps)→ 0x09 DECISION → '
           '0x13 AP_INFO → 连热点 → TCP 连续推「14B 流头 + JPEG」直到手动停止。'
+          '帧率跟着帧源走(内置帧固定 '
+          '${EBadgeStreamSource.builtin.defaultFps} fps、摄像头由滑条给,'
+          '$kEBadgeStreamFpsMin–$kEBadgeStreamFpsMax),设备可回 decision=2 '
+          '协商成更低的值。'
           '与 §5 的区别:流头只有 14 字节且不带文件名,EBXR 应答是可选的,'
           '设备侧帧间隔超 3 s 就会自行清理会话。',
         ),
@@ -988,12 +1054,20 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
                   '测试帧(黑底 + 半幅白块四格轮转并印帧号,便于肉眼判断卡帧/丢帧)。'
                   '画面固定、每帧体积固定,设备屏上任何异常都能归因到协议实现。'
                   '首次点按要先编这四帧(纯 Dart 编码,约几百毫秒),之后复用。'
+                  '本源按 ${EBadgeStreamSource.builtin.defaultFps} fps 推 ——'
+                  '每秒落一帧,能逐帧对着设备屏核帧号;十倍速下白块转一圈只要 '
+                  '400 ms,看着就是一片闪烁,反而读不出丢了哪一帧。'
+                  '这也是 3 s 帧超时下的安全底线:再慢就只能跳一次 tick。'
+                  '本源没有滑条 —— 帧率和画面都是它的固定量,可调就失去对照价值了。'
               : '推的是摄像头实时画面,'
                   '${EBadgeStreamCameraSource.size}×'
                   '${EBadgeStreamCameraSource.size} JPEG '
-                  '(q=${EBadgeStreamCameraSource.quality},每帧独立成一个完整 '
-                  'JFIF,设备可逐帧解)。画面和每帧体积都在变,压的是真实负载下的'
-                  '时序 —— 这是固定帧测不出来的。只保留最新一帧,推不及的会被顶掉'
+                  '(每帧独立成一个完整 JFIF,设备可逐帧解)。画面和每帧体积都在变,'
+                  '压的是真实负载下的时序 —— 这是固定帧测不出来的,所以帧率和质量'
+                  '都做成滑条:一边往上推帧率、往下压质量,一边看进度里的「跳 N 帧」'
+                  '从第几档开始攒,那个拐点就是这条链路的真实容量。'
+                  '质量能边推边调(原生每帧现场读),帧率要停下来才能改。'
+                  '只保留最新一帧,推不及的会被顶掉'
                   '(「顶掉」数不是故障:相机按 fps 一直产,设备协商的 fps 可能更低,'
                   '差额就落在这里),所以延迟不会越攒越大。',
         ),
@@ -1529,11 +1603,19 @@ class _XferHeaderToggle extends StatelessWidget {
 class _StreamSourceRow extends StatelessWidget {
   const _StreamSourceRow({
     required this.source,
+    required this.cameraFps,
     required this.enabled,
     required this.onChanged,
   });
 
   final EBadgeStreamSource source;
+
+  /// 摄像头源当前的帧率(滑条值)。只用来写标签。
+  ///
+  /// 不能在标签里用 [EBadgeStreamSource.defaultFps]:那是摄像头源的**初始**档,
+  /// 滑条调过之后就不再是实际帧率了 —— 而标签的全部意义就是「选之前先知道推多快」,
+  /// 显示一个过期的数比不显示更坏。
+  final int cameraFps;
 
   /// 会话进行中禁止切换:帧源是在 [EBadgeStreamSession.start] 之前准备好的,
   /// 中途换源会让界面说的和实际推的不是一回事。
@@ -1558,7 +1640,11 @@ class _StreamSourceRow extends StatelessWidget {
             children: [
               for (final s in EBadgeStreamSource.values)
                 PresetChip(
-                  label: s.label,
+                  // 帧率写进标签:两个源的帧率不一样,而按下开始之后要等握手跑完
+                  // 才在进度里看到 fps —— 那时候已经在推了。选之前就该知道推多快。
+                  label: '${s.label} '
+                      '${s == EBadgeStreamSource.camera ? cameraFps : s.defaultFps}'
+                      'fps',
                   selected: s == source,
                   onTap: enabled ? () => onChanged(s) : null,
                 ),
@@ -1570,15 +1656,34 @@ class _StreamSourceRow extends StatelessWidget {
   }
 }
 
-/// 摄像头帧源的本机预览 + 帧计数。
+/// 摄像头帧源的本机预览 + 帧计数 + 帧率/质量滑条。
 ///
 /// 预览是**必要的**而不是装饰:没有它，设备屏上画面不对时分不清是「相机没拍到东西」
 /// 还是「协议/解码有问题」。计数同理 —— 产帧、推帧、丢帧三个数放一起,才能看出瓶颈
 /// 在相机侧还是推送侧。
+///
+/// 滑条放在预览**右边**而不是下面:调质量时要盯着预览看画面糊到什么程度,上下排的话
+/// 一个在视线上一个在视线下,来回扫。左右并排才能一眼同时看到「画面」和「档位」。
 class _StreamCameraPanel extends StatelessWidget {
-  const _StreamCameraPanel({required this.source});
+  const _StreamCameraPanel({
+    required this.source,
+    required this.fps,
+    required this.quality,
+    required this.fpsEnabled,
+    required this.onFpsChanged,
+    required this.onQualityChanged,
+  });
 
   final EBadgeStreamCameraSource source;
+  final int fps;
+  final int quality;
+
+  /// 帧率能不能调。**推流中不能** —— 帧率已经写进 0x08 OFFER 报给设备了,会话的推流
+  /// 周期也在握手时定好,中途改只会让界面说的和协议里说的对不上。质量不受这个限制:
+  /// 它是纯本机编码参数,协议不关心,原生每帧现场读。
+  final bool fpsEnabled;
+  final ValueChanged<int> onFpsChanged;
+  final ValueChanged<int> onQualityChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1588,15 +1693,85 @@ class _StreamCameraPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (info != null && info.textureId >= 0)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 120,
-                height: 120,
-                // GL 阶段已经把旋转/裁切/缩放烘进纹理,输出就是 1:1 的 466×466,
-                // 所以直接按正方形铺,不用再套 AspectRatio 换算。
-                child: Texture(textureId: info.textureId),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 位置**一直占着**,相机没开时放一个占位框而不是什么都不放:否则一按
+              // 开始推流,滑条会被突然出现的预览挤到右边去,手指还停在滑条上。
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: info != null && info.textureId >= 0
+                      // GL 阶段已经把旋转/裁切/缩放烘进纹理,输出就是 1:1 的
+                      // 466×466,所以直接按正方形铺,不用再套 AspectRatio 换算。
+                      ? Texture(textureId: info.textureId)
+                      : const ColoredBox(
+                          color: AppTheme.surfaceContainerHighest,
+                          child: Center(
+                            child: Text(
+                              '预览\n（推流后出现）',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                height: 1.4,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // 滑条吃掉剩下的宽度。Expanded 而不是固定宽:这一行还要容得下 120 的
+              // 预览,窄屏上写死宽度会溢出。
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _StreamSlider(
+                      label: '帧率',
+                      // 单位写进读数而不是标签:调的时候眼睛盯着数字那一头。
+                      value: fps.toDouble(),
+                      valueText: '$fps fps',
+                      min: kEBadgeStreamFpsMin.toDouble(),
+                      max: kEBadgeStreamFpsMax.toDouble(),
+                      // 1 fps 一档。40 档在 100+ 逻辑像素上还能捏得准,再细就只是
+                      // 拖不到目标值。
+                      divisions: kEBadgeStreamFpsMax - kEBadgeStreamFpsMin,
+                      enabled: fpsEnabled,
+                      onChanged: (v) => onFpsChanged(v.round()),
+                    ),
+                    _StreamSlider(
+                      label: 'JPEG 质量',
+                      value: quality.toDouble(),
+                      valueText: 'q=$quality',
+                      min: kEBadgeStreamQualityMin.toDouble(),
+                      max: kEBadgeStreamQualityMax.toDouble(),
+                      // 5 一档:1 一档要拖 90 下才到头,而质量差 1 档肉眼看不出来。
+                      divisions:
+                          (kEBadgeStreamQualityMax - kEBadgeStreamQualityMin) ~/
+                              5,
+                      // 推流中也能调 —— 这是遇到背压时最快见效的旋钮。
+                      enabled: true,
+                      onChanged: (v) => onQualityChanged(v.round()),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (!fpsEnabled)
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Text(
+                '帧率已随 0x08 OFFER 报给设备，改它要先停推流；质量可以边推边调。',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  height: 1.3,
+                  color: AppTheme.textSecondary,
+                ),
               ),
             ),
           if (source.error != null)
@@ -1622,6 +1797,80 @@ class _StreamCameraPanel extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 帧率 / 质量滑条。两条长得一样,所以抽出来 —— 抄一遍必然在某次改样式时只改一条。
+///
+/// 标签和读数同一行、滑条另起一行:横向已经被预览占掉 120,再把三样东西挤进一行,
+/// 滑条就只剩几十像素可拖。
+class _StreamSlider extends StatelessWidget {
+  const _StreamSlider({
+    required this.label,
+    required this.value,
+    required this.valueText,
+    required this.min,
+    required this.max,
+    required this.divisions,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final String valueText;
+  final double min;
+  final double max;
+  final int divisions;
+  final bool enabled;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color textColor =
+        enabled ? AppTheme.textPrimary : AppTheme.textSecondary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              valueText,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                // 等宽:拖动时读数位数会变(9→10 fps),非等宽会让整行左右跳。
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: textColor,
+              ),
+            ),
+          ],
+        ),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            // 默认 Slider 上下留 24 逻辑像素的触摸区,两条叠起来就把预览挤高了。
+            trackHeight: 2,
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+          ),
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: enabled ? onChanged : null,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2022,6 +2271,228 @@ class _StreamProgress extends StatelessWidget {
                       ),
                     ),
                   ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 实时带宽条。按**线上字节**(payload + 每帧 14B 流头)统计,最近 3 s 滑动窗口。
+///
+/// **为什么自带一个 500ms 定时器,不跟着推流的 setState 走**:进度行只在成功推出
+/// 一帧时重写,而带宽最需要被看见的时刻恰恰是**没有帧推出去的时候** —— 那时页面
+/// 不会重画,读数就会永远冻在最后那一瞬的正常值上,画面已经卡死了而屏上还显示
+/// 「63 KB/s」。自己定时刷才能让它如实掉到 0。
+///
+/// 500ms 是取舍:再快对一个人眼读的数字没有意义,再慢则「掉到 0」这件事会迟到
+/// —— 而 0 出现的那个点正好对应设备该超时(§6.4 的 3 s),值得早看到。
+class _StreamBandwidth extends StatefulWidget {
+  const _StreamBandwidth({required this.tcp});
+
+  final EBadgeStreamTransport tcp;
+
+  @override
+  State<_StreamBandwidth> createState() => _StreamBandwidthState();
+}
+
+class _StreamBandwidthState extends State<_StreamBandwidth> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) {
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.tcp;
+    final bps = t.bandwidthBps;
+    // 读数为 0 要变色:这不是「慢」,而是「至少 3 s 没有字节出去」—— 设备那边正好
+    // 该按 §6.4 清理会话了。和「40 KB/s 偏低」完全是两种事,不能长得一样。
+    final stalled = bps == 0;
+    final color = stalled ? const Color(0xFFB06000) : AppTheme.secondary;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(stalled ? Icons.trending_down : Icons.speed,
+              size: 14, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      EBadgeStreamTransport.formatBps(bps),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: color,
+                        // 等宽数字:不然每次刷新数字宽度一变,整行就跳,盯着看很难受。
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      stalled ? '停流中（≥3s 无字节）' : '实时（近 3s）',
+                      style: TextStyle(fontSize: 11, color: color),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    // 均值和峰值一起给:瞬时值答「现在怎样」,这两个答「整场怎样」。
+                    // 峰值远高于当前值就说明中途被压下来过 —— 那是背压的痕迹,而
+                    // 瞬时读数看不出来。
+                    '均 ${EBadgeStreamTransport.formatBps(t.averageBandwidthBps)}'
+                    ' / 峰 ${EBadgeStreamTransport.formatBps(t.peakBandwidthBps)}'
+                    ' / 累计 ${_mib(t.wireBytesSent)}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      height: 1.35,
+                      color: AppTheme.textSecondary,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    // 明说算的是线上字节:核「码率对不对得上设置」时,差着 14B/帧
+                    // 的头会让人以为哪里漏了 —— 高帧率小图时这个头占比很可观。
+                    '含每帧 ${EBadgeStreamHeader.length}B 流头；'
+                    '图像正文 ${_mib(t.bytesSent)}',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      height: 1.3,
+                      color: AppTheme.textTertiary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _mib(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+    return '${(kb / 1024).toStringAsFixed(2)} MB';
+  }
+}
+
+/// 推流警告条。**故意和 [_StreamProgress] 的「已中止」长得不一样** —— 用琥珀色而
+/// 不是红色:会话还在跑,画面还在推。红色会让人立刻去点「停止推流」,而这条警告的
+/// 全部意义是「继续观察,顺手动一下旋钮」。
+///
+/// 单独一条而不是塞进进度框:进度框推流中每帧重写,警告会被下一帧覆盖。
+class _StreamWarning extends StatelessWidget {
+  const _StreamWarning({
+    required this.text,
+    required this.cause,
+    required this.count,
+  });
+
+  final String text;
+
+  /// 哪一侧的问题。null 表示传输层没能归因(理论上不该出现,但 UI 不该因此崩)。
+  final EBadgeGapCause? cause;
+
+  /// 累计次数。**偶发一次和一直在发生是两种情况** —— 前者多半是设备侧某帧解码慢,
+  /// 后者说明当前帧率/质量组合根本跑不动。
+  final int count;
+
+  /// 下一步该动哪个旋钮。归因只说「哪一侧」,这里说「怎么办」——
+  /// 调试台上最容易卡住的一步就是「知道是背压了,然后呢」。
+  String get _action => switch (cause) {
+        EBadgeGapCause.backpressure => '往下压 JPEG 质量（可边推边调，立刻生效）；压到底还在攒就停下来降帧率。',
+        EBadgeGapCause.starvation => '问题在帧源不在协议：看摄像头面板的「编出」还在不在涨 —— '
+            '不涨是相机卡住了，涨但「推出」不涨才是推送侧。',
+        null => '看下方计数判断是哪一侧。',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    const amber = Color(0xFFB06000);
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: amber.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: amber.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded, size: 14, color: amber),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  // 明说会话没停 —— 否则一条黄底警告出现时,第一反应还是「是不是断了」。
+                  '警告 ×$count（会话继续，未中止）',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: amber,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    text,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      height: 1.35,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    '→ $_action',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      height: 1.35,
+                      fontWeight: FontWeight.w500,
+                      color: amber,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

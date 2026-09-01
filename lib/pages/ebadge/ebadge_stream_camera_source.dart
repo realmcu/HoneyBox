@@ -53,9 +53,18 @@ class EBadgeStreamCameraSource {
   /// 只能按 JPEG 自身的 SOF 解,三条链路发不同尺寸只会多出一个待排除的变量。
   static const int size = kEBadgeDemoImageSize;
 
-  /// IJG 质量档。80 是原生 JPEG 分支的默认档,466×466 下每帧约 20–40 KB;
-  /// 再高会让单帧接近甚至超过设备的解码缓冲,而那是另一个问题,不该混进时序调试。
+  /// IJG 质量档的**默认值**。80 是原生 JPEG 分支的默认档,466×466 下每帧约
+  /// 20–40 KB。实际用哪一档由调用方经 [open] / [setQuality] 给 —— 单帧体积是这条
+  /// 链路的主要瓶颈,得能一边推一边调。
   static const int quality = 80;
+
+  /// 当前生效的质量档。
+  int get activeQuality => _quality;
+  int _quality = quality;
+
+  /// 当前生效的帧率(原生据此节流 GL 回读)。
+  int get activeFps => _fps;
+  int _fps = 10;
 
   /// 相机就绪信息(预览纹理 id 和尺寸)。null 表示还没就绪。
   CameraInfo? get camera => _camera;
@@ -124,10 +133,13 @@ class EBadgeStreamCameraSource {
   /// [fps] 传会话请求的帧率 —— 原生侧据此节流 GL 回读,不然软件编码器会跟着相机的
   /// 自动曝光帧率跑,白烧 CPU 也白编大量推不出去的帧。
   ///
+  /// [jpegQuality] 缺省沿用 [quality]。
+  ///
   /// [readyTimeout] 是等 `camera` 事件的上限。相机打不开时原生侧只会发 `error`,
   /// 万一连 error 都没有(权限被系统静默拒了之类),不设上限就会永远卡在这里。
   Future<String?> open({
     required int fps,
+    int? jpegQuality,
     Duration readyTimeout = const Duration(seconds: 10),
   }) async {
     if (_open) return null;
@@ -139,11 +151,13 @@ class EBadgeStreamCameraSource {
 
     _error = null;
     _camera = null;
+    _fps = fps;
+    _quality = jpegQuality ?? quality;
     _resetCounters();
     final ready = Completer<String?>();
     _ready = ready;
 
-    final cfg = _configFor(fps);
+    final cfg = _configFor(_fps, _quality);
     _encoder.listen();
     try {
       await _encoder.openCamera(cfg);
@@ -175,6 +189,28 @@ class EBadgeStreamCameraSource {
     return null;
   }
 
+  /// 改 JPEG 质量,**推流中也能改**。返回 null 表示已下发。
+  ///
+  /// 能实时生效是因为原生的 JPEG 分支每帧现场读 `config.jpegQuality`
+  /// (`CameraEncoder.encodeJpeg` 那一行),而 `setConfig` 把整个 config 换掉。
+  /// 所以下一帧就是新质量,不用重开相机 —— 这正是它作为「背压旋钮」的价值:
+  /// 一边看着进度里的跳帧数,一边往下调,拐点立刻就看出来了。
+  ///
+  /// **帧率没有对应的方法**,是有意的:帧率已经写进 0x08 OFFER 报给设备、会话的
+  /// 推流周期也在握手时就定了,中途改原生节流只会让「界面说的」和「协议里说的」
+  /// 对不上。改帧率必须重开会话。
+  Future<String?> setQuality(int jpegQuality) async {
+    _quality = jpegQuality;
+    if (!_open) return null;
+    try {
+      await _encoder.setConfig(_configFor(_fps, _quality));
+    } on PlatformException catch (e) {
+      return '调整 JPEG 质量失败：${e.message ?? e.code}';
+    }
+    onChanged?.call();
+    return null;
+  }
+
   /// 停编码并交还相机。幂等。
   Future<void> close() async {
     _open = false;
@@ -198,17 +234,18 @@ class EBadgeStreamCameraSource {
   }
 
   /// 帧源用的编码配置。**格式必须是 jpeg** —— 见类文档:h264 的单帧解不开。
-  static EncoderConfig _configFor(int fps) => EncoderConfig(
+  static EncoderConfig _configFor(int fps, [int? jpegQuality]) => EncoderConfig(
         format: EncoderFormat.jpeg,
         width: size,
         height: size,
         fps: fps,
-        jpegQuality: quality,
+        jpegQuality: jpegQuality ?? quality,
         // 调试台只关心推出去的字节,不落地文件;录文件会额外占 IO 和内存,
         // 还会在停止时触发 AVI 封装,和协议无关。
         recordToFile: false,
       );
 
   /// 暴露给测试:配置确实是 466×466 的 JPEG。
-  static EncoderConfig debugConfigFor(int fps) => _configFor(fps);
+  static EncoderConfig debugConfigFor(int fps, [int? jpegQuality]) =>
+      _configFor(fps, jpegQuality);
 }

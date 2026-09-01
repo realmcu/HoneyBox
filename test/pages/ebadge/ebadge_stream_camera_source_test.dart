@@ -44,6 +44,30 @@ void main() {
     expect(EBadgeStreamCameraSource.debugConfigFor(3).fps, 3);
   });
 
+  // 质量滑条的值必须真的进到下发给原生的 config 里。不然滑条动了、界面读数变了,
+  // 而每帧还是按 80 编 —— 「调质量没效果」就成了一个查不出因由的现象。
+  test('请求的 JPEG 质量透传到编码配置', () {
+    expect(EBadgeStreamCameraSource.debugConfigFor(10, 30).jpegQuality, 30);
+    expect(EBadgeStreamCameraSource.debugConfigFor(10, 100).jpegQuality, 100);
+  });
+
+  // 不给质量时沿用默认档:调用方(比如内部重建 config 的路径)漏传不该把画面质量
+  // 悄悄改掉。
+  test('不给质量时沿用默认档', () {
+    expect(EBadgeStreamCameraSource.debugConfigFor(10).jpegQuality,
+        EBadgeStreamCameraSource.quality);
+  });
+
+  // 相机没开时 setQuality 只记住值、不碰平台通道(碰了在测试里就会抛
+  // MissingPluginException),等 open() 带上它。用户在推流前先把质量拖好是常见操作。
+  test('相机未开时 setQuality 只记值，不打平台通道', () async {
+    final w = _wire();
+    expect(w.src.activeQuality, EBadgeStreamCameraSource.quality);
+    expect(await w.src.setQuality(35), isNull);
+    expect(w.src.activeQuality, 35);
+    expect(w.src.isOpen, isFalse);
+  });
+
   test('没有帧时 takeLatest 返回 null，不抛', () {
     final w = _wire();
     expect(w.src.takeLatest(), isNull);
