@@ -78,6 +78,12 @@ void main() {
       expect(cfg.cameraQuality, EBadgeStreamCameraSource.quality);
     });
 
+    // 从没选过升级包时是 null,而不是空串 —— 页面据此显示「尚未选择升级包」并把
+    // 「OTA 升级」按钮禁掉,不会拿一个空路径去 stat。
+    test('默认没有 OTA 升级包路径', () {
+      expect(const EBadgeDebugConfig().otaFilePath, isNull);
+    });
+
     test('滑条默认档落在自己的区间里', () {
       const cfg = EBadgeDebugConfig();
       expect(cfg.cameraFps,
@@ -111,7 +117,7 @@ void main() {
   });
 
   group('序列化', () {
-    test('六项都能存能读回', () {
+    test('七项都能存能读回', () {
       const cfg = EBadgeDebugConfig(
         xferWithHeader: true,
         demoPresetSlug: 'xxl',
@@ -119,6 +125,7 @@ void main() {
         autoScroll: false,
         cameraFps: 25,
         cameraQuality: 45,
+        otaFilePath: '/data/user/0/app/cache/ebadge_fw_v1.2.3.bin',
       );
       final back = EBadgeDebugConfig.fromJson(cfg.toJson());
       expect(back.xferWithHeader, isTrue);
@@ -127,6 +134,16 @@ void main() {
       expect(back.autoScroll, isFalse);
       expect(back.cameraFps, 25);
       expect(back.cameraQuality, 45);
+      expect(back.otaFilePath, '/data/user/0/app/cache/ebadge_fw_v1.2.3.bin');
+    });
+
+    // 只存路径,不存体积:文件随时会被删或被换成新一版固件,存下体积就有机会拿一个
+    // 过期数字去填 Offer 和 EBXF 头,而那两处报的必须是这一次真正推出去的字节数。
+    test('只记路径，不记体积或校验值', () {
+      final json = const EBadgeDebugConfig(otaFilePath: '/tmp/fw.bin').toJson();
+      expect(json['otaFilePath'], '/tmp/fw.bin');
+      expect(json.keys.where((k) => k.toLowerCase().contains('ota')),
+          ['otaFilePath']);
     });
 
     // 存名字而不是序号:枚举里插一项就会让旧配置里的序号指向另一个源,而「我明明
@@ -158,6 +175,7 @@ void main() {
       expect(back.autoScroll, isTrue);
       expect(back.cameraFps, const EBadgeDebugConfig().cameraFps);
       expect(back.cameraQuality, const EBadgeDebugConfig().cameraQuality);
+      expect(back.otaFilePath, isNull);
     });
 
     test('类型不对的值不抛，退回默认', () {
@@ -168,6 +186,7 @@ void main() {
         'autoScroll': 'no',
         'cameraFps': '30',
         'cameraQuality': null,
+        'otaFilePath': 12345,
       });
       expect(back.xferWithHeader, isFalse);
       expect(back.demoPresetSlug, kDefaultDemoPresetSlug);
@@ -175,6 +194,16 @@ void main() {
       expect(back.autoScroll, isTrue);
       expect(back.cameraFps, const EBadgeDebugConfig().cameraFps);
       expect(back.cameraQuality, const EBadgeDebugConfig().cameraQuality);
+      expect(back.otaFilePath, isNull);
+    });
+
+    // 空串一并当「没选过」:它只会让界面显示一个没有名字的文件,而 File('') 的
+    // exists() 恒为 false —— 两条路的结果一样,不如在入口就收敛掉。
+    test('空的 OTA 路径等同没选过', () {
+      expect(
+        EBadgeDebugConfig.fromJson(const {'otaFilePath': ''}).otaFilePath,
+        isNull,
+      );
     });
 
     // 越界的值**夹到区间**而不是退回默认:存下来的是用户上次调的值,滑条上界将来
@@ -268,6 +297,26 @@ void main() {
       final both = fps.copyWith(cameraQuality: 20);
       expect(both.cameraQuality, 20);
       expect(both.cameraFps, 40, reason: '改质量不该把帧率带回默认');
+    });
+
+    test('改 OTA 路径不动其余各项，改其余各项也不丢 OTA 路径', () {
+      const base = EBadgeDebugConfig();
+      final a = base.copyWith(otaFilePath: '/tmp/fw.bin');
+      expect(a.otaFilePath, '/tmp/fw.bin');
+      expect(a.cameraFps, base.cameraFps);
+      expect(a.demoPresetSlug, base.demoPresetSlug);
+
+      final b = a.copyWith(cameraFps: 30);
+      expect(b.otaFilePath, '/tmp/fw.bin', reason: '改帧率不该把选好的包丢掉');
+    });
+
+    // 可空字段没法用 `?? this.x` 表达「清空」—— 传 null 和不传是同一件事,所以另给
+    // 一个显式开关。少了它,选过的包就再也去不掉,只能整个重建配置对象。
+    test('clearOtaFilePath 能真的清掉路径', () {
+      final a = const EBadgeDebugConfig().copyWith(otaFilePath: '/tmp/fw.bin');
+      expect(a.copyWith(clearOtaFilePath: true).otaFilePath, isNull);
+      // 传 null 不等于清空(那是「没传」),这一点要钉住,否则将来有人以为能这么清。
+      expect(a.copyWith(otaFilePath: null).otaFilePath, '/tmp/fw.bin');
     });
   });
 }

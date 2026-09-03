@@ -112,6 +112,35 @@ class EBadgeCmd {
   /// 换一版固件同一个 subcmd 可能干完全不同的事,所以不能被产品功能依赖。
   static const int h2dDebug = 0xFF;
 
+  /// 0xE0–0xE6 OTA 家族 —— **协议文档里也没有这几条命令**,和 0xFF DEBUG 一样是
+  /// 厂商私有扩展,占的同样是 §3 既未定义也未保留的 0x30–0xFF 段。
+  ///
+  /// 号段照 §5 传图那一套**整段平移**,低位半字节一一对应:
+  ///
+  /// | 传图 | OTA  | 含义                                   |
+  /// |------|------|----------------------------------------|
+  /// | 0x10 | 0xE0 | OFFER:name / type / size / crc32       |
+  /// | 0x11 | 0xE1 | DECISION:同意或拒绝                    |
+  /// | 0x12 | ——   | GET_AP_INFO(**共用 0x12**)            |
+  /// | 0x13 | ——   | AP_INFO(**共用 0x13**)                |
+  /// | 0x14 | 0xE4 | PROGRESS:设备已收字节数                |
+  /// | 0x15 | 0xE5 | DONE:升级结果 —— 成功                  |
+  /// | 0x16 | 0xE6 | FAIL:升级结果 —— 失败                  |
+  ///
+  /// **0xE2 / 0xE3 刻意空着**:热点信息与「传的是什么」无关 —— 设备起的是同一个 AP、
+  /// 同一个 TCP 端口,再造一对命令只会让固件多一份一模一样的实现。空号留着也让「0xE_
+  /// 里缺的正好是共用的那两条」自己把这件事说清楚。
+  ///
+  /// 除了 cmd 号,时序(Offer → Decision → AP_INFO → 连热点 → TCP → Done/Fail)、
+  /// 各条的参数区结构、数据面封装(§5.2 的 40 字节 EBXF 头 + 正文 → 8 字节 EBXR)
+  /// 与传图**完全一致**,所以会话编排直接复用 `EBadgeTransferSession`,只把这五个号
+  /// 换掉(见 `EBadgeXferKind`)。
+  static const int h2dOtaOffer = 0xE0;
+  static const int d2hOtaDecision = 0xE1;
+  static const int d2hOtaProgress = 0xE4;
+  static const int d2hOtaDone = 0xE5;
+  static const int d2hOtaFail = 0xE6;
+
   /// 0x05–0x07、0x0A–0x0F、0x1B–0x2F 为协议保留段,未定义前禁止使用(§3 末行)。
   /// V1.2 的保留段是连续的 0x05–0x0F,V1.3 从中挖走 0x08/0x09 给同屏预览。
   static bool isReserved(int cmd) =>
@@ -137,6 +166,11 @@ class EBadgeCmd {
         d2hBattery => 'BATTERY',
         h2dGetStorage => 'GET_STORAGE',
         d2hStorageInfo => 'STORAGE_INFO',
+        h2dOtaOffer => 'OTA_OFFER',
+        d2hOtaDecision => 'OTA_DECISION',
+        d2hOtaProgress => 'OTA_PROGRESS',
+        d2hOtaDone => 'OTA_DONE',
+        d2hOtaFail => 'OTA_FAIL',
         h2dDebug => 'DEBUG',
         _ => isReserved(cmd) ? 'RESERVED' : 'UNKNOWN',
       };
@@ -249,6 +283,48 @@ abstract class EBadgeTlvStorage {
   static const int wpCount = 0x03; // uint16 LE
   static const int wpUsed = 0x04; // uint64 LE
   static const int fsMargin = 0x05; // uint32 LE,固定回 4096
+}
+
+// ── 0xE0–0xE6 OTA 家族(协议外的私有命令,见 [EBadgeCmd.h2dOtaOffer])────────
+//
+// 五张表逐号和 §5 里对应那条一致。**仍然分开列**,不直接复用 [EBadgeTlvOffer]
+// 那几张:§2.4 规定 type 只在本命令上下文内有意义,复用等于断言两条命令的参数区
+// 永远一样 —— 而 OTA 将来要加的字段(固件版本、目标分区、签名方式…)不会也进
+// 0x10。号一致是眼下的事实,不是约束;用测试钉住,不用共享常量绑死。
+
+/// 0xE0 OTA_OFFER —— 结构照 0x10(§4.7)
+abstract class EBadgeTlvOtaOffer {
+  static const int name = 0x01; // 必选,包名 ≤23B
+  static const int type = 0x02; // 必选,恒为 EBadgeFileType.bin
+  static const int size = 0x03; // 必选,uint32 LE,升级包正文字节数
+  static const int crc32 = 0x04; // 必选,uint32 LE,对整个正文
+  // 0x05 空着:0x10 那里是 replace_id(替换第几张壁纸),固件包没有对应物。
+  // 将来补固件版本/目标分区/签名方式,从 0x06 起。
+}
+
+/// 0xE1 OTA_DECISION —— 结构照 0x11(§4.8)
+abstract class EBadgeTlvOtaDecision {
+  static const int decision = 0x01; // 0拒绝 1同意 2超时
+  static const int reason = 0x02; // §2.6
+}
+
+/// 0xE4 OTA_PROGRESS —— 结构照 0x14(§4.10)
+abstract class EBadgeTlvOtaProgress {
+  static const int recv = 0x01; // uint32 LE
+  static const int total = 0x02; // uint32 LE
+}
+
+/// 0xE5 OTA_DONE —— 结构照 0x15(§4.11),但 file_id 降为可选
+abstract class EBadgeTlvOtaDone {
+  static const int fileId = 0x01; // 可选,uint16 LE(见 [EBadgeOtaDone])
+  static const int size = 0x02; // 必选,uint32 LE,设备实际收下的字节数
+  static const int name = 0x03; // 可选,设备侧记下的包名
+}
+
+/// 0xE6 OTA_FAIL —— 结构照 0x16(§4.12)
+abstract class EBadgeTlvOtaFail {
+  static const int reason = 0x01; // §2.6
+  static const int detail = 0x02; // 可选,≤23B
 }
 
 /// 0xFF DEBUG(协议外的私有调试命令,见 [EBadgeCmd.h2dDebug])
@@ -545,6 +621,37 @@ class EBadgeCodec {
     return bytes;
   }
 
+  /// 按字节上限**裁剪**字符串,不抛异常。
+  ///
+  /// 与 [str] 的分工是刻意的:凡是要进协议帧的字段一律走 [str],超限就抛 —— 静默
+  /// 截断会让设备收到半个 UTF-8 序列,还掩盖了「调用方给的值本来就不合法」。本函数
+  /// 只用在**名字来自协议管不到的地方**:OTA 升级包是用户从文件系统里挑的,
+  /// `ebadge_fw_v1.2.3_release.bin` 一上手就是 28 字节,而 [EBadgeXferHeader] 的
+  /// name 字段只有 23 字节。裁剪是调用方的显式决定(并且要把裁剪前后都记进日志),
+  /// 不是编解码层的默认行为。
+  ///
+  /// 按码点累加字节数,**绝不切断多字节序列**;后缀优先保留 —— 设备按名字分发时
+  /// 后缀往往比主干更要紧。后缀本身超过 8B 就当它不是后缀(那多半只是名字里带点)。
+  ///
+  /// [maxBytes] 需要至少装得下后缀加一个字符;协议里的 23B 远够。
+  static String fitStr(String s, int maxBytes) {
+    if (utf8.encode(s).length <= maxBytes) return s;
+    final dot = s.lastIndexOf('.');
+    var ext = dot > 0 ? s.substring(dot) : '';
+    if (utf8.encode(ext).length > 8) ext = '';
+    final budget = maxBytes - utf8.encode(ext).length;
+    final base = dot > 0 ? s.substring(0, dot) : s;
+    final out = StringBuffer();
+    var used = 0;
+    for (final r in base.runes) {
+      final n = utf8.encode(String.fromCharCode(r)).length;
+      if (used + n > budget) break;
+      out.writeCharCode(r);
+      used += n;
+    }
+    return '$out$ext';
+  }
+
   // ── 帧编码 ──────────────────────────────────────────────────────────
 
   /// 按 §2.3 拼一帧:`[ver, cmd, 0x80, params_len LE] + 顺序拼接的 TLV`。
@@ -776,6 +883,41 @@ class EBadgeRequest {
     ]);
   }
 
+  /// 0xE0 OTA_OFFER(协议外私有)—— 固件升级握手,参数区与 0x10 TRANSFER_OFFER
+  /// 逐条一致。
+  ///
+  /// 帧形状:`01 E0 80 <len LE> | 01 <n LE> <name> | 02 01 00 06 |
+  /// 03 04 00 <size u32 LE> | 04 04 00 <crc32 u32 LE>`。
+  ///
+  /// **[type] 不开成参数**:升级包恒为 [EBadgeFileType.bin] —— §2.7 那张表里没有
+  /// 「固件」这一档,bin(0x06)是唯一不宣称内容格式的一项。开成参数只会多出一条
+  /// 「帧里报 jpeg、EBXF 头里报 bin」的出错路径,而这两处必须是同一个值。
+  ///
+  /// [size] / [crc32] 都必须取**这一次真正要推的那份正文**:size 是设备划升级分区、
+  /// 判断装不装得下的依据;crc32 则要与 §5.2 EBXF 头里那个**完全相同**(校验规则
+  /// 第 3 条)。所以调用方一律从同一份 body 现取,不要拿配置里记的旧值 —— 这也是
+  /// `otaFilePath` 只存路径的原因。
+  ///
+  /// [name] 超 23 字节由 [EBadgeCodec.str] **直接抛**,不静默截断:名字被悄悄改短,
+  /// 设备侧落盘用的就是另一个名字,而这种错要等到对账时才看得出来。要截断请调用方
+  /// 先过 [EBadgeCodec.fitStr]。
+  static Uint8List otaOffer({
+    required String name,
+    required int size,
+    required int crc32,
+  }) {
+    if (size <= 0 || size > 0xFFFFFFFF) {
+      throw ArgumentError.value(size, 'size', 'OTA size 是 uint32,且不得为 0');
+    }
+    return EBadgeCodec.encode(EBadgeCmd.h2dOtaOffer, [
+      EBadgeTlv(EBadgeTlvOtaOffer.name,
+          EBadgeCodec.str(name, EBadgeLimits.fileName, 'name')),
+      EBadgeTlv(EBadgeTlvOtaOffer.type, EBadgeCodec.u8(EBadgeFileType.bin)),
+      EBadgeTlv(EBadgeTlvOtaOffer.size, EBadgeCodec.u32le(size)),
+      EBadgeTlv(EBadgeTlvOtaOffer.crc32, EBadgeCodec.u32le(crc32)),
+    ]);
+  }
+
   /// 0x12 GET_AP_INFO(§4.9)—— 无业务参数,params_len=0。
   static Uint8List getApInfo() =>
       EBadgeCodec.encode(EBadgeCmd.h2dGetApInfo, const []);
@@ -986,6 +1128,49 @@ class EBadgeTransferDone {
   }
 }
 
+/// 0xE5 OTA_DONE
+///
+/// 参数区结构和 [EBadgeTransferDone] 一样,但**不复用那个解析器**:它要求 file_id
+/// 必须在且非 0,而 file_id 的语义是「入库成了第几张壁纸」—— 固件包没有对应物,
+/// 固件很可能压根不带这条。拿严格的解析器去解,结果是解出 null、会话一直等到 20 s
+/// 超时,把一次**已经刷完的升级**报成失败。这是最不该出现的误报,所以这里只把 size
+/// 当必选:那才是唯一有对账价值的数(设备收下的字节数 vs 本机发出的字节数)。
+///
+/// 0x11/0xE1 那对 decision 能共用一个解析器,是因为两边的必选集合相同;这里不同,
+/// 所以分开。
+class EBadgeOtaDone {
+  const EBadgeOtaDone({required this.size, this.fileId, this.name = ''});
+
+  /// 设备确认收下的字节数。
+  final int size;
+
+  /// 设备若照 0x15 的样子带了 file_id 就记下来;没带是正常的。
+  final int? fileId;
+
+  /// 设备侧记下的包名。没带就是空串。
+  final String name;
+
+  /// 一行摘要。阶段线和日志摘要**共用这一份** —— 两处各写一遍迟早会漂。
+  String get summary {
+    final b = StringBuffer('size=${size}B');
+    if (fileId != null) b.write(' file_id=$fileId');
+    if (name.isNotEmpty) b.write(' name=$name');
+    return b.toString();
+  }
+
+  static EBadgeOtaDone? parse(EBadgeFrame f) {
+    final sz = f.value(EBadgeTlvOtaDone.size);
+    if (sz == null || sz.length < 4) return null;
+    final id = f.value(EBadgeTlvOtaDone.fileId);
+    final nm = f.value(EBadgeTlvOtaDone.name);
+    return EBadgeOtaDone(
+      size: EBadgeCodec.readU32le(sz),
+      fileId: (id != null && id.length >= 2) ? EBadgeCodec.readU16le(id) : null,
+      name: nm == null ? '' : utf8.decode(nm, allowMalformed: true),
+    );
+  }
+}
+
 /// 0x16 TRANSFER_FAIL
 class EBadgeTransferFail {
   const EBadgeTransferFail({required this.reason, this.detail});
@@ -1078,12 +1263,18 @@ String eBadgeDescribe(EBadgeFrame f) {
       return 'RESULT ← cmd 0x${r.cmd.toRadixString(16).padLeft(2, '0')}'
           ' ${EBadgeCmd.name(r.cmd)}:${EBadgeResultCode.name(r.code)}';
 
+    // 0x11 与 0xE1 的参数区逐号一致(见 [EBadgeTlvOtaDecision]),摘要没必要写两遍;
+    // 只把命令名换掉 —— 两条链路的日志在调试台上是混着看的,不区分就分不出这条
+    // 「同意」是谁给的。下面 PROGRESS / FAIL 两处同理。
     case EBadgeCmd.d2hTransferDecision:
+    case EBadgeCmd.d2hOtaDecision:
+      final tag =
+          f.cmd == EBadgeCmd.d2hOtaDecision ? 'OTA_DECISION' : 'DECISION';
       final d = EBadgeTransferDecision.parse(f);
-      if (d == null) return 'DECISION(参数缺失)';
+      if (d == null) return '$tag(参数缺失)';
       final reason =
           d.reason == null ? '' : ',reason=${EBadgeXferError.name(d.reason!)}';
-      return 'DECISION:${EBadgeDecision.name(d.decision)}$reason';
+      return '$tag:${EBadgeDecision.name(d.decision)}$reason';
 
     case EBadgeCmd.d2hJpgStreamDecision:
       final s = EBadgeStreamDecision.parse(f);
@@ -1106,22 +1297,33 @@ String eBadgeDescribe(EBadgeFrame f) {
           '${a.ipv4}:${a.port} $proto $sec';
 
     case EBadgeCmd.d2hTransferProgress:
+    case EBadgeCmd.d2hOtaProgress:
+      final tag =
+          f.cmd == EBadgeCmd.d2hOtaProgress ? 'OTA_PROGRESS' : 'PROGRESS';
       final p = EBadgeProgress.parse(f);
-      if (p == null) return 'PROGRESS(参数缺失)';
+      if (p == null) return '$tag(参数缺失)';
       final pct = (p.fraction * 100).toStringAsFixed(1);
-      return 'PROGRESS:${p.recv}/${p.total} ($pct%)';
+      return '$tag:${p.recv}/${p.total} ($pct%)';
 
     case EBadgeCmd.d2hTransferDone:
       final d = EBadgeTransferDone.parse(f);
       if (d == null) return 'DONE(参数缺失)';
       return 'DONE:file_id=${d.fileId} size=${d.size} name=${d.name}';
 
+    // 0xE5 单独一支:它的必选集合比 0x15 小(file_id 可选),见 [EBadgeOtaDone]。
+    case EBadgeCmd.d2hOtaDone:
+      final od = EBadgeOtaDone.parse(f);
+      if (od == null) return 'OTA_DONE(缺 size)';
+      return 'OTA_DONE:${od.summary}';
+
     case EBadgeCmd.d2hTransferFail:
+    case EBadgeCmd.d2hOtaFail:
+      final tag = f.cmd == EBadgeCmd.d2hOtaFail ? 'OTA_FAIL' : 'FAIL';
       final x = EBadgeTransferFail.parse(f);
-      if (x == null) return 'FAIL(参数缺失)';
+      if (x == null) return '$tag(参数缺失)';
       final detail =
           (x.detail == null || x.detail!.isEmpty) ? '' : ' — ${x.detail}';
-      return 'FAIL:${EBadgeXferError.name(x.reason)}$detail';
+      return '$tag:${EBadgeXferError.name(x.reason)}$detail';
 
     case EBadgeCmd.d2hBattery:
       final b = EBadgeBattery.parse(f);
@@ -1134,6 +1336,44 @@ String eBadgeDescribe(EBadgeFrame f) {
       String mib(int b) => '${(b / 1048576).toStringAsFixed(2)}MiB';
       return 'STORAGE:总 ${mib(s.total)} 可用 ${mib(s.free)} '
           '壁纸 ${s.wpCount} 张占 ${mib(s.wpUsed)} margin=${s.fsMargin}';
+
+    case EBadgeCmd.h2dOtaOffer:
+      // 四条必选逐个读出来:这一行的用处就是和「本机选的那个包」对眼。size 按十进制
+      // (u32 的 hex 谁也换算不动),crc32 反过来按十六进制 —— 它要和 EBXF 头里那个
+      // 字面比对。缺了写「缺失」而不是省略:省略会被当成正常。
+      final onm = f.value(EBadgeTlvOtaOffer.name);
+      final oty = f.value(EBadgeTlvOtaOffer.type);
+      final osz = f.value(EBadgeTlvOtaOffer.size);
+      final ocrc = f.value(EBadgeTlvOtaOffer.crc32);
+      final nmText =
+          onm == null ? '缺失' : utf8.decode(onm, allowMalformed: true);
+      final tyText =
+          (oty == null || oty.isEmpty) ? '缺失' : EBadgeFileType.name(oty[0]);
+      final szText = osz == null
+          ? '缺失'
+          : osz.length == 4
+              ? '${EBadgeCodec.readU32le(osz)}B'
+              : '长度异常(${osz.length}B)';
+      final crcText = ocrc == null
+          ? '缺失'
+          : ocrc.length == 4
+              ? '0x${EBadgeCodec.readU32le(ocrc).toRadixString(16).toUpperCase().padLeft(8, '0')}'
+              : '长度异常(${ocrc.length}B)';
+      // 将来从 0x06 起补的字段这里还没有语义可解,原样列 hex 比不列有用。
+      const known = {
+        EBadgeTlvOtaOffer.name,
+        EBadgeTlvOtaOffer.type,
+        EBadgeTlvOtaOffer.size,
+        EBadgeTlvOtaOffer.crc32,
+      };
+      final rest = f.tlvs.where((t) => !known.contains(t.type));
+      final tail = rest.isEmpty
+          ? ''
+          : ' ${rest.map((t) => '0x'
+              '${t.type.toRadixString(16).toUpperCase().padLeft(2, '0')}='
+              '${EBadgeCodec.hex(t.value, max: 16)}').join(' ')}';
+      return 'OTA_OFFER:name=$nmText type=$tyText size=$szText '
+          'crc32=$crcText$tail';
 
     case EBadgeCmd.h2dDebug:
       final sc = f.value(EBadgeTlvDebug.subcmd);
@@ -1334,12 +1574,18 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
         ));
       }
 
+    // 0x11 与 0xE1 的参数区逐号一致(见 [EBadgeTlvOtaDecision]),查法完全一样。
+    // 只把条款号换掉:拿「§4.8」去指责一条协议里根本不存在的命令,看红字的人第一
+    // 反应会是校验器搞错了,而不是固件填错了。下面 PROGRESS / FAIL 两处同理。
     case EBadgeCmd.d2hTransferDecision:
-      _need(out, f, EBadgeTlvDecision.decision, 'TLV_DECISION', '§4.8');
+    case EBadgeCmd.d2hOtaDecision:
+      final ref =
+          f.cmd == EBadgeCmd.d2hOtaDecision ? '0xE1 私有约定,参照 §4.8' : '§4.8';
+      _need(out, f, EBadgeTlvDecision.decision, 'TLV_DECISION', ref);
       final d = f.value(EBadgeTlvDecision.decision);
       if (d != null && d.isNotEmpty && d[0] > EBadgeDecision.timeout) {
         out.add(EBadgeViolation(
-          'decision=${d[0]},§4.8 只定义 0(拒绝)/ 1(同意)/ 2(超时)',
+          'decision=${d[0]},$ref 只定义 0(拒绝)/ 1(同意)/ 2(超时)',
         ));
       }
       // 拒绝/超时必须带原因,否则上层无法给用户解释为什么失败。
@@ -1347,7 +1593,7 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
           d.isNotEmpty &&
           d[0] != EBadgeDecision.accept &&
           f.value(EBadgeTlvDecision.reason) == null) {
-        out.add(const EBadgeViolation('decision 非 ACCEPT 却缺 TLV_REASON(§4.8)'));
+        out.add(EBadgeViolation('decision 非 ACCEPT 却缺 TLV_REASON($ref)'));
       }
 
     case EBadgeCmd.d2hApInfo:
@@ -1386,10 +1632,13 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
       }
 
     case EBadgeCmd.d2hTransferProgress:
-      _need(out, f, EBadgeTlvProgress.recv, 'TLV_RECV', '§4.10');
-      _need(out, f, EBadgeTlvProgress.total, 'TLV_TOTAL', '§4.10');
-      _len(out, f, EBadgeTlvProgress.recv, 'TLV_RECV', 4, '§4.10');
-      _len(out, f, EBadgeTlvProgress.total, 'TLV_TOTAL', 4, '§4.10');
+    case EBadgeCmd.d2hOtaProgress:
+      final ref =
+          f.cmd == EBadgeCmd.d2hOtaProgress ? '0xE4 私有约定,参照 §4.10' : '§4.10';
+      _need(out, f, EBadgeTlvProgress.recv, 'TLV_RECV', ref);
+      _need(out, f, EBadgeTlvProgress.total, 'TLV_TOTAL', ref);
+      _len(out, f, EBadgeTlvProgress.recv, 'TLV_RECV', 4, ref);
+      _len(out, f, EBadgeTlvProgress.total, 'TLV_TOTAL', 4, ref);
       final p = EBadgeProgress.parse(f);
       if (p != null && p.recv > p.total) {
         out.add(EBadgeViolation('recv=${p.recv} > total=${p.total},进度不可能超过总量'));
@@ -1406,8 +1655,21 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
         out.add(const EBadgeViolation('file_id=0,协议要求非 0(§4.11)'));
       }
 
+    // 0xE5 OTA_DONE:**只把 size 当必选**。file_id 是「入库成了第几张壁纸」的意思,
+    // 升级包没有对应物 —— 强制要求它,等于让一次已经刷完的升级因为少一条无意义的
+    // TLV 被标红(见 [EBadgeOtaDone])。带了就顺手查长度。
+    case EBadgeCmd.d2hOtaDone:
+      const doneRef = '0xE5 私有约定,参照 §4.11';
+      _need(out, f, EBadgeTlvOtaDone.size, 'TLV_SIZE', doneRef);
+      _len(out, f, EBadgeTlvOtaDone.size, 'TLV_SIZE', 4, doneRef);
+      _len(out, f, EBadgeTlvOtaDone.fileId, 'TLV_FILE_ID', 2, doneRef);
+      _cap(out, f, EBadgeTlvOtaDone.name, 'TLV_NAME', EBadgeLimits.fileName);
+
     case EBadgeCmd.d2hTransferFail:
-      _need(out, f, EBadgeTlvFail.reason, 'TLV_REASON', '§4.12');
+    case EBadgeCmd.d2hOtaFail:
+      final ref =
+          f.cmd == EBadgeCmd.d2hOtaFail ? '0xE6 私有约定,参照 §4.12' : '§4.12';
+      _need(out, f, EBadgeTlvFail.reason, 'TLV_REASON', ref);
       _cap(out, f, EBadgeTlvFail.detail, 'TLV_DETAIL', EBadgeLimits.failDetail);
       final rs = f.value(EBadgeTlvFail.reason);
       if (rs != null &&
@@ -1458,6 +1720,32 @@ List<EBadgeViolation> eBadgeValidate(EBadgeFrame f) {
       if (f.tlvs.isNotEmpty) {
         out.add(EBadgeViolation(
           '${f.cmdName} 是无参数命令,却带了 ${f.tlvs.length} 条 TLV(§4)',
+        ));
+      }
+
+    // 0xE0 OTA_OFFER 是协议外的私有命令,但参数区照 0x10 抄的,就按 0x10 的强度查:
+    // 四条必选缺任何一条,设备解出来的都是随机数,而这种错在链路上的表现是「传到一半
+    // 不动了」——离根因太远,必须在日志里当场点出来。
+    case EBadgeCmd.h2dOtaOffer:
+      const ref = '0xE0 私有约定,参照 §4.7';
+      _need(out, f, EBadgeTlvOtaOffer.name, 'TLV_OTA_NAME', ref);
+      _need(out, f, EBadgeTlvOtaOffer.type, 'TLV_OTA_TYPE', ref);
+      _need(out, f, EBadgeTlvOtaOffer.size, 'TLV_OTA_SIZE', ref);
+      _need(out, f, EBadgeTlvOtaOffer.crc32, 'TLV_OTA_CRC32', ref);
+      _cap(out, f, EBadgeTlvOtaOffer.name, 'TLV_OTA_NAME',
+          EBadgeLimits.fileName);
+      _len(out, f, EBadgeTlvOtaOffer.size, 'TLV_OTA_SIZE', 4, ref);
+      _len(out, f, EBadgeTlvOtaOffer.crc32, 'TLV_OTA_CRC32', 4, ref);
+      final osz = f.value(EBadgeTlvOtaOffer.size);
+      if (osz != null && osz.length == 4 && EBadgeCodec.readU32le(osz) == 0) {
+        out.add(const EBadgeViolation('TLV_OTA_SIZE=0,空升级包没有意义'));
+      }
+      // type 不是 bin 就说明发送方把壁纸那套语义套过来了 —— 升级包恒为 bin(0x06),
+      // 见 [EBadgeRequest.otaOffer]。
+      final oty = f.value(EBadgeTlvOtaOffer.type);
+      if (oty != null && oty.isNotEmpty && oty[0] != EBadgeFileType.bin) {
+        out.add(EBadgeViolation(
+          'TLV_OTA_TYPE=0x${_hx(oty[0])},升级包恒为 BIN(0x06)($ref)',
         ));
       }
 

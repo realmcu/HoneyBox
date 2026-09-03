@@ -192,6 +192,59 @@ void main() {
       expect(wire.sublist(40), payload);
     });
 
+    test('OTA 走的是同一条数据面:也是 40B 头 + 正文,头里 type=BIN', () async {
+      // 曾经给 OTA 开过一条「裸流」分支(不发头、应答可选)。现在两条链路的封装完全
+      // 一致,只有 BLE 那五个 cmd 号不同 —— 这条用例钉住「不存在第二种封装」。
+      final payload = body(300);
+      final crc = eBadgeCrc32(payload);
+      final received = serve(ok(), 40 + payload.length);
+
+      final r = await EBadgeWifiTransport().upload(
+        ip: server.address.address,
+        port: server.port,
+        name: 'fw.bin',
+        fileType: EBadgeFileType.bin,
+        body: payload,
+        crc32: crc,
+      );
+
+      expect(r.succeed, isTrue);
+      final wire = await received;
+      expect(wire.length, 40 + payload.length);
+      expect(
+        wire.sublist(0, 40),
+        EBadgeXferHeader.build(
+          fileType: EBadgeFileType.bin,
+          name: 'fw.bin',
+          size: payload.length,
+          crc32: crc,
+        ),
+      );
+      expect(wire.sublist(40), payload);
+    });
+
+    test('正文全写出去但设备一个字节都不回 —— 算失败,不算成功', () async {
+      // §5.2 要求设备必须回这 8 个字节。没有它就无从判断正文是否被接受,更不能替固件
+      // 断言「大概成了」—— 那会把一次失败的升级报成成功。
+      final payload = body(64);
+      final received = serve(null, 40 + payload.length);
+
+      final r = await EBadgeWifiTransport().upload(
+        ip: server.address.address,
+        port: server.port,
+        name: 'fw.bin',
+        fileType: EBadgeFileType.bin,
+        body: payload,
+        crc32: eBadgeCrc32(payload),
+      );
+
+      await received;
+      expect(r.succeed, isFalse);
+      expect(r.ack, isNull);
+      expect(r.failure, EBadgeWifiFailure.ackMissing);
+      expect(r.bytesSent, payload.length);
+    });
+
     test('crc32 用调用方给的值,不自己重算 —— §5.2 要求与 Offer 一致', () async {
       final received = serve(ok(), 40 + 16);
       // 故意给一个错的 CRC:头里必须原样出现它,而不是被「修正」成真值。

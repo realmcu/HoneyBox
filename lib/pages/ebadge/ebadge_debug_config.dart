@@ -1,6 +1,7 @@
 // ebadge_debug_config.dart
 //
-// 协议调试页的可记忆配置(封装开关 / 测试图档位 / 帧源 / 日志自动滚动)。
+// 协议调试页的可记忆配置(封装开关 / 测试图档位 / 帧源 / 日志自动滚动 /
+// OTA 升级包路径)。
 //
 // 为什么要持久化:调试这条链路是**反复进出页面**的活 —— 传一次、看设备屏、退出去
 // 改点别的、再进来传第二次。每次回到默认档等于每次都要重新点一遍那几个开关,而漏点
@@ -99,6 +100,7 @@ class EBadgeDebugConfig {
     this.autoScroll = true,
     this.cameraFps = _defaultCameraFps,
     this.cameraQuality = _defaultCameraQuality,
+    this.otaFilePath,
   });
 
   /// 摄像头源的默认帧率 / 质量。取自枚举与原生默认档,保持单一来源 ——
@@ -146,6 +148,17 @@ class EBadgeDebugConfig {
   /// 「跳 N 帧」)时**最快见效**的一档旋钮,所以它得能一边推一边调。
   final int cameraQuality;
 
+  /// 上次选中的 OTA 升级包路径;从没选过是 null。
+  ///
+  /// 记住它是为了**免掉每次进页面重选一遍**——调试 OTA 是反复进出页面的活,而升级包
+  /// 往往埋在下载目录的深处。
+  ///
+  /// **只记路径,别的一概不记**:不复制文件、不存体积、不存校验值。存下体积就意味着
+  /// 有机会拿一个过期数字去发包 —— 而 Offer 报的 size 和 EBXF 头必须是这一次真正要
+  /// 推的字节数。路径可能失效(文件被删、被换成新一版固件,Android 上选择器给的还是
+  /// 缓存目录副本),所以每次进页面都重新 stat 一遍,拿不到就在界面上说明白。
+  final String? otaFilePath;
+
   /// 当前档位在 [kEBadgeDemoPresets] 里的下标;slug 认不出就退回第 0 档。
   ///
   /// 界面用下标(ChoiceChip 的选中态),存储用 slug,转换收在这里一处 —— 两边各自
@@ -162,6 +175,8 @@ class EBadgeDebugConfig {
     bool? autoScroll,
     int? cameraFps,
     int? cameraQuality,
+    String? otaFilePath,
+    bool clearOtaFilePath = false,
   }) =>
       EBadgeDebugConfig(
         xferWithHeader: xferWithHeader ?? this.xferWithHeader,
@@ -170,6 +185,10 @@ class EBadgeDebugConfig {
         autoScroll: autoScroll ?? this.autoScroll,
         cameraFps: cameraFps ?? this.cameraFps,
         cameraQuality: cameraQuality ?? this.cameraQuality,
+        // 可空字段没法用 `?? this.x` 表达「清空」——传 null 和不传是同一件事。所以
+        // 另给一个显式开关,而不是让调用方绕道重建整个对象。
+        otaFilePath:
+            clearOtaFilePath ? null : (otaFilePath ?? this.otaFilePath),
       );
 
   Map<String, dynamic> toJson() => {
@@ -179,6 +198,7 @@ class EBadgeDebugConfig {
         'autoScroll': autoScroll,
         'cameraFps': cameraFps,
         'cameraQuality': cameraQuality,
+        'otaFilePath': otaFilePath,
       };
 
   /// 逐字段带默认值地读。
@@ -205,10 +225,15 @@ class EBadgeDebugConfig {
           kEBadgeStreamFpsMax),
       cameraQuality: _int(json['cameraQuality'], _defaultCameraQuality,
           kEBadgeStreamQualityMin, kEBadgeStreamQualityMax),
+      otaFilePath: _path(json['otaFilePath']),
     );
   }
 
   static bool _bool(Object? v, bool fallback) => v is bool ? v : fallback;
+
+  /// 读一个可空路径。空串一并当作「没选过」——它只会让界面显示一个没有名字的文件,
+  /// 而 [File('')] 的 exists() 恒为 false,两者都是同一个结果,不如在入口收敛掉。
+  static String? _path(Object? v) => v is String && v.isNotEmpty ? v : null;
 
   /// 读一个整数并**夹到合法区间**。
   ///

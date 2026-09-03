@@ -80,8 +80,11 @@ class EBadgeWifiTransport {
 
   /// 按 §5.2 上传一个文件，返回设备的 EBXR 应答。
   ///
+  /// 壁纸和 OTA 走的是**同一条**数据面:40 字节 EBXF 头 + 正文 → 8 字节 EBXR。两边
+  /// 只有 BLE 控制面的 cmd 号不同(见 [EBadgeXferKind]),这里不需要分支。
+  ///
   /// [onProgress] 给的是**本机已写出**的字节数,不等于设备已收 —— 后者以 BLE
-  /// 0x14 PROGRESS 为准。TCP 的 write 只是进了内核缓冲。
+  /// 0x14 / 0xE4 PROGRESS 为准。TCP 的 write 只是进了内核缓冲。
   ///
   /// [crc32] 必须与 Offer 里的 TLV_XFER_CRC32 一致（§5.2 校验规则第 3 条），
   /// 所以由调用方传入而不在这里重算 —— 重算一遍反而掩盖了两处不一致的 bug。
@@ -331,6 +334,8 @@ class EBadgeWifiResult {
   /// 异常文本之类的补充,由构造方填。
   final String? _detail;
 
+  /// 以设备的 EBXR 应答为准。没应答就不算成功 —— §5.2 要求设备必须回这 8 个字节,
+  /// 没有它就无从判断正文是否被接受。
   bool get succeed => ack?.succeed ?? false;
 
   /// 失败原因文本;成功(含设备判失败)时为 null。
@@ -342,11 +347,8 @@ class EBadgeWifiResult {
 
   /// 「到底传出去了多少」的一行摘要 —— 失败排查时最先要看的就是这个。
   String get progressText {
-    if (!headerSent) {
-      return failure == EBadgeWifiFailure.connect
-          ? '未建立连接，0 字节发出'
-          : '40B EBXF 头都没写出去';
-    }
+    if (failure == EBadgeWifiFailure.connect) return '未建立连接，0 字节发出';
+    if (!headerSent) return '40B EBXF 头都没写出去';
     const head = '40B 头已发';
     if (totalBytes <= 0) return '$head，正文为空';
     if (bytesSent == 0) return '$head，正文 0/$totalBytes B（0%）';
@@ -379,7 +381,10 @@ class EBadgeWifiResult {
   /// 给日志用的一行摘要。
   String describe() {
     if (failure != EBadgeWifiFailure.none) return error!;
-    final a = ack!;
+    final a = ack;
+    // failure=none 只由 .ok 构造出来,那里 ack 一定非空;写清而不是 `a!`,是为了让
+    // 将来多出一条「成功但没应答」的路径时,日志里出现的是这句话而不是崩溃。
+    if (a == null) return '正文已全部写出，但没有 EBXR 可读（$progressText）';
     if (a.succeed) return 'EBXR status=成功（$progressText）';
     return 'EBXR status=失败 reason=0x${a.reason.toRadixString(16).padLeft(2, '0')} '
         '${EBadgeXferError.name(a.reason)}（$progressText）';

@@ -77,6 +77,30 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   EBadgeXferStage _xferStage = EBadgeXferStage.idle;
   String? _xferDetail;
 
+  /// OTA(0xE0–0xE6)会话状态。**和传图分开记**,尽管两者跑的是同一个
+  /// [EBadgeTransferSession]:两个进度框在界面上是同时存在的,共用一组字段会让
+  /// OTA 的阶段显示到传图那一栏里 —— 而这两条链路的失败要能分开归因,否则「刚才
+  /// 那个 4/6 失败」到底是哪一次就说不清了。
+  bool _otaBusy = false;
+  EBadgeXferStage _otaStage = EBadgeXferStage.idle;
+  String? _otaDetail;
+
+  /// 当前选中升级包的字节数;null = 拿不到(没选过,或选过的文件已经不在了)。
+  ///
+  /// 每次都是现 stat 出来的,**不进配置文件**(见
+  /// [EBadgeDebugConfig.otaFilePath]):存下来就有机会拿过期数字去填 0xE0 的 size
+  /// TLV,而设备照它划/擦升级分区、也照它判「该收多少」,报错了就是收不全。
+  ///
+  /// 只用来显示和禁用按钮 —— 真正发出去的 size/crc32 一律取自下发那一刻现读的字节。
+  int? _otaSize;
+
+  /// 「配置里有路径,但文件已经不存在」。
+  ///
+  /// 和 `_otaSize == null` 分开是因为两者要说的话不一样:从没选过该提示「先选一个
+  /// 包」,而选过又没了(文件被删,或 Android 上 file_picker 给的缓存目录副本已被系统
+  /// 清掉)得明确说「上次选的文件不见了」—— 否则用户只会看到按钮是灰的,以为功能坏了。
+  bool _otaMissing = false;
+
   /// 同屏预览(§6)会话状态。与传图共用「设备只允许单会话」这条约束(§6.7),
   /// 但两者是**不同的会话**:推流期间不能发传图 Offer,反之亦然,所以两个按钮
   /// 互相禁用(见 [_busy])。
@@ -106,7 +130,7 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
 
   /// 任一会话在跑 —— BLE 控制面就那一条,两条链路的握手混在一起,日志会乱到
   /// 没法看,设备也会回 BUSY。
-  bool get _busy => _xferBusy || _streamStarting || _stream != null;
+  bool get _busy => _xferBusy || _otaBusy || _streamStarting || _stream != null;
 
   /// 日志区占屏高比例。0.42 是权衡出来的:再高命令区就装不下两行按钮,
   /// 再低日志一次只能看三四条,来回滚反而更慢。
@@ -144,6 +168,11 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
       // 帧率**只有在推流之前**能调。等到点「开始推流」时才建就太晚了。
       if (cfg.streamSource == EBadgeStreamSource.camera) _ensureCamera();
     });
+
+    // 记住的只是路径,文件本身可能早没了(见 [EBadgeDebugConfig.otaFilePath])。
+    // 进页面就 stat 一次,让界面一上来就说清「这个包还在不在」,而不是等用户点了
+    // 「升级」才报错。不 await:一次 stat 没必要挡住后面的 BLE attach。
+    _refreshOtaFile();
 
     _logSub = link.onLogChanged.listen((_) {
       if (!mounted) return;
@@ -532,6 +561,320 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     } finally {
       src.dispose();
     }
+  }
+
+  // ── OTA 升级(0xE0–0xE6,协议文档之外)───────────────────────────────
+
+  /// 0xE0 OTA_OFFER —— **只发那一帧**,不接后续上传。
+  ///
+  /// 与 [_transferOffer] 对 0x10 的分工相同:先单独确认设备认不认这条命令。回了
+  /// 0xE1 说明它照那套时序在走,一点回应都没有就说明这个 cmd 号固件还没实现。
+  /// 完整链路走「OTA 升级」。
+  ///
+  /// 四条 TLV(name/type/size/crc32)报的都是**当前选中那个包的真实值**,所以没选包
+  /// 时直接拒发而不是编一套数:设备很可能拿 size 去划/擦升级分区,报一个不打算推的假
+  /// 长度,坏账要留到下一次真升级时才暴露。
+  ///
+  /// 因此这一下会把整个包**读进内存**:crc32 只能从内容算,stat 给不出来。几十 MB 的
+  /// 包按一次要等一会儿,但拿一个假 CRC 去换这点等待毫无意义 —— 设备照 §5.2 拿它和
+  /// 数据面头里的值对,不一致就直接 close。
+  ///
+  /// 和 [_transferOffer] 一样不查 [_busy]:发一帧不占会话,而它恰恰是「会话卡住了
+  /// 设备还认不认命令」时最需要能按下去的那个按钮。
+  Future<void> _otaOffer() async {
+    final path = _cfg.otaFilePath;
+    if (path == null || path.isEmpty) {
+      _link.logError('未选择 OTA 升级包,0xE0 未发出',
+          detail: '这一帧要带包名/长度/CRC32,先用「选择升级包」挑一个本地文件');
+      return;
+    }
+    final Uint8List body;
+    try {
+      body = await File(path).readAsBytes();
+    } catch (e) {
+      // 顺手把界面上那个体积刷新掉:读不到通常就是文件已经没了,而信息行上还挂着上一
+      // 次 stat 的数字,不刷会让人以为包还在。
+      await _refreshOtaFile();
+      _link.logError('读不到 OTA 升级包,0xE0 未发出', detail: '$path\n$e');
+      return;
+    }
+    if (body.isEmpty) {
+      _link.logError('OTA 升级包是空文件,0xE0 未发出', detail: path);
+      return;
+    }
+    final name = _otaXferName(path);
+    final crc = eBadgeCrc32(body);
+    await _send(
+      EBadgeRequest.otaOffer(name: name, size: body.length, crc32: crc),
+      '0xE0 OTA_OFFER($name ${EBadgeFileType.name(_otaFileType)} '
+      '${body.length}B crc32=0x${crc.toRadixString(16).padLeft(8, '0')}'
+      ',不接上传)',
+    );
+  }
+
+  /// 选一个本地文件当升级包。**只把路径存进配置**,下次进页面直接沿用,不必再选一遍
+  /// (进页面时会 stat 一次确认文件还在,见 [_refreshOtaFile])。
+  ///
+  /// 不按扩展名过滤:固件包叫 `.bin` / `.img` / `.ota` / 带版本号的无后缀文件都见
+  /// 过,一过滤就会出现「我明明有这个包却选不中」。调试台宁可让人选错,也不该让人
+  /// 选不了 —— 选错在日志里(名字、体积、CRC32)一眼看得出来。
+  Future<void> _pickOtaFile() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        dialogTitle: '选择 OTA 升级包',
+        // 不要 withData:升级包动辄几 MB 到几十 MB,为了拿个名字先整份读进内存太亏,
+        // 而且真要发的时候还得重读一遍(选完到点发之间文件可能已经换了)。
+        withData: false,
+      );
+      // 判空用 `files.isEmpty` 而不是 `files.single`:取消时有的平台返回 null,有的
+      // 返回空列表,后者上 `single` 会直接抛。
+      final path =
+          res == null || res.files.isEmpty ? null : res.files.first.path;
+      if (path == null || path.isEmpty) {
+        messenger.showSnackBar(const SnackBar(content: Text('已取消选择')));
+        return;
+      }
+      // 只记路径,不复制文件 —— 发的就是用户选的那一份,换了新固件包盖回原路径就能
+      // 直接再发一次,不必再进选择器。
+      //
+      // 选文件期间用户可能已经退出页面(选择器是另一个 Activity),而 _updateConfig
+      // 里就是 setState。
+      if (!mounted) return;
+      _updateConfig(_cfg.copyWith(otaFilePath: path));
+      await _refreshOtaFile();
+      if (!mounted) return;
+      final size = _otaSize;
+      _link.logInfo(
+        size == null ? '已选择 OTA 升级包,但读不到内容' : '已选择 OTA 升级包',
+        detail: size == null ? path : '${_otaXferName(path)} ${size}B\n$path',
+      );
+      messenger.showSnackBar(SnackBar(
+        content: Text(size == null ? '选中的文件读不到' : '已选择,${_otaSizeText(size)}'),
+      ));
+    } catch (e) {
+      _link.logError('选择 OTA 升级包失败', detail: '$e');
+      messenger.showSnackBar(SnackBar(content: Text('选择失败：$e')));
+    }
+  }
+
+  /// 重新 stat 配置里记的那个升级包,刷新体积和「文件还在不在」。
+  ///
+  /// **三个时机都要调**:进页面(记住的路径可能早已失效)、刚选完(确认真的读得到)、
+  /// 以及点下升级之后([_otaTransfer] 自己再查一遍)。少任何一次,界面上显示的体积
+  /// 就有可能属于另一份文件 —— 而 0xE0 的 size/crc32 报的是**下发那一刻现读**的那份,
+  /// 两者不一致时页面会骗人。
+  Future<void> _refreshOtaFile() async {
+    final path = _cfg.otaFilePath;
+    if (path == null || path.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _otaSize = null;
+          _otaMissing = false;
+        });
+      }
+      return;
+    }
+    int? size;
+    try {
+      final f = File(path);
+      if (await f.exists()) size = await f.length();
+    } catch (_) {
+      // 权限被收回、路径其实指向目录、SAF 授权过期 —— 结局都一样:这个包用不了。
+      // 分别报错没有意义(用户能做的只有重选一次),所以统一按「拿不到」处理。
+      size = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _otaSize = size;
+      _otaMissing = size == null;
+    });
+  }
+
+  /// OTA 全链路下发:0xE0 → 0xE1 → 0x13 → 连热点 → TCP(EBXF 头 + 正文 → EBXR)
+  /// → 0xE5/0xE6。
+  ///
+  /// 时序编排整条复用 [EBadgeTransferSession](`kind: ota`)—— 除了那五个 cmd 号,OTA
+  /// 和 §5 传图走的是同一套流程、同一套包结构,见 [EBadgeXferKind]。
+  ///
+  /// 与 [_wifiTransfer] 的三处实质差别:
+  ///
+  /// 1. 正文来自**用户选的本地文件**,不是内置测试图 —— 所以每次发之前都要重新
+  ///    确认文件还在、并重新读一遍;
+  /// 2. 走 0xE0/0xE1/0xE4/0xE5/0xE6 那一组号,且额外容忍「设备跳过 0xE1 直接报
+  ///    0x13」(见 `EBadgeTransferSession._awaitGo`);
+  /// 3. 存储不足**只提示不拦**(见下面那段注释)。
+  ///
+  /// **副作用同传图**:连上设备热点期间本进程所有网络请求都改走这张无外网的热点,
+  /// 会话结束(含失败)自动解绑。
+  Future<void> _otaTransfer() async {
+    if (_busy) return;
+
+    final path = _cfg.otaFilePath;
+    if (path == null || path.isEmpty) {
+      _link.logError('未选择 OTA 升级包,未发起升级', detail: '先用「选择升级包」挑一个本地文件');
+      return;
+    }
+
+    // 发送前**必须**再查一次存在性,不能信界面上那个体积:配置里的路径可能是上次
+    // (甚至上个月)存下来的,而进页面那一次 stat 之后文件也还可能被删/被换。少这
+    // 一步,故障会推迟到 readAsBytes 抛异常 —— 那时设备已经收下 Offer 停在 WaitSta,
+    // 得等 §5.5 的 60 s 超时才能再试一次。
+    final file = File(path);
+    var exists = false;
+    try {
+      exists = await file.exists();
+    } catch (_) {
+      exists = false;
+    }
+    if (!exists) {
+      await _refreshOtaFile();
+      _link.logError('OTA 升级包已不存在,未发起升级', detail: path);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('升级包已不存在,请重新选择'),
+        duration: const Duration(seconds: 4),
+        backgroundColor: Theme.of(context).colorScheme.error,
+      ));
+      return;
+    }
+    if (!mounted) return;
+
+    setState(() {
+      _otaBusy = true;
+      _otaStage = EBadgeXferStage.idle;
+      // 大包读盘要一会儿,先把状态摆出来 —— 否则按下按钮后界面毫无变化,人会以为
+      // 没点上而去连点(而按钮此刻已经靠 _busy 禁掉了,连点只是白等)。
+      _otaDetail = '正在读取升级包…';
+    });
+
+    final Uint8List body;
+    try {
+      body = await file.readAsBytes();
+    } catch (e) {
+      _link.logError('读取 OTA 升级包失败', detail: '$path\n$e');
+      if (mounted) {
+        setState(() {
+          _otaBusy = false;
+          _otaStage = EBadgeXferStage.failed;
+          _otaDetail = '读取升级包失败：$e';
+        });
+      }
+      return;
+    }
+    if (!mounted) return;
+
+    if (body.isEmpty) {
+      // 0 字节包直接拦掉:Offer 报 size=0 没有任何意义,设备要么回 0xE6 要么把空
+      // 文件当成一次「成功」刷写,后者比失败更麻烦。
+      _link.logError('OTA 升级包是空文件,未发起升级', detail: path);
+      setState(() {
+        _otaBusy = false;
+        _otaStage = EBadgeXferStage.failed;
+        _otaDetail = '升级包是空文件(0 B)';
+      });
+      return;
+    }
+
+    // 存储只提示、不拦:0x1A 报的 free 是**壁纸那个文件系统**的余量,而固件包大概率
+    // 落在独立的升级分区上 —— 拿壁纸的余量去拦 OTA,会把本来能升的包挡在门外。设备
+    // 收到 Offer 会自己复检容量(§4.7),真不够它回 0xE6,那个判断比这里准。
+    final storage = _storage;
+    if (storage != null && !storage.canFit(body.length)) {
+      _link.logInfo(
+        '提示:按 0x1A 的余量算装不下这个包,仍继续下发',
+        detail: '§2.9 的 free ≥ size + ${EBadgeLimits.fsMargin} 说的是壁纸分区;'
+            '升级包可能落在别的分区,故此处只提示。'
+            '当前 free=${storage.free} size=${body.length}',
+      );
+    }
+
+    final name = _otaXferName(path);
+    final base = _baseName(path);
+    _link.logInfo(
+      '升级包已就绪',
+      detail: '$name ${body.length}B '
+          'file_type=${EBadgeFileType.name(_otaFileType)}'
+          // 名字被裁过就把原名一起记上:设备侧按名字落盘,对不上时第一件要确认的
+          // 就是「我选的和它收到的是不是同一个名字」。
+          '${name == base ? '' : '(原名 $base,已裁到 ${EBadgeLimits.fileName}B)'}'
+          '\n$path',
+    );
+
+    final session = EBadgeTransferSession(
+      link: _link,
+      wifi: EBadgeWifiTransport(),
+      kind: EBadgeXferKind.ota,
+      onStage: (s, detail) {
+        if (!mounted) return;
+        setState(() {
+          _otaStage = s;
+          _otaDetail = detail;
+        });
+      },
+    );
+
+    try {
+      final err = await session.run(
+        name: name,
+        type: _otaFileType,
+        body: body,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(err == null ? 'OTA 下发完成' : 'OTA 失败,详情见上方进度框'),
+          duration: Duration(seconds: err == null ? 3 : 5),
+          backgroundColor:
+              err == null ? null : Theme.of(context).colorScheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _otaBusy = false);
+    }
+  }
+
+  /// 会话里用的文件名:取路径最后一段,并裁到 §2.8 的 23 字节。
+  ///
+  /// 这个名字**两处都要上线**:0xE0 的 TLV_NAME,以及数据面那 40 字节 EBXF 头。所以
+  /// 裁不是保险而是硬要求 —— 两边写字符串走的 [EBadgeCodec.str] 遇到超长名字**直接
+  /// 抛**,而真实固件包名一上手就超(`ebadge_fw_v1.2.3_release.bin` 已经 28 字节)。
+  /// 裁在页面这一层做是刻意的 —— 编解码层不替调用方决定截断,见 [EBadgeCodec.fitStr]。
+  static String _otaXferName(String path) {
+    final base = _baseName(path);
+    return EBadgeCodec.fitStr(
+        base.isEmpty ? 'ota.bin' : base, EBadgeLimits.fileName);
+  }
+
+  /// 会话里报的 file_type。§2.7 那张表里没有「固件」这一档,取
+  /// [EBadgeFileType.bin](0x06)—— 它是唯一不宣称内容格式的一项。
+  ///
+  /// 这个常量现在只用来**记日志和显示**:0xE0 的 TLV_TYPE 由
+  /// [EBadgeRequest.otaOffer] 自己写死成 bin,EBXF 头里的那份由
+  /// [EBadgeTransferSession] 强制对齐(§5.2 要求两处必须一致)。留着它是因为日志和
+  /// 信息行要说出「按什么类型发的」,而那句话不该从两个地方各猜一次。
+  static const int _otaFileType = EBadgeFileType.bin;
+
+  /// 体积的人话表示。B / KB / MB 三档,给人估「这包多大、传多久」用的。
+  static String _otaSizeText(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / 1048576).toStringAsFixed(2)} MB';
+  }
+
+  /// 当前升级包的信息行。
+  ///
+  /// 单拆一个方法而不是直接写进 [_buildCommandArea] 的列表字面量:算 EBXF 名字要先
+  /// 判空 path,而列表字面量里放不进局部变量。
+  Widget _buildOtaFileRow() {
+    final path = _cfg.otaFilePath;
+    final size = _otaSize;
+    return _OtaFileRow(
+      path: path,
+      sizeText: size == null ? null : _otaSizeText(size),
+      xferName: path == null ? null : _otaXferName(path),
+      missing: _otaMissing,
+    );
   }
 
   // ── §6 同屏预览(备用能力,仅协议调试)────────────────────────────────
@@ -984,6 +1327,78 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
           '本区的档位与开关(以及下方帧源、日志自动滚动)会记住,下次进来沿用 ——'
           '调试要反复进出页面,每次回到默认档很容易把上一轮的结论套到这一轮上。'
           '注意:连热点期间本机所有网络请求都走设备热点(无外网),会话结束自动恢复。',
+        ),
+        const SizedBox(height: 16),
+        const _SectionLabel('OTA 升级(0xE0–0xE6,协议文档之外)'),
+        _CmdGrid(children: [
+          _CmdButton(
+            cmd: EBadgeCmd.h2dOtaOffer,
+            name: 'OTA',
+            icon: Icons.system_update_alt,
+            onTap: _otaOffer,
+          ),
+          _OtaPickButton(enabled: !_busy, onTap: _pickOtaFile),
+          _OtaButton(
+            busy: _otaBusy,
+            // 没有可用的包时禁用,而不是让人点下去再报错 —— 那一下会把 Offer 发出去,
+            // 设备就得停在 WaitSta 等 §5.5 的 60 s 超时。
+            enabled: !_busy && _otaSize != null,
+            onTap: _otaTransfer,
+          ),
+        ]),
+        _buildOtaFileRow(),
+        if (_otaStage != EBadgeXferStage.idle || _otaBusy)
+          _XferProgress(stage: _otaStage, detail: _otaDetail),
+        const _Hint(
+          '0xE0–0xE6 不在协议 §3 的命令表里(那一段既未定义也未保留),和 0xFF DEBUG '
+          '一样是厂商私有扩展。它是把 §5 传图那一组**整段平移**出来的:0xE0 OFFER ← '
+          '0x10、0xE1 确认 ← 0x11、0xE4 进度 ← 0x14、0xE5 成功 ← 0x15、0xE6 失败 ← '
+          '0x16,每条的参数区结构和被平移的那条逐字节一致。所以左边那个「OTA」按钮只'
+          '发 0xE0 那一帧看设备认不认,「OTA 升级」才跑完整链路。',
+        ),
+        const _Hint(
+          '0xE2/0xE3 **刻意空着**:热点那两条(0x12 GET_AP_INFO / 0x13 AP_INFO)两条'
+          '链路**共用**—— 设备起的是同一个 AP、同一个 TCP 端口,再造一对命令只会让固件'
+          '多一份一模一样的实现。「0xE_ 里缺的正好是共用的那两条」这件事本身就是文档。',
+        ),
+        const _Hint(
+          '数据面和传图**完全一样**:40 字节 EBXF 头 + 正文,然后必须等设备回 8 字节 '
+          'EBXR 应答。头里的 name/type/size/crc32 就是 0xE0 里那四条(§5.2 校验规则'
+          '第 3 条要求两处的 CRC32 必须相同,所以整份包只算一次 CRC,两处共用)。'
+          'EBXR 只说明「字节收全并通过校验」,最终成败仍以 BLE 的 0xE5/0xE6 为准 ——'
+          '那才是设备刷完之后给的结论(§5.3 对传图本来就这么规定)。',
+        ),
+        const _Hint(
+          'Offer 里 type 恒为 BIN(0x06):§2.7 那张表里没有「固件」这一档,而 BIN 是'
+          '唯一不宣称内容格式的一项,固件包自己带签名/校验、由设备刷写时验。这个值'
+          '**不给调用方选** —— 一旦帧里写 JPEG、头里写 BIN,设备按 §5.2 直接 close,'
+          '而现场表现只是「连上就断」,离根因太远。size 和 crc32 都取自按下按钮那一刻'
+          '现读的那份字节:报小了设备收够就收工、剩下的全丢,报大了它一直等到超时。',
+        ),
+        const _Hint(
+          '升级包从本地文件选,**只记路径**(不复制文件),下次进页面直接沿用、不用'
+          '再选一遍;进页面时会 stat 一次确认文件还在,不在就红字提示重选。'
+          '每次下发前还会再查一遍存在性并重读内容 —— 报的长度和 CRC32 必须属于这一次'
+          '真正推出去的那份。「OTA」那一帧也要现读整个包才能算 CRC32,几十 MB 的包'
+          '按下去会等一会儿。'
+          '文件名按 §2.8 裁到 ${EBadgeLimits.fileName} 字节(裁过会同时记下原名)——'
+          '真实固件包名一上手就超,不裁会直接抛。'
+          '存储不足只提示不拦:0x1A 报的余量是壁纸分区的,升级包大概率落在别的分区。',
+        ),
+        const _Hint(
+          '放行条件比传图多一条**容错**:正常路径等 0xE1,但设备若跳过它直接报 0x13 '
+          'AP_INFO,也按同意处理、直接去连热点 —— 固件先前的实现是「自检过了就把热点'
+          '起起来报 AP_INFO」,而 0x13 的信息量本来就比 decision=1 更足(热点已经能'
+          '连)。这条容忍只在 0xE1 一直没来时生效。设备要拒绝仍然走 0xE6,所以放宽它'
+          '不会把失败当成功。传图那条链路不变 ——§5.4 规定它必须先回 0x11,先来 0x13 '
+          '属于固件时序出错,替它兜着只会把问题藏到更靠后的阶段。',
+        ),
+        const _Hint(
+          '0xE5 的 file_id **当可选**处理:那条 TLV 在 0x15 里的意思是「入库成了第几张'
+          '壁纸」,固件包没有对应物,很可能压根不带。拿 0x15 的严格解析去解,结果是一次'
+          '**已经刷完的升级**因为少一条无意义的 TLV 被等到 20 s 超时、报成失败 —— 这是'
+          '最不该出现的误报。0xE5 里唯一必选的是 size:它和本机发出的字节数一对账,才'
+          '知道设备到底收全了没有。',
         ),
         const SizedBox(height: 16),
         const _SectionLabel('同屏预览(§6 全链路,V1.3 新增)'),
@@ -2125,6 +2540,203 @@ class _XferProgress extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 路径的最后一段。
+///
+/// 用正则切而不是 `package:path`:pubspec 里没有那个依赖,而这里要的只是「最后一个
+/// 分隔符之后的部分」。两种分隔符一起吃掉 —— Android 上 file_picker 给的缓存路径用
+/// `/`,桌面端可能是 `\`。
+String _baseName(String path) => path.split(RegExp(r'[\\/]')).last;
+
+/// 「选择升级包」按钮。
+class _OtaPickButton extends StatelessWidget {
+  const _OtaPickButton({required this.enabled, required this.onTap});
+
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: enabled ? onTap : null,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.folder_open, size: 16),
+          SizedBox(width: 7),
+          Text('选择升级包', style: TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+/// 「OTA 升级(全链路)」按钮。
+///
+/// 与 [_XferButton] 同形不复用:两者的禁用条件不一样 —— 传图的正文是内置的、随时
+/// 都在,而这个还要求「已经选了一个真实存在的包」。把那个条件塞进 [_XferButton] 只会
+/// 让一个按钮组件同时伺候两条链路。
+class _OtaButton extends StatelessWidget {
+  const _OtaButton({
+    required this.busy,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final bool busy;
+
+  /// 另一条链路在跑、或还没选到可用的升级包时都为 false。
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return FilledButton(
+      onPressed: enabled ? onTap : null,
+      style: FilledButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        visualDensity: VisualDensity.compact,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (busy)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cs.onPrimary,
+              ),
+            )
+          else
+            const Icon(Icons.system_update_alt, size: 16),
+          const SizedBox(width: 7),
+          Text(busy ? '升级中…' : 'OTA 升级(全链路)',
+              style: const TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+/// 当前选中的升级包:文件名 + 体积 + 完整路径。
+///
+/// **必须把路径整条显示出来**:同名的 `update.bin` 在下载目录里能有好几份,只显示
+/// 文件名的话根本分不清发的是哪一个 —— 而「我明明换了新包,设备行为却没变」正是
+/// 这类调试里最常见的假故障。
+class _OtaFileRow extends StatelessWidget {
+  const _OtaFileRow({
+    required this.path,
+    required this.sizeText,
+    required this.xferName,
+    required this.missing,
+  });
+
+  /// null = 从没选过。
+  final String? path;
+
+  /// null = stat 不到(没选过,或选过的文件已经没了)。
+  final String? sizeText;
+
+  /// 裁过之后真正发出去的名字(0xE0 的 TLV_NAME 和 EBXF 头都用它);和原名一致时
+  /// 不显示。
+  final String? xferName;
+
+  /// 有路径但文件已不存在。和「没选过」要说不一样的话。
+  final bool missing;
+
+  static const _pathStyle = TextStyle(
+    fontSize: 10.5,
+    height: 1.3,
+    fontFamily: 'monospace',
+    color: AppTheme.textSecondary,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final p = path;
+    if (p == null) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: Text(
+          '尚未选择升级包',
+          style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+        ),
+      );
+    }
+    final base = _baseName(p);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                missing ? Icons.error_outline : Icons.inventory_2_outlined,
+                size: 14,
+                color: missing ? cs.error : AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  base,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: missing ? cs.error : AppTheme.textPrimary,
+                  ),
+                ),
+              ),
+              if (sizeText != null) ...[
+                const SizedBox(width: 8),
+                Text(sizeText!,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontFamily: 'monospace',
+                      color: AppTheme.textSecondary,
+                    )),
+              ],
+            ],
+          ),
+          if (missing)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, left: 19),
+              child: Text(
+                '上次选的文件已不存在,请重新选择',
+                style: TextStyle(fontSize: 11, color: cs.error),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2, left: 19),
+            // 路径可选中:要贴进问题单,也要能拷到电脑上比对同一份文件的 CRC。
+            child: SelectableText(p, style: _pathStyle),
+          ),
+          if (xferName != null && xferName != base)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, left: 19),
+              child: Text(
+                '发出去记作:$xferName(原名超 ${EBadgeLimits.fileName}B,已裁)',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
         ],
       ),
     );

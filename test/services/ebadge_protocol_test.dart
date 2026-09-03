@@ -624,6 +624,347 @@ void main() {
     });
   });
 
+  group('0xE0–0xE6 OTA 家族(协议外的私有命令)', () {
+    test('五个号都不落在 §3 的保留段里 —— 这是敢占它们的前提', () {
+      for (final cmd in [0xE0, 0xE1, 0xE4, 0xE5, 0xE6]) {
+        expect(EBadgeCmd.isReserved(cmd), isFalse, reason: 'cmd=$cmd');
+        // 名字必须登记:eBadgeValidate 见到 'UNKNOWN' 就报「不在命令表内」,
+        // 于是自己发的每一帧都会被标红。
+        expect(EBadgeCmd.name(cmd), isNot('UNKNOWN'), reason: 'cmd=$cmd');
+      }
+      expect(EBadgeCmd.name(0xE0), 'OTA_OFFER');
+      expect(EBadgeCmd.name(0xE1), 'OTA_DECISION');
+      expect(EBadgeCmd.name(0xE4), 'OTA_PROGRESS');
+      expect(EBadgeCmd.name(0xE5), 'OTA_DONE');
+      expect(EBadgeCmd.name(0xE6), 'OTA_FAIL');
+    });
+
+    test('0xE2/0xE3 刻意空着 —— 热点那两条共用 0x12/0x13', () {
+      // 空号是**设计**,不是漏登记。哪天有人顺手把它们填上,这条断言先响:
+      // 固件那侧只实现了一套热点命令。
+      expect(EBadgeCmd.name(0xE2), 'UNKNOWN');
+      expect(EBadgeCmd.name(0xE3), 'UNKNOWN');
+    });
+
+    test('TLV 号和被平移的那条逐个一致', () {
+      // 号一致是眼下的事实,不是约束(§2.4:type 只在本命令上下文里有意义),所以
+      // 用断言钉住而不是共享常量 —— 将来 OTA 要加的字段不会也进 0x10。
+      expect(EBadgeTlvOtaOffer.name, EBadgeTlvOffer.name);
+      expect(EBadgeTlvOtaOffer.type, EBadgeTlvOffer.type);
+      expect(EBadgeTlvOtaOffer.size, EBadgeTlvOffer.size);
+      expect(EBadgeTlvOtaOffer.crc32, EBadgeTlvOffer.crc32);
+      expect(EBadgeTlvOtaDecision.decision, EBadgeTlvDecision.decision);
+      expect(EBadgeTlvOtaDecision.reason, EBadgeTlvDecision.reason);
+      expect(EBadgeTlvOtaProgress.recv, EBadgeTlvProgress.recv);
+      expect(EBadgeTlvOtaProgress.total, EBadgeTlvProgress.total);
+      expect(EBadgeTlvOtaDone.fileId, EBadgeTlvDone.fileId);
+      expect(EBadgeTlvOtaDone.size, EBadgeTlvDone.size);
+      expect(EBadgeTlvOtaDone.name, EBadgeTlvDone.name);
+      expect(EBadgeTlvOtaFail.reason, EBadgeTlvFail.reason);
+      expect(EBadgeTlvOtaFail.detail, EBadgeTlvFail.detail);
+      // 0x05 replace_id 在 OTA 里没有对应物,所以 [EBadgeTlvOtaOffer] 跳过了它。
+      expect(EBadgeTlvOffer.replaceId, 0x05);
+    });
+
+    test('0xE0 逐字节:name / type=BIN / size / crc32 四条,顺序照 0x10', () {
+      // 设备侧解 0xE0 的代码是从 0x10 复制来的,同号同序是这条私有命令唯一的对齐
+      // 依据 —— 一旦谁调了顺序,现场表现只是「设备不认」。
+      expect(
+        hexOf(EBadgeRequest.otaOffer(
+            name: 'fw.bin', size: 0x0012D687, crc32: 0xDEADBEEF)),
+        hexOf(h('01 E0 80 1B 00 '
+            '01 06 00 66 77 2E 62 69 6E '
+            '02 01 00 06 '
+            '03 04 00 87 D6 12 00 '
+            '04 04 00 EF BE AD DE')),
+      );
+      final d = EBadgeCodec.decode(
+              EBadgeRequest.otaOffer(name: 'a.bin', size: 1, crc32: 2))
+          .frame!;
+      expect(d.tlvs.map((t) => t.type), [0x01, 0x02, 0x03, 0x04]);
+      expect(d.value(EBadgeTlvOtaOffer.type)!.single, EBadgeFileType.bin);
+      expect(EBadgeCodec.readU32le(d.value(EBadgeTlvOtaOffer.size)!), 1);
+      expect(EBadgeCodec.readU32le(d.value(EBadgeTlvOtaOffer.crc32)!), 2);
+    });
+
+    test('4 GiB-1 也编得出来,越界和 0 直接拒', () {
+      // size 是 uint32:边界值要能编,超界宁可当场抛也不要静默截断成一个小数字 ——
+      // 截断后设备会以为包很小,收够就判完成,校验才失败,离根因太远。
+      final d = EBadgeCodec.decode(EBadgeRequest.otaOffer(
+              name: 'a.bin', size: 0xFFFFFFFF, crc32: 0xFFFFFFFF))
+          .frame!;
+      expect(
+          EBadgeCodec.readU32le(d.value(EBadgeTlvOtaOffer.size)!), 0xFFFFFFFF);
+      expect(
+          EBadgeCodec.readU32le(d.value(EBadgeTlvOtaOffer.crc32)!), 0xFFFFFFFF);
+      for (final bad in [0x100000000, 0, -1]) {
+        expect(() => EBadgeRequest.otaOffer(name: 'a', size: bad, crc32: 0),
+            throwsArgumentError,
+            reason: 'size=$bad');
+      }
+    });
+
+    test('包名超 §2.8 的 23 字节直接抛,不静默截断', () {
+      // 名字现在**上线**(0xE0 的 TLV_NAME + EBXF 头),截断等于悄悄改掉设备落盘的
+      // 名字。调用方要裁自己用 fitStr 裁,见 [EBadgeCodec.fitStr]。
+      expect(
+        () => EBadgeRequest.otaOffer(
+            name: 'ebadge_fw_v1.2.3_release.bin', size: 1, crc32: 1),
+        throwsArgumentError,
+      );
+    });
+
+    test('自己发的 0xE0 不该被判违规', () {
+      final d = EBadgeCodec.decode(EBadgeRequest.otaOffer(
+              name: 'fw.bin', size: 4096, crc32: 0xDEADBEEF))
+          .frame!;
+      expect(eBadgeValidate(d), isEmpty);
+    });
+
+    test('0xE0 缺任何一条必选、size=0、type≠BIN 都要报违规', () {
+      // 手工拼的坏帧只能靠 encode 造:otaOffer 自己已经拦住了这些输入。
+      EBadgeFrame mk(List<EBadgeTlv> tlvs) =>
+          EBadgeCodec.decode(EBadgeCodec.encode(EBadgeCmd.h2dOtaOffer, tlvs))
+              .frame!;
+      final nm = EBadgeTlv(EBadgeTlvOtaOffer.name,
+          EBadgeCodec.str('fw.bin', EBadgeLimits.fileName, 'name'));
+      final ty =
+          EBadgeTlv(EBadgeTlvOtaOffer.type, EBadgeCodec.u8(EBadgeFileType.bin));
+      final sz = EBadgeTlv(EBadgeTlvOtaOffer.size, EBadgeCodec.u32le(4096));
+      final cr = EBadgeTlv(EBadgeTlvOtaOffer.crc32, EBadgeCodec.u32le(1));
+
+      expect(eBadgeValidate(mk(const [])), isNotEmpty);
+      expect(eBadgeValidate(mk([ty, sz, cr])), isNotEmpty); // 缺 name
+      expect(eBadgeValidate(mk([nm, sz, cr])), isNotEmpty); // 缺 type
+      expect(eBadgeValidate(mk([nm, ty, cr])), isNotEmpty); // 缺 size
+      expect(eBadgeValidate(mk([nm, ty, sz])), isNotEmpty); // 缺 crc32
+      // size 只有 2 字节 —— 设备解出来的是个随机数。
+      expect(
+        eBadgeValidate(mk([
+          nm,
+          ty,
+          EBadgeTlv(EBadgeTlvOtaOffer.size, EBadgeCodec.u16le(4096)),
+          cr
+        ])),
+        isNotEmpty,
+      );
+      expect(
+        eBadgeValidate(mk([
+          nm,
+          ty,
+          EBadgeTlv(EBadgeTlvOtaOffer.size, EBadgeCodec.u32le(0)),
+          cr
+        ])),
+        isNotEmpty,
+      );
+      // type 报成 JPEG:§5.2 要求它和 EBXF 头里一致,而头里恒为 BIN。
+      expect(
+        eBadgeValidate(mk([
+          nm,
+          EBadgeTlv(
+              EBadgeTlvOtaOffer.type, EBadgeCodec.u8(EBadgeFileType.jpeg)),
+          sz,
+          cr
+        ])),
+        isNotEmpty,
+      );
+    });
+
+    test('0xE0 摘要把四条都读出来 —— size 十进制,crc32 十六进制', () {
+      // size 按十进制(u32 的 hex 谁也换算不动)拿来和本机文件对眼;crc32 反过来按
+      // 十六进制 —— 它要和 EBXF 头里那个字面比对。
+      final d = EBadgeCodec.decode(EBadgeRequest.otaOffer(
+              name: 'fw.bin', size: 1234567, crc32: 0x0012D687))
+          .frame!;
+      expect(
+        eBadgeDescribe(d),
+        'OTA_OFFER:name=fw.bin type=BIN size=1234567B crc32=0x0012D687',
+      );
+    });
+
+    test('0xE0 缺字段的摘要写「缺失」而不是省略', () {
+      // 省略会被当成正常 —— 看日志的人只会以为那一行本来就这么短。
+      final s = eBadgeDescribe(EBadgeCodec.decode(
+          EBadgeCodec.encode(EBadgeCmd.h2dOtaOffer, const [])).frame!);
+      expect(s, contains('name=缺失'));
+      expect(s, contains('type=缺失'));
+      expect(s, contains('size=缺失'));
+      expect(s, contains('crc32=缺失'));
+    });
+
+    test('将来从 0x06 起补的 TLV,摘要按十六进制原样列出', () {
+      final f = EBadgeCodec.encode(EBadgeCmd.h2dOtaOffer, [
+        EBadgeTlv(EBadgeTlvOtaOffer.size, EBadgeCodec.u32le(16)),
+        EBadgeTlv(0x06, Uint8List.fromList([0xDE, 0xAD])),
+      ]);
+      final s = eBadgeDescribe(EBadgeCodec.decode(f).frame!);
+      expect(s, contains('size=16B'));
+      expect(s, contains('0x06='));
+      expect(s, contains('DE AD'));
+    });
+
+    test('0xE1 / 0xE4 / 0xE6 的摘要换的只是命令名', () {
+      // 参数区逐号一致,所以解析器共用;但命令名必须换 —— 两条链路的日志在调试台上
+      // 是混着看的,不区分就分不出这条「同意」是谁给的。
+      EBadgeFrame mk(int cmd, List<EBadgeTlv> tlvs) =>
+          EBadgeCodec.decode(EBadgeCodec.encode(cmd, tlvs)).frame!;
+
+      final dec = [
+        EBadgeTlv(EBadgeTlvOtaDecision.decision,
+            EBadgeCodec.u8(EBadgeDecision.accept)),
+      ];
+      final accept = EBadgeDecision.name(EBadgeDecision.accept);
+      expect(eBadgeDescribe(mk(EBadgeCmd.d2hOtaDecision, dec)),
+          'OTA_DECISION:$accept');
+      expect(eBadgeDescribe(mk(EBadgeCmd.d2hTransferDecision, dec)),
+          'DECISION:$accept');
+
+      final prog = [
+        EBadgeTlv(EBadgeTlvOtaProgress.recv, EBadgeCodec.u32le(50)),
+        EBadgeTlv(EBadgeTlvOtaProgress.total, EBadgeCodec.u32le(200)),
+      ];
+      expect(eBadgeDescribe(mk(EBadgeCmd.d2hOtaProgress, prog)),
+          'OTA_PROGRESS:50/200 (25.0%)');
+      expect(eBadgeDescribe(mk(EBadgeCmd.d2hTransferProgress, prog)),
+          'PROGRESS:50/200 (25.0%)');
+
+      final fail = [
+        EBadgeTlv(
+            EBadgeTlvOtaFail.reason, EBadgeCodec.u8(EBadgeXferError.verify)),
+      ];
+      expect(eBadgeDescribe(mk(EBadgeCmd.d2hOtaFail, fail)),
+          'OTA_FAIL:${EBadgeXferError.name(EBadgeXferError.verify)}');
+      expect(eBadgeDescribe(mk(EBadgeCmd.d2hTransferFail, fail)),
+          'FAIL:${EBadgeXferError.name(EBadgeXferError.verify)}');
+    });
+
+    test('0xE5 只把 size 当必选 —— file_id 不带也算成功', () {
+      // 这是最不该出现的误报:file_id 的语义是「入库成了第几张壁纸」,固件包没有对应
+      // 物。拿 0x15 的严格解析去解,一次**已经刷完的升级**会被等到超时报成失败。
+      final only = EBadgeCodec.decode(EBadgeCodec.encode(EBadgeCmd.d2hOtaDone, [
+        EBadgeTlv(EBadgeTlvOtaDone.size, EBadgeCodec.u32le(4096)),
+      ])).frame!;
+      final od = EBadgeOtaDone.parse(only);
+      expect(od, isNotNull);
+      expect(od!.size, 4096);
+      expect(od.fileId, isNull);
+      expect(od.name, '');
+      expect(od.summary, 'size=4096B');
+      expect(eBadgeValidate(only), isEmpty);
+      expect(eBadgeDescribe(only), 'OTA_DONE:size=4096B');
+      // 同一帧拿 0x15 的解析器去解就是 null —— 这条钉住「为什么要分开写一个解析器」。
+      expect(EBadgeTransferDone.parse(only), isNull);
+    });
+
+    test('0xE5 带上 file_id / name 时一并读出来', () {
+      final full = EBadgeCodec.decode(EBadgeCodec.encode(EBadgeCmd.d2hOtaDone, [
+        EBadgeTlv(EBadgeTlvOtaDone.fileId, EBadgeCodec.u16le(7)),
+        EBadgeTlv(EBadgeTlvOtaDone.size, EBadgeCodec.u32le(2048)),
+        EBadgeTlv(EBadgeTlvOtaDone.name,
+            EBadgeCodec.str('fw.bin', EBadgeLimits.fileName, 'name')),
+      ])).frame!;
+      final od = EBadgeOtaDone.parse(full)!;
+      expect(od.fileId, 7);
+      expect(od.name, 'fw.bin');
+      expect(od.summary, 'size=2048B file_id=7 name=fw.bin');
+      expect(eBadgeValidate(full), isEmpty);
+    });
+
+    test('0xE5 缺 size 才是真的失败', () {
+      final none = EBadgeCodec.decode(EBadgeCodec.encode(EBadgeCmd.d2hOtaDone, [
+        EBadgeTlv(EBadgeTlvOtaDone.fileId, EBadgeCodec.u16le(7)),
+      ])).frame!;
+      expect(EBadgeOtaDone.parse(none), isNull);
+      expect(eBadgeValidate(none), isNotEmpty);
+      expect(eBadgeDescribe(none), 'OTA_DONE(缺 size)');
+    });
+
+    test('0xE1 / 0xE4 / 0xE6 缺必选也照 §4 的强度报违规', () {
+      EBadgeFrame mk(int cmd, List<EBadgeTlv> tlvs) =>
+          EBadgeCodec.decode(EBadgeCodec.encode(cmd, tlvs)).frame!;
+      expect(
+          eBadgeValidate(mk(EBadgeCmd.d2hOtaDecision, const [])), isNotEmpty);
+      expect(
+          eBadgeValidate(mk(EBadgeCmd.d2hOtaProgress, const [])), isNotEmpty);
+      expect(eBadgeValidate(mk(EBadgeCmd.d2hOtaFail, const [])), isNotEmpty);
+      // 齐了就该干净 —— 否则自己模拟设备回帧时满屏红字,校验也就没人看了。
+      expect(
+        eBadgeValidate(mk(EBadgeCmd.d2hOtaDecision, [
+          EBadgeTlv(EBadgeTlvOtaDecision.decision,
+              EBadgeCodec.u8(EBadgeDecision.accept)),
+        ])),
+        isEmpty,
+      );
+      expect(
+        eBadgeValidate(mk(EBadgeCmd.d2hOtaProgress, [
+          EBadgeTlv(EBadgeTlvOtaProgress.recv, EBadgeCodec.u32le(1)),
+          EBadgeTlv(EBadgeTlvOtaProgress.total, EBadgeCodec.u32le(2)),
+        ])),
+        isEmpty,
+      );
+      expect(
+        eBadgeValidate(mk(EBadgeCmd.d2hOtaFail, [
+          EBadgeTlv(
+              EBadgeTlvOtaFail.reason, EBadgeCodec.u8(EBadgeXferError.verify)),
+        ])),
+        isEmpty,
+      );
+    });
+  });
+
+  group('EBadgeCodec.fitStr —— 按字节裁剪(只给协议管不到的名字用)', () {
+    test('没超限就原样返回', () {
+      expect(EBadgeCodec.fitStr('a.bin', EBadgeLimits.fileName), 'a.bin');
+      expect(EBadgeCodec.fitStr('', 23), '');
+    });
+
+    test('超限时裁主干、保后缀', () {
+      // 真实固件包名一上手就是 28 字节。
+      final out = EBadgeCodec.fitStr(
+          'ebadge_fw_v1.2.3_release.bin', EBadgeLimits.fileName);
+      expect(utf8.encode(out).length, lessThanOrEqualTo(EBadgeLimits.fileName));
+      expect(out.endsWith('.bin'), isTrue);
+      expect(out, 'ebadge_fw_v1.2.3_re.bin');
+    });
+
+    test('绝不切断多字节序列', () {
+      // 每个汉字 3 字节:23 字节的上限不是 3 的整数倍,按字节硬切必然切出半个字符。
+      final out = EBadgeCodec.fitStr('固件升级包很长很长很长很长.bin', 23);
+      final bytes = utf8.encode(out);
+      expect(bytes.length, lessThanOrEqualTo(23));
+      // 能原样解回来 = 没有残缺的 UTF-8 序列。
+      expect(utf8.decode(bytes), out);
+      expect(out, '固件升级包很.bin');
+    });
+
+    test('后缀超过 8B 就当它不是后缀(那多半只是名字里带个点)', () {
+      final out = EBadgeCodec.fitStr('${'x' * 30}.superlongextension', 23);
+      expect(out, 'x' * 23);
+    });
+
+    test('裁过的名字能过 EBXF 头,不裁的会被 str 挡下来', () {
+      // 这就是 fitStr 存在的理由:EBadgeXferHeader 走的 str 对超长名字直接抛,
+      // 而 OTA 的名字来自文件系统,不由协议约束。
+      const long = 'ebadge_fw_v1.2.3_release.bin';
+      expect(
+        () => EBadgeXferHeader.build(
+          fileType: EBadgeFileType.bin,
+          name: long,
+          size: 1,
+          crc32: 0,
+        ),
+        throwsArgumentError,
+      );
+      final head = EBadgeXferHeader.build(
+        fileType: EBadgeFileType.bin,
+        name: EBadgeCodec.fitStr(long, EBadgeLimits.fileName),
+        size: 1,
+        crc32: 0,
+      );
+      expect(head.length, 40);
+    });
+  });
+
   group('Wi-Fi 数据面 (§5)', () {
     test('EBXF 头 40 字节,magic 与小端字段就位', () {
       final head = EBadgeXferHeader.build(
@@ -766,6 +1107,11 @@ void main() {
             type: EBadgeFileType.jpeg,
             size: 1024,
             crc32: 0xDEADBEEF)),
+        isEmpty,
+      );
+      expect(
+        check(EBadgeRequest.otaOffer(
+            name: 'fw.bin', size: 1024, crc32: 0xDEADBEEF)),
         isEmpty,
       );
     });
