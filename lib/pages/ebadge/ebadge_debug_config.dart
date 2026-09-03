@@ -101,6 +101,8 @@ class EBadgeDebugConfig {
     this.cameraFps = _defaultCameraFps,
     this.cameraQuality = _defaultCameraQuality,
     this.otaFilePath,
+    this.otaFileUri,
+    this.otaFileName,
   });
 
   /// 摄像头源的默认帧率 / 质量。取自枚举与原生默认档,保持单一来源 ——
@@ -148,16 +150,101 @@ class EBadgeDebugConfig {
   /// 「跳 N 帧」)时**最快见效**的一档旋钮,所以它得能一边推一边调。
   final int cameraQuality;
 
-  /// 上次选中的 OTA 升级包路径;从没选过是 null。
+  /// 上次选中的 OTA 升级包 —— **本机上真读得到的那个路径**;从没选过是 null。
   ///
-  /// 记住它是为了**免掉每次进页面重选一遍**——调试 OTA 是反复进出页面的活,而升级包
-  /// 往往埋在下载目录的深处。
+  /// 原文件读得到时(桌面端,或反解出的路径确实能打开)存的就是原文件路径;读不到时
+  /// 存的是我们自己搬到 app 私有目录下的那一份(见 `_stashOtaFile`)。
   ///
-  /// **只记路径,别的一概不记**:不复制文件、不存体积、不存校验值。存下体积就意味着
-  /// 有机会拿一个过期数字去发包 —— 而 Offer 报的 size 和 EBXF 头必须是这一次真正要
-  /// 推的字节数。路径可能失效(文件被删、被换成新一版固件,Android 上选择器给的还是
-  /// 缓存目录副本),所以每次进页面都重新 stat 一遍,拿不到就在界面上说明白。
+  /// **不能存 `FilePicker.pickFiles()` 交回来的 `path`**:插件文档原话是
+  /// 「a cached copy of this file」—— 那份副本落在 `cache/file_picker/<时间戳>/` 下,
+  /// 而 `cache` 是系统随时可以回收的目录。存它的结果就是「这次选完能用,下次进页面
+  /// 报已读不到」,而这恰恰是持久化要解决的那个问题。搬进 app 私有目录才是能跨进程
+  /// 存活的那一份。
+  ///
+  /// **体积和校验值一概不记**:存下来就有机会拿一个过期数字去发包,而 Offer 报的
+  /// size 和 EBXF 头必须是这一次真正推出去的字节数。路径仍然可能失效(文件被删、
+  /// app 数据被清),所以每次进页面都重新 stat 一遍,拿不到就在界面上说明白。
   final String? otaFilePath;
+
+  /// 用户选的那个文件的**原始引用**:Android 上是 SAF 的 `content://` URI
+  /// (`PlatformFile.identifier`),桌面端为 null —— 那里 [otaFilePath] 本身就是原文件。
+  ///
+  /// 记它是为了答副本路径答不了的问题:「这包到底是哪一个文件」(一个 app 私有目录
+  /// 下的 `fw.bin` 看不出是下载目录那份还是 U 盘那份,而调试时手上常有好几版固件),
+  /// 以及「读到的是不是原文件的**当前**内容」—— 副本是选中那一刻的字节快照,原文件
+  /// 之后被新一版覆盖它不会跟着变,于是页面报着一份体积、刷进设备的却是另一份包,而
+  /// 这种偏差在设备屏上看不出来。
+  final String? otaFileUri;
+
+  /// 用户选的那个文件的原始文件名。
+  ///
+  /// 不从 [otaFilePath] 切最后一段:那可能是搬过一手的副本,撞名时会被改名,而 0xE0
+  /// 的 TLV_NAME 和 EBXF 头该报用户认得的那个名字 —— 名字是设备日志里认包的唯一线索。
+  final String? otaFileName;
+
+  /// 用户选的那个文件的路径,即**原始的那一份**;拿不到是 null。
+  ///
+  /// [otaFileUri] 为 null(桌面端,或选择器没给)时 [otaFilePath] 就是原文件,直接
+  /// 返回它;Android 上从 URI 反解,解不出就是 null —— 那种情况下能读的只有副本。
+  String? get otaOriginalPath =>
+      otaFileUri == null ? otaFilePath : originalPathOf(otaFileUri);
+
+  /// 从 SAF 的 `content://` URI 反解出文件系统路径;认不出返回 null。
+  ///
+  /// 只认三种**能确定映射**的形式:
+  ///
+  /// - `file:///storage/emulated/0/Download/fw.bin` —— 本身就是路径;
+  /// - documents 的 `raw:` 前缀(下载目录常见)—— 冒号后面就是完整路径;
+  /// - externalstorage 的 `<卷>:<相对路径>` —— `primary` 是内置存储
+  ///   (`/storage/emulated/0`),`1234-5678` 那种 FAT 序列号是外置卡(`/storage/<卷>`)。
+  ///
+  /// 其余一律 null,**不猜**:`msf:1000000123`(Android 11+ 下载目录)、媒体库的
+  /// `image:123` 都只是数据库主键,压根没有对应路径。猜一个出来比返回 null 更坏 ——
+  /// 界面会显示一个不存在的位置,而用户会拿它去核对自己手上的包。
+  static String? originalPathOf(String? uri) {
+    if (uri == null || uri.isEmpty) return null;
+    final Uri u;
+    try {
+      u = Uri.parse(uri);
+    } catch (_) {
+      return null;
+    }
+    // 用 Uri.path 而不是 toFilePath():后者跟着当前平台走分隔符,在 Windows 上会把
+    // /storage/... 变成 \storage\...。代价是 path 保留着 %XX(只有 pathSegments 会
+    // 解),得自己解一次 —— 空格在固件包名里很常见。
+    if (u.scheme == 'file') {
+      final p = _decode(u.path);
+      return (p == null || p.isEmpty) ? null : p;
+    }
+    if (u.scheme != 'content') return null;
+    final segs = u.pathSegments;
+    final i = segs.indexOf('document');
+    if (i < 0 || i + 1 >= segs.length) return null;
+    final docId = segs[i + 1];
+    final colon = docId.indexOf(':');
+    if (colon < 0) return null;
+    final volume = docId.substring(0, colon);
+    final rel = docId.substring(colon + 1);
+    if (rel.isEmpty) return null;
+    if (volume == 'raw') return rel.startsWith('/') ? rel : null;
+    if (volume == 'primary') return '/storage/emulated/0/$rel';
+    if (RegExp(r'^[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}$').hasMatch(volume)) {
+      return '/storage/$volume/$rel';
+    }
+    return null;
+  }
+
+  /// 解一次 %XX;残缺的转义(`%zz`)不抛,当作认不出。
+  ///
+  /// 这里的输入是外部存下来的字符串,格式不可信 —— 一个解析异常没道理让整个调试页
+  /// 起不来,退回 null 走副本那条路就行。
+  static String? _decode(String s) {
+    try {
+      return Uri.decodeComponent(s);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// 当前档位在 [kEBadgeDemoPresets] 里的下标;slug 认不出就退回第 0 档。
   ///
@@ -176,7 +263,9 @@ class EBadgeDebugConfig {
     int? cameraFps,
     int? cameraQuality,
     String? otaFilePath,
-    bool clearOtaFilePath = false,
+    String? otaFileUri,
+    String? otaFileName,
+    bool clearOtaFile = false,
   }) =>
       EBadgeDebugConfig(
         xferWithHeader: xferWithHeader ?? this.xferWithHeader,
@@ -187,8 +276,12 @@ class EBadgeDebugConfig {
         cameraQuality: cameraQuality ?? this.cameraQuality,
         // 可空字段没法用 `?? this.x` 表达「清空」——传 null 和不传是同一件事。所以
         // 另给一个显式开关,而不是让调用方绕道重建整个对象。
-        otaFilePath:
-            clearOtaFilePath ? null : (otaFilePath ?? this.otaFilePath),
+        //
+        // 一个开关清掉整组三个字段:留下任何一个都会得到一份自相矛盾的配置(有名字
+        // 没路径、有 URI 没内容),而界面就是照这几个字段画的。
+        otaFilePath: clearOtaFile ? null : (otaFilePath ?? this.otaFilePath),
+        otaFileUri: clearOtaFile ? null : (otaFileUri ?? this.otaFileUri),
+        otaFileName: clearOtaFile ? null : (otaFileName ?? this.otaFileName),
       );
 
   Map<String, dynamic> toJson() => {
@@ -199,6 +292,8 @@ class EBadgeDebugConfig {
         'cameraFps': cameraFps,
         'cameraQuality': cameraQuality,
         'otaFilePath': otaFilePath,
+        'otaFileUri': otaFileUri,
+        'otaFileName': otaFileName,
       };
 
   /// 逐字段带默认值地读。
@@ -226,13 +321,16 @@ class EBadgeDebugConfig {
       cameraQuality: _int(json['cameraQuality'], _defaultCameraQuality,
           kEBadgeStreamQualityMin, kEBadgeStreamQualityMax),
       otaFilePath: _path(json['otaFilePath']),
+      otaFileUri: _path(json['otaFileUri']),
+      otaFileName: _path(json['otaFileName']),
     );
   }
 
   static bool _bool(Object? v, bool fallback) => v is bool ? v : fallback;
 
-  /// 读一个可空路径。空串一并当作「没选过」——它只会让界面显示一个没有名字的文件,
-  /// 而 [File('')] 的 exists() 恒为 false,两者都是同一个结果,不如在入口收敛掉。
+  /// 读一个可空路径 / URI / 文件名。空串一并当作「没选过」——它只会让界面显示一个
+  /// 没有名字的文件,而 [File('')] 的 exists() 恒为 false,两者都是同一个结果,不如
+  /// 在入口收敛掉。
   static String? _path(Object? v) => v is String && v.isNotEmpty ? v : null;
 
   /// 读一个整数并**夹到合法区间**。

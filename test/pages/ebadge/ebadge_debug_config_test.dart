@@ -81,7 +81,11 @@ void main() {
     // 从没选过升级包时是 null,而不是空串 —— 页面据此显示「尚未选择升级包」并把
     // 「OTA 升级」按钮禁掉,不会拿一个空路径去 stat。
     test('默认没有 OTA 升级包路径', () {
-      expect(const EBadgeDebugConfig().otaFilePath, isNull);
+      const cfg = EBadgeDebugConfig();
+      expect(cfg.otaFilePath, isNull);
+      expect(cfg.otaFileUri, isNull);
+      expect(cfg.otaFileName, isNull);
+      expect(cfg.otaOriginalPath, isNull);
     });
 
     test('滑条默认档落在自己的区间里', () {
@@ -125,7 +129,10 @@ void main() {
         autoScroll: false,
         cameraFps: 25,
         cameraQuality: 45,
-        otaFilePath: '/data/user/0/app/cache/ebadge_fw_v1.2.3.bin',
+        otaFilePath: '/data/user/0/app/cache/file_picker/ebadge_fw_v1.2.3.bin',
+        otaFileUri: 'content://com.android.externalstorage.documents/document/'
+            'primary%3ADownload%2Febadge_fw_v1.2.3.bin',
+        otaFileName: 'ebadge_fw_v1.2.3.bin',
       );
       final back = EBadgeDebugConfig.fromJson(cfg.toJson());
       expect(back.xferWithHeader, isTrue);
@@ -134,16 +141,35 @@ void main() {
       expect(back.autoScroll, isFalse);
       expect(back.cameraFps, 25);
       expect(back.cameraQuality, 45);
-      expect(back.otaFilePath, '/data/user/0/app/cache/ebadge_fw_v1.2.3.bin');
+      expect(back.otaFilePath,
+          '/data/user/0/app/cache/file_picker/ebadge_fw_v1.2.3.bin');
+      expect(back.otaFileUri, cfg.otaFileUri);
+      expect(back.otaFileName, 'ebadge_fw_v1.2.3.bin');
+      // 原始位置要能跨一次存读活下来 —— 它就是记它的全部理由。
+      expect(back.otaOriginalPath,
+          '/storage/emulated/0/Download/ebadge_fw_v1.2.3.bin');
     });
 
-    // 只存路径,不存体积:文件随时会被删或被换成新一版固件,存下体积就有机会拿一个
-    // 过期数字去填 Offer 和 EBXF 头,而那两处报的必须是这一次真正推出去的字节数。
-    test('只记路径，不记体积或校验值', () {
-      final json = const EBadgeDebugConfig(otaFilePath: '/tmp/fw.bin').toJson();
-      expect(json['otaFilePath'], '/tmp/fw.bin');
+    // 记的是**位置和名字**,不是内容的度量:文件随时会被删或被换成新一版固件,存下
+    // 体积/校验值就有机会拿一个过期数字去填 Offer 和 EBXF 头,而那两处报的必须是这
+    // 一次真正推出去的字节数。
+    test('只记位置和原名，不记体积或校验值', () {
+      final json = const EBadgeDebugConfig(
+        otaFilePath: '/tmp/cache/fw.bin',
+        otaFileUri: 'content://x/document/raw%3A%2Ftmp%2Ffw.bin',
+        otaFileName: 'fw.bin',
+      ).toJson();
+      expect(json['otaFilePath'], '/tmp/cache/fw.bin');
+      expect(json['otaFileUri'], 'content://x/document/raw%3A%2Ftmp%2Ffw.bin');
+      expect(json['otaFileName'], 'fw.bin');
       expect(json.keys.where((k) => k.toLowerCase().contains('ota')),
-          ['otaFilePath']);
+          ['otaFilePath', 'otaFileUri', 'otaFileName']);
+      expect(
+        json.keys.where((k) =>
+            k.toLowerCase().contains('size') ||
+            k.toLowerCase().contains('crc')),
+        isEmpty,
+      );
     });
 
     // 存名字而不是序号:枚举里插一项就会让旧配置里的序号指向另一个源,而「我明明
@@ -176,6 +202,19 @@ void main() {
       expect(back.cameraFps, const EBadgeDebugConfig().cameraFps);
       expect(back.cameraQuality, const EBadgeDebugConfig().cameraQuality);
       expect(back.otaFilePath, isNull);
+      expect(back.otaFileUri, isNull);
+      expect(back.otaFileName, isNull);
+    });
+
+    // 加原始引用这两个键之前存下来的配置里只有 otaFilePath。它在 Android 上是副本
+    // 路径 —— 读不到就红字提示重选,读得到就照旧能发,不该因为缺了新键把包丢掉。
+    test('旧配置只有 otaFilePath —— 照旧可用，原始位置退回它本身', () {
+      final back =
+          EBadgeDebugConfig.fromJson(const {'otaFilePath': '/tmp/fw.bin'});
+      expect(back.otaFilePath, '/tmp/fw.bin');
+      expect(back.otaFileUri, isNull);
+      expect(back.otaFileName, isNull);
+      expect(back.otaOriginalPath, '/tmp/fw.bin');
     });
 
     test('类型不对的值不抛，退回默认', () {
@@ -187,6 +226,8 @@ void main() {
         'cameraFps': '30',
         'cameraQuality': null,
         'otaFilePath': 12345,
+        'otaFileUri': ['content://x'],
+        'otaFileName': 7,
       });
       expect(back.xferWithHeader, isFalse);
       expect(back.demoPresetSlug, kDefaultDemoPresetSlug);
@@ -195,15 +236,19 @@ void main() {
       expect(back.cameraFps, const EBadgeDebugConfig().cameraFps);
       expect(back.cameraQuality, const EBadgeDebugConfig().cameraQuality);
       expect(back.otaFilePath, isNull);
+      expect(back.otaFileUri, isNull);
+      expect(back.otaFileName, isNull);
     });
 
     // 空串一并当「没选过」:它只会让界面显示一个没有名字的文件,而 File('') 的
     // exists() 恒为 false —— 两条路的结果一样,不如在入口就收敛掉。
     test('空的 OTA 路径等同没选过', () {
-      expect(
-        EBadgeDebugConfig.fromJson(const {'otaFilePath': ''}).otaFilePath,
-        isNull,
-      );
+      final back = EBadgeDebugConfig.fromJson(
+          const {'otaFilePath': '', 'otaFileUri': '', 'otaFileName': ''});
+      expect(back.otaFilePath, isNull);
+      expect(back.otaFileUri, isNull);
+      expect(back.otaFileName, isNull);
+      expect(back.otaOriginalPath, isNull);
     });
 
     // 越界的值**夹到区间**而不是退回默认:存下来的是用户上次调的值,滑条上界将来
@@ -301,22 +346,146 @@ void main() {
 
     test('改 OTA 路径不动其余各项，改其余各项也不丢 OTA 路径', () {
       const base = EBadgeDebugConfig();
-      final a = base.copyWith(otaFilePath: '/tmp/fw.bin');
-      expect(a.otaFilePath, '/tmp/fw.bin');
+      final a = base.copyWith(
+        otaFilePath: '/tmp/cache/fw.bin',
+        otaFileUri: 'content://x/document/raw%3A%2Ftmp%2Ffw.bin',
+        otaFileName: 'fw.bin',
+      );
+      expect(a.otaFilePath, '/tmp/cache/fw.bin');
       expect(a.cameraFps, base.cameraFps);
       expect(a.demoPresetSlug, base.demoPresetSlug);
 
       final b = a.copyWith(cameraFps: 30);
-      expect(b.otaFilePath, '/tmp/fw.bin', reason: '改帧率不该把选好的包丢掉');
+      expect(b.otaFilePath, '/tmp/cache/fw.bin', reason: '改帧率不该把选好的包丢掉');
+      expect(b.otaFileUri, a.otaFileUri, reason: '原始引用也不该被带走');
+      expect(b.otaFileName, 'fw.bin');
     });
 
     // 可空字段没法用 `?? this.x` 表达「清空」—— 传 null 和不传是同一件事,所以另给
     // 一个显式开关。少了它,选过的包就再也去不掉,只能整个重建配置对象。
-    test('clearOtaFilePath 能真的清掉路径', () {
-      final a = const EBadgeDebugConfig().copyWith(otaFilePath: '/tmp/fw.bin');
-      expect(a.copyWith(clearOtaFilePath: true).otaFilePath, isNull);
+    test('clearOtaFile 把三个字段整组清掉', () {
+      final a = const EBadgeDebugConfig().copyWith(
+        otaFilePath: '/tmp/cache/fw.bin',
+        otaFileUri: 'content://x/document/raw%3A%2Ftmp%2Ffw.bin',
+        otaFileName: 'fw.bin',
+      );
+      final cleared = a.copyWith(clearOtaFile: true);
+      // 三个必须一起清:留下任何一个都会得到一份指向两个文件的配置(有名字没路径、
+      // 有 URI 没内容),而界面就是照这几个字段画的。
+      expect(cleared.otaFilePath, isNull);
+      expect(cleared.otaFileUri, isNull);
+      expect(cleared.otaFileName, isNull);
+      expect(cleared.otaOriginalPath, isNull);
       // 传 null 不等于清空(那是「没传」),这一点要钉住,否则将来有人以为能这么清。
-      expect(a.copyWith(otaFilePath: null).otaFilePath, '/tmp/fw.bin');
+      expect(a.copyWith(otaFilePath: null).otaFilePath, '/tmp/cache/fw.bin');
+    });
+
+    // 重选一个包时页面先 clearOtaFile 再写新值,靠的就是这个组合 —— 直接 copyWith
+    // 的话,新包没带 identifier(桌面端)会沿用上一个包的 URI,配置就指向两个文件了。
+    test('先整组清再写新值 —— 不会串上一个包的 URI', () {
+      final old = const EBadgeDebugConfig().copyWith(
+        otaFilePath: '/tmp/cache/old.bin',
+        otaFileUri: 'content://x/document/raw%3A%2Ftmp%2Fold.bin',
+        otaFileName: 'old.bin',
+      );
+      final fresh = old
+          .copyWith(clearOtaFile: true)
+          .copyWith(otaFilePath: '/tmp/new.bin', otaFileName: 'new.bin');
+      expect(fresh.otaFileUri, isNull);
+      expect(fresh.otaOriginalPath, '/tmp/new.bin');
+      expect(fresh.otaFileName, 'new.bin');
+    });
+  });
+
+  // 记原始位置的全部意义在于能**认出**和**回到**用户选的那个文件。反解不出来就得
+  // 老实返回 null,让页面退回副本并说明白 —— 猜一个路径出来最坏:界面显示一个不存在
+  // 的位置,而用户会拿它去核对自己手上的包。
+  group('SAF URI 反解出原始路径', () {
+    test('externalstorage 的 primary 卷 → 内置存储', () {
+      expect(
+        EBadgeDebugConfig.originalPathOf(
+            'content://com.android.externalstorage.documents/document/'
+            'primary%3ADownload%2Ffw.bin'),
+        '/storage/emulated/0/Download/fw.bin',
+      );
+    });
+
+    test('externalstorage 的卷标 → 外置卡', () {
+      expect(
+        EBadgeDebugConfig.originalPathOf(
+            'content://com.android.externalstorage.documents/document/'
+            '1234-5678%3Aota%2Ffw.bin'),
+        '/storage/1234-5678/ota/fw.bin',
+      );
+    });
+
+    // 下载目录常见的形式,冒号后面本来就是完整路径。
+    test('raw: 前缀 → 冒号后面就是路径', () {
+      expect(
+        EBadgeDebugConfig.originalPathOf(
+            'content://com.android.providers.downloads.documents/document/'
+            'raw%3A%2Fstorage%2Femulated%2F0%2FDownload%2Ffw.bin'),
+        '/storage/emulated/0/Download/fw.bin',
+      );
+    });
+
+    test('file:// 本身就是路径，且不随平台改分隔符', () {
+      expect(
+        EBadgeDebugConfig.originalPathOf(
+            'file:///storage/emulated/0/Download/my%20fw.bin'),
+        '/storage/emulated/0/Download/my fw.bin',
+      );
+    });
+
+    // Android 11+ 下载目录给的是数据库主键,压根没有对应路径 —— 这是最常见的一种,
+    // 也正是页面必须留着副本兜底的原因。
+    test('msf: 这类数据库主键反解不出来 —— 返回 null，不猜', () {
+      expect(
+        EBadgeDebugConfig.originalPathOf(
+            'content://com.android.providers.downloads.documents/document/'
+            'msf%3A1000000123'),
+        isNull,
+      );
+    });
+
+    test('媒体库的 image:/video: 同理', () {
+      expect(
+        EBadgeDebugConfig.originalPathOf(
+            'content://media/external/file/document/image%3A42'),
+        isNull,
+      );
+    });
+
+    test('认不出的形状一律 null，不抛', () {
+      for (final bad in [
+        null,
+        '',
+        'content://x', // 没有 /document/
+        'content://x/document/', // 有 document 没 docId
+        'content://x/document/nocolon',
+        'content://x/document/primary%3A', // 卷后面空的
+        'content://x/document/raw%3Arelative%2Fpath', // raw 必须是绝对路径
+        'http://example.com/fw.bin',
+        '::::',
+      ]) {
+        expect(EBadgeDebugConfig.originalPathOf(bad), isNull, reason: '$bad');
+      }
+    });
+
+    // 桌面端 identifier 为 null,那里 path 本身就是原文件 —— 不该因为「没有 URI」
+    // 就认为原始位置未知,否则桌面端会永远走副本那条提示。
+    test('没有 URI 时原始位置就是 otaFilePath 本身', () {
+      const cfg = EBadgeDebugConfig(otaFilePath: r'D:\fw\ota.bin');
+      expect(cfg.otaOriginalPath, r'D:\fw\ota.bin');
+    });
+
+    test('有 URI 但反解不出 → 原始位置未知（页面据此退回副本）', () {
+      const cfg = EBadgeDebugConfig(
+        otaFilePath: '/data/cache/file_picker/fw.bin',
+        otaFileUri: 'content://downloads/document/msf%3A1000000123',
+      );
+      expect(cfg.otaOriginalPath, isNull);
+      expect(cfg.otaFilePath, isNotNull, reason: '副本还在,页面靠它兜底');
     });
   });
 }

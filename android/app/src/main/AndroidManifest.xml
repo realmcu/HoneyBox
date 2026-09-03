@@ -10,6 +10,14 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- 所有文件访问权限(Android 11+ 的「特殊权限」,要用户去设置页手动开)。
+         只有 OTA 调试用得上:那条流程要反复读**同一个固件包此刻的内容** —— 编一版、
+         覆盖掉、再刷一次。没有这条权限时,选择器只交回一个 dart:io 打不开的
+         content:// URI 加一份落在 cache 里(系统随时回收)的副本,下次进页面读到的
+         就是过期字节;有了它,反解出的 /sdcard 路径能直接 File 读,永远是当前内容。
+         详见 EBadgeDebugPage._locateOtaFile / SystemSettings.allFilesAccess。
+         不主动弹窗要:进页面只在没授权时显示一个「授权读原文件」的小按钮,点了才跳。 -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- Local-only Wi-Fi hotspot (WiFi 配网 probe)。
          NEARBY_WIFI_DEVICES 在 Android 13+ 也是 eBadge 传图 (§5) 反向连设备
          SoftAP 所必需的 —— WifiNetworkSpecifier 少了它会抛 SecurityException。 -->

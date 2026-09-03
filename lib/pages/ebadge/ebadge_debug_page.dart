@@ -5,6 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../providers/ebadge_link_provider.dart';
 import '../../services/ebadge_link.dart';
@@ -15,6 +17,7 @@ import '../../services/ebadge_transfer_session.dart';
 import '../../services/ebadge_wifi_transport.dart';
 import '../../services/image_jpeg.dart';
 import '../../services/raster.dart';
+import '../../services/system_settings.dart';
 import '../../theme/app_theme.dart';
 import '../shared/file_send_layout.dart';
 import 'ebadge_debug_config.dart';
@@ -101,6 +104,25 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// 清掉)得明确说「上次选的文件不见了」—— 否则用户只会看到按钮是灰的,以为功能坏了。
   bool _otaMissing = false;
 
+  /// 用户选的那个**原文件**在本机的路径,只用来显示。读不到也填 —— 「这包是哪来的」
+  /// 和「现在还读不读得到」是两个问题。
+  ///
+  /// 不直接用 [EBadgeDebugConfig.otaOriginalPath]:那个只做纯字符串反解,Android 11+
+  /// 从下载目录选的包给的是 `msf:<数字>`,得问原生查一次才知道路径(见 [_otaOriginPath])。
+  String? _otaOrigin;
+
+  /// [_otaOriginPath] 的记忆:同一个 URI 不必反复过通道。命中键但值是 null 也算命中
+  /// —— 「这个 URI 解不出路径」同样不会变。授权状态变了要清掉(查 MediaStore 也要权限)。
+  ({String uri, String? path})? _resolvedOrigin;
+
+  /// 有没有「所有文件访问权限」。**三态**:true 有、false 没有、null 不适用
+  /// (非 Android 或系统低于 11)—— 只有 false 才显示授权入口,见
+  /// [SystemSettings.allFilesAccess]。
+  ///
+  /// 这一条只影响 OTA:有它才能直接 File 读用户选的那个原文件,于是「重编一版覆盖掉、
+  /// 再刷一次」拿到的永远是新字节;没有它只能退回本机备份 —— 备份是选中那一刻的快照。
+  bool? _allFiles;
+
   /// 同屏预览(§6)会话状态。与传图共用「设备只允许单会话」这条约束(§6.7),
   /// 但两者是**不同的会话**:推流期间不能发传图 Offer,反之亦然,所以两个按钮
   /// 互相禁用(见 [_busy])。
@@ -173,6 +195,9 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     // 进页面就 stat 一次,让界面一上来就说清「这个包还在不在」,而不是等用户点了
     // 「升级」才报错。不 await:一次 stat 没必要挡住后面的 BLE attach。
     _refreshOtaFile();
+    // 查一次「所有文件访问权限」——没有它就只能读备份。同样不 await,而且**不主动
+    // 要**:没授权时界面上多一个小按钮,点不点由用户定。
+    _refreshAllFilesAccess();
 
     _logSub = link.onLogChanged.listen((_) {
       if (!mounted) return;
@@ -582,38 +607,82 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// 和 [_transferOffer] 一样不查 [_busy]:发一帧不占会话,而它恰恰是「会话卡住了
   /// 设备还认不认命令」时最需要能按下去的那个按钮。
   Future<void> _otaOffer() async {
-    final path = _cfg.otaFilePath;
-    if (path == null || path.isEmpty) {
+    if (_cfg.otaFilePath == null) {
       _link.logError('未选择 OTA 升级包,0xE0 未发出',
           detail: '这一帧要带包名/长度/CRC32,先用「选择升级包」挑一个本地文件');
       return;
     }
+    // 现定位一次,不用界面上那个:原始文件优先,读不到才退副本(见 [_locateOtaFile])。
+    final src = await _locateOtaFile();
+    if (src == null) {
+      await _refreshOtaFile();
+      _link.logError('OTA 升级包已读不到,0xE0 未发出', detail: _otaWhereText());
+      return;
+    }
     final Uint8List body;
     try {
-      body = await File(path).readAsBytes();
+      body = await File(src.path).readAsBytes();
     } catch (e) {
       // 顺手把界面上那个体积刷新掉:读不到通常就是文件已经没了,而信息行上还挂着上一
       // 次 stat 的数字,不刷会让人以为包还在。
       await _refreshOtaFile();
-      _link.logError('读不到 OTA 升级包,0xE0 未发出', detail: '$path\n$e');
+      _link.logError('读不到 OTA 升级包,0xE0 未发出', detail: '${src.path}\n$e');
       return;
     }
     if (body.isEmpty) {
-      _link.logError('OTA 升级包是空文件,0xE0 未发出', detail: path);
+      _link.logError('OTA 升级包是空文件,0xE0 未发出', detail: src.path);
       return;
     }
-    final name = _otaXferName(path);
+    final name = _otaXferName();
     final crc = eBadgeCrc32(body);
     await _send(
       EBadgeRequest.otaOffer(name: name, size: body.length, crc32: crc),
       '0xE0 OTA_OFFER($name ${EBadgeFileType.name(_otaFileType)} '
-      '${body.length}B crc32=0x${crc.toRadixString(16).padLeft(8, '0')}'
-      ',不接上传)',
+      '${body.length}B crc32=0x${crc.toRadixString(16).padLeft(8, '0')},不接上传)',
     );
   }
 
-  /// 选一个本地文件当升级包。**只把路径存进配置**,下次进页面直接沿用,不必再选一遍
-  /// (进页面时会 stat 一次确认文件还在,见 [_refreshOtaFile])。
+  /// 「用户选的是哪一个文件」的一行答案:反解出的原始路径,反解不出就给 URI 原文。
+  ///
+  /// **不提本机备份**:备份是内部实现,页面每次进来自动刷新(见 [_syncOtaStash]),
+  /// 说出来只会让人以为还得自己维护它。成功路径上要提位置就用这个。
+  ///
+  /// 读 [_otaOrigin] 而不是 [EBadgeDebugConfig.otaOriginalPath]:后者只做纯字符串
+  /// 反解,从下载目录选的包(`msf:` 开头)它答不出来,而前者已经把原生那一问的结果
+  /// 也算进去了(见 [_otaOriginPath])。
+  String? _otaOriginText() => _otaOrigin ?? _cfg.otaFileUri;
+
+  /// 「这个包现在在哪」的多行说明,**只在失败路径上用**(报错日志)。
+  ///
+  /// 三行分开写而不是只报一个路径:定位失败时最需要知道的恰恰是**哪一步失败的** ——
+  /// 原始位置认不出来(URI 反解不了)、原文件读不到(权限/被删)、备份也没了,对应的
+  /// 动作完全不同。成功路径上一个字都不说,见 [_syncOtaStash]。
+  String _otaWhereText() {
+    final b = StringBuffer();
+    final orig = _otaOrigin;
+    if (orig != null) b.writeln('原文件:$orig');
+    final uri = _cfg.otaFileUri;
+    if (uri != null && orig == null) b.writeln('原文件(URI,反解不出路径):$uri');
+    final copy = _cfg.otaFilePath;
+    if (copy != null && copy != orig) b.writeln('本机备份:$copy');
+    return b.toString().trimRight();
+  }
+
+  /// 选一个本地文件当升级包。**记三样:原始引用、原始文件名、一个存得住的可读路径**;
+  /// 下次进页面直接沿用,不必再选一遍(进页面时会重新定位一次,见 [_refreshOtaFile])。
+  ///
+  /// 存的路径**不是选择器交回来的那个**:`res.files.first.path` 在 Android 上是
+  /// file_picker 复制到 `cache/file_picker/<时间戳>/` 的副本(插件文档原话「a cached
+  /// copy of this file」),而 `cache` 是系统随时回收的目录 —— 存它的结果就是「这次
+  /// 选完能用、下次进页面报已读不到」。所以原文件读得到就记原文件路径,读不到就把
+  /// 字节搬进 app 私有目录再记那一份(见 [_stashOtaFile])。
+  ///
+  /// 原文件在哪分两步问:先纯字符串反解 URI,解不出再让原生查一次 MediaStore
+  /// (见 [_otaOriginPath])—— 从下载目录选的包只有后者答得上来。
+  ///
+  /// 原始引用(SAF 的 `content://` URI,在 `identifier` 里)另记一份:它答的是
+  /// 「这包到底是哪一个文件」—— 一个私有目录下的 `fw.bin` 看不出是下载目录那份还是
+  /// U 盘那份,而调试时手上常有好几版固件。见 [EBadgeDebugConfig.otaFileUri]。
   ///
   /// 不按扩展名过滤:固件包叫 `.bin` / `.img` / `.ota` / 带版本号的无后缀文件都见
   /// 过,一过滤就会出现「我明明有这个包却选不中」。调试台宁可让人选错,也不该让人
@@ -629,26 +698,51 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
       );
       // 判空用 `files.isEmpty` 而不是 `files.single`:取消时有的平台返回 null,有的
       // 返回空列表,后者上 `single` 会直接抛。
-      final path =
-          res == null || res.files.isEmpty ? null : res.files.first.path;
-      if (path == null || path.isEmpty) {
+      final picked = res == null || res.files.isEmpty ? null : res.files.first;
+      final path = picked?.path;
+      if (picked == null || path == null || path.isEmpty) {
         messenger.showSnackBar(const SnackBar(content: Text('已取消选择')));
         return;
       }
-      // 只记路径,不复制文件 —— 发的就是用户选的那一份,换了新固件包盖回原路径就能
-      // 直接再发一次,不必再进选择器。
-      //
+      // 无论原文件读不读得到,都先备一份到自己的目录 —— 那是这个包唯一保证还在的副本。
+      // 记进配置的路径则优先用原文件:原文件读得到时每次下发都读它此刻的内容,换了新
+      // 一版也不用重选;读不到才落到备份上。
+      final orig = EBadgeDebugConfig.originalPathOf(picked.identifier) ??
+          await SystemSettings.resolveUriPath(picked.identifier) ??
+          (picked.identifier == null ? path : null);
+      final stash = await _stashOtaFile(path, picked.name);
+      final origReadable = orig != null && await _fileExists(orig);
+      final keep = origReadable ? orig : (stash ?? path);
       // 选文件期间用户可能已经退出页面(选择器是另一个 Activity),而 _updateConfig
       // 里就是 setState。
       if (!mounted) return;
-      _updateConfig(_cfg.copyWith(otaFilePath: path));
+      // 先整组清掉再写:上一个包留下的 URI/名字配到这一次的路径上,就成了一份指向两个
+      // 文件的配置 —— 而 copyWith 的 `?? this.x` 恰恰会那么干(这次没 identifier 就
+      // 沿用上次的)。
+      _updateConfig(_cfg.copyWith(clearOtaFile: true).copyWith(
+            otaFilePath: keep,
+            otaFileUri: picked.identifier,
+            otaFileName: picked.name,
+          ));
       await _refreshOtaFile();
       if (!mounted) return;
       final size = _otaSize;
+      final where = _otaOriginText();
       _link.logInfo(
         size == null ? '已选择 OTA 升级包,但读不到内容' : '已选择 OTA 升级包',
-        detail: size == null ? path : '${_otaXferName(path)} ${size}B\n$path',
+        detail: size == null
+            ? _otaWhereText()
+            : '${_otaXferName()} ${size}B${where == null ? '' : '\n$where'}',
       );
+      // 唯一还值得说的备份相关的话:原文件读不到、备份又没建起来 —— 这次能发(读的是
+      // 选择器缓存),但那个缓存随时被系统清掉,下次进页面就是「已读不到」。提前说一声
+      // 比让人下回自己撞上去好。备份正常时一个字都不提。
+      if (stash == null && !origReadable) {
+        _link.logError(
+          '升级包备份失败,下次进页面可能要重选一次',
+          detail: '原文件读不到,备份也没建起来;当前读的是选择器缓存\n$path',
+        );
+      }
       messenger.showSnackBar(SnackBar(
         content: Text(size == null ? '选中的文件读不到' : '已选择,${_otaSizeText(size)}'),
       ));
@@ -658,37 +752,232 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     }
   }
 
-  /// 重新 stat 配置里记的那个升级包,刷新体积和「文件还在不在」。
+  /// 把 [srcPath] 那份字节备到 **app 私有目录**,返回备份路径;备不了返回 null。
+  ///
+  /// 为什么一定要备一份:Android 上选择器交回来的路径在
+  /// `cache/file_picker/<时间戳>/` 下 —— `cache` 是系统随时回收的目录(用户在「存储」
+  /// 里点一下清缓存也一样),而原文件那一侧只有一个 `content://` URI,`dart:io` 打不开、
+  /// 反解出的 `/sdcard` 路径在 targetSdk 36 的分区存储下**也**读不到。也就是说**除了
+  /// 这份备份,下次进页面可能一个字节都拿不到**,而升级包是要反复用的。
+  ///
+  /// 拿到「所有文件访问权限」后那条 `/sdcard` 路径就能直接 `File` 读了(见
+  /// [_requestAllFilesAccess]),备份于是退成纯保险 —— 但它还得留着:权限是用户手动
+  /// 给的,可能压根没给;给了也可能被撤;而 `msf:` 那种解不出路径的来源照样只有备份。
+  ///
+  /// **只留最新一个包**:整个目录先清掉再放。升级包动辄几十 MB,每选一次留一份,几轮
+  /// 调试下来 app 数据就涨到几百 MB,而旧的那些一个都不会再用到。
+  ///
+  /// 备不了(磁盘满、权限)返回 null,**不抛也不写日志**:进页面时会自动刷一次备份
+  /// ([_syncOtaStash]),那条路上失败一次没有任何后果,报出来只是噪音。真正要说的那
+  /// 一种情况(选完包时连备份都没建起来)由 [_pickOtaFile] 自己判断后报。
+  Future<String?> _stashOtaFile(String srcPath, String name) async {
+    try {
+      final dir = Directory(await _otaStashDirPath());
+      // 源就在备份目录里(刷新时原文件恰好是备份自己)—— 清目录会先把源删掉,直接
+      // 认为已经是最新的。
+      if (srcPath.startsWith('${dir.path}/')) return srcPath;
+      if (await dir.exists()) await dir.delete(recursive: true);
+      await dir.create(recursive: true);
+      final dest = _otaStashPathIn(dir.path, name);
+      await File(srcPath).copy(dest);
+      return dest;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 备份目录:app support 下的一个固定子目录。
+  static Future<String> _otaStashDirPath() async =>
+      '${(await getApplicationSupportDirectory()).path}/ebadge_ota';
+
+  /// 备份文件名沿用原名 —— 出问题时 adb 拉出来一看就知道是哪个包。名字里的路径分隔符
+  /// 要去掉:SAF 给的 displayName 理论上不含 `/`,但它来自外部,不值得赌。
+  static String _otaStashPathIn(String dir, String name) {
+    final safe = name.replaceAll(RegExp(r'[\\/]'), '_');
+    return '$dir/${safe.isEmpty ? 'ota.bin' : safe}';
+  }
+
+  /// 配置里那个包的备份应该在哪;不知道原名就返回 null。
+  Future<String?> _otaStashPath() async {
+    final name = _cfg.otaFileName ?? _baseName(_cfg.otaFilePath ?? '');
+    if (name.isEmpty) return null;
+    return _otaStashPathIn(await _otaStashDirPath(), name);
+  }
+
+  /// 用户选的那个**原文件**在本机的路径;拿不到返回 null。
+  ///
+  /// 两级解法,先便宜的:
+  ///
+  /// 1. 纯字符串反解([EBadgeDebugConfig.otaOriginalPath])—— `file:` / `raw:` /
+  ///    `primary:相对路径` 这些形状不用问任何人;
+  /// 2. 还解不出就问原生查一次 MediaStore([SystemSettings.resolveUriPath])——
+  ///    Android 11+ 从下载目录选的包给的是 `msf:<数字>`,那是数据库主键,只有回查
+  ///    才知道路径。**这一步是「永远新」能不能成立的关键**:少了它,从下载目录选的
+  ///    包永远只能读备份。
+  ///
+  /// 解出来也可能读不到(没「所有文件访问权限」时分区存储照样拦),所以调用方必须自己
+  /// 复核存在性 —— 这个方法只回答「它在哪」。
+  Future<String?> _otaOriginPath() async {
+    final pure = _cfg.otaOriginalPath;
+    if (pure != null && pure.isNotEmpty) return pure;
+    final uri = _cfg.otaFileUri;
+    if (uri == null || uri.isEmpty) return null;
+    final memo = _resolvedOrigin;
+    if (memo != null && memo.uri == uri) return memo.path;
+    final p = await SystemSettings.resolveUriPath(uri);
+    _resolvedOrigin = (uri: uri, path: p);
+    return p;
+  }
+
+  /// 定位这一次真正要读的那个文件:**原文件 → 配置里记的路径 → 本机备份**,第一个
+  /// 读得到的就用它。
+  ///
+  /// 顺序不能反。原文件([_otaOriginPath])读到的永远是它此刻的内容;备份是某一刻的
+  /// 快照,原文件换了新一版它不会跟着变 —— 先读备份就意味着「换了包、页面上体积也变
+  /// 了、刷进去的还是旧的」这种最难查的偏差。
+  ///
+  /// 但也不能只认原文件:没有「所有文件访问权限」时它读不到(见 [_stashOtaFile]),那
+  /// 时备份是唯一读得到的那一份。第三个候选是**兜底**——配置里的路径和原文件都失效了
+  /// (比如那条路径本来就指向已经被清掉的选择器缓存),备份还在就照样能用。
+  ///
+  /// [origin] 是外面已经算好的原文件路径,省一次重复解析;不传就自己解。
+  /// 返回 null = 三个都读不到。`isOrigin` = 读的就是原文件本身(那才是新鲜的)。
+  Future<({String path, bool isOrigin})?> _locateOtaFile([
+    String? origin,
+  ]) async {
+    final orig = origin ?? await _otaOriginPath();
+    if (orig != null && orig.isNotEmpty && await _fileExists(orig)) {
+      return (path: orig, isOrigin: true);
+    }
+    for (final p in [_cfg.otaFilePath, await _otaStashPath()]) {
+      if (p != null && p.isNotEmpty && p != orig && await _fileExists(p)) {
+        return (path: p, isOrigin: false);
+      }
+    }
+    return null;
+  }
+
+  /// 把备份刷成 [src] 此刻的内容。**静默** —— 不弹提示、不写日志、不进界面。
+  ///
+  /// 这是备份唯一的更新时机(进页面 / 选完包各一次)。[src] 是选择器缓存时更要刷:
+  /// 那份字节随时被系统回收,这可能是最后一次捞得到它。
+  ///
+  /// 体积和 mtime 都没变就跳过:升级包几十 MB,每次进页面白拷一遍既慢又费闪存。
+  /// [src] 本身就是备份时直接返回(`dest == src` 那一支),没有更新的来源。
+  Future<void> _syncOtaStash(String src) async {
+    final name = _cfg.otaFileName ?? _baseName(src);
+    if (name.isEmpty) return;
+    try {
+      final dest = _otaStashPathIn(await _otaStashDirPath(), name);
+      if (dest == src) return;
+      final from = await File(src).stat();
+      final to = File(dest);
+      if (await to.exists()) {
+        final st = await to.stat();
+        if (st.size == from.size && !st.modified.isBefore(from.modified)) {
+          return;
+        }
+      }
+      await _stashOtaFile(src, name);
+    } catch (_) {
+      // 备份是保险,刷不动不影响这一轮下发 —— 真读不到时 [_locateOtaFile] 会报。
+    }
+  }
+
+  /// 存在性检查。异常一律按「不存在」——权限被收回、路径其实指向目录、SAF 授权过期,
+  /// 结局都一样:这个文件读不了,而用户能做的只有重选一次,分别报错没有意义。
+  static Future<bool> _fileExists(String path) async {
+    try {
+      return await File(path).exists();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 重新定位并 stat 配置里记的那个升级包,刷新体积和「文件还在不在」。
   ///
   /// **三个时机都要调**:进页面(记住的路径可能早已失效)、刚选完(确认真的读得到)、
   /// 以及点下升级之后([_otaTransfer] 自己再查一遍)。少任何一次,界面上显示的体积
   /// 就有可能属于另一份文件 —— 而 0xE0 的 size/crc32 报的是**下发那一刻现读**的那份,
   /// 两者不一致时页面会骗人。
+  ///
+  /// 顺带把本机备份刷成此刻读到的内容([_syncOtaStash]),不 await:几十 MB 的固件
+  /// 拷一次要几百毫秒,进页面不该为它卡住,而备份是给**下一次**进页面用的保险,这一轮
+  /// 下发读的是刚 stat 过的那个路径,与拷贝完成与否无关。
   Future<void> _refreshOtaFile() async {
-    final path = _cfg.otaFilePath;
-    if (path == null || path.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _otaSize = null;
-          _otaMissing = false;
-        });
-      }
-      return;
-    }
+    final picked = _cfg.otaFilePath;
+    final origin = picked == null ? null : await _otaOriginPath();
+    final src = picked == null ? null : await _locateOtaFile(origin);
     int? size;
-    try {
-      final f = File(path);
-      if (await f.exists()) size = await f.length();
-    } catch (_) {
-      // 权限被收回、路径其实指向目录、SAF 授权过期 —— 结局都一样:这个包用不了。
-      // 分别报错没有意义(用户能做的只有重选一次),所以统一按「拿不到」处理。
-      size = null;
+    if (src != null) {
+      try {
+        size = await File(src.path).length();
+      } catch (_) {
+        size = null;
+      }
     }
     if (!mounted) return;
+    // 「没选过」不算丢:那时该提示「先选一个包」,而不是「上次选的不见了」。
+    final missing = picked != null && size == null;
+    // 只在**刚变成**读不到时记一条,不是每次定位都记:进页面会定位一次,发送前又一次,
+    // 每次都写会把日志冲淡。而这一条是必须留下的 —— 信息行只说「已读不到」,到底是原
+    // 文件没了、URI 反解不出、还是副本被清掉,只有这里说得出来。
+    if (missing && !_otaMissing) {
+      _link.logError('上次选的 OTA 升级包已读不到', detail: _otaWhereText());
+    }
     setState(() {
       _otaSize = size;
-      _otaMissing = size == null;
+      _otaMissing = missing;
+      _otaOrigin = origin;
     });
+    if (src == null) return;
+    // 原文件此刻读得到、而配置里记的还是别的(备份 / 选择器缓存)—— **静默**换成它。
+    // 这就是「授权之后自动生效」那一步:授权前存的是备份路径,授权后进一次页面,记住
+    // 的路径自己升级成永远新的那个,不用重选、也没有任何提示。
+    if (src.isOrigin && picked != src.path) {
+      _updateConfig(_cfg.copyWith(otaFilePath: src.path));
+    }
+    unawaited(_syncOtaStash(src.path));
+  }
+
+  /// 查一次「所有文件访问权限」。不要也不提示 —— 只决定要不要显示那个授权按钮。
+  Future<void> _refreshAllFilesAccess() async {
+    final v = await SystemSettings.allFilesAccess();
+    if (!mounted || v == _allFiles) return;
+    setState(() => _allFiles = v);
+  }
+
+  /// 去要「所有文件访问权限」:跳系统设置页,回来后复查一次。
+  ///
+  /// 只有 [_allFiles] == false 时界面上才有这个入口,而那意味着必然是 Android 11+ ——
+  /// permission_handler 在更低的版本上走这条路会崩(见 [SystemSettings.allFilesAccess])。
+  ///
+  /// 拿到权限之后**不用重选包**:清掉 URI→路径 的记忆(那一步也要权限),再刷一次,
+  /// [_refreshOtaFile] 就会把配置里的路径升级成原文件本身。
+  Future<void> _requestAllFilesAccess() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await Permission.manageExternalStorage.request();
+    } catch (e) {
+      _link.logError('申请所有文件访问权限失败', detail: '$e');
+    }
+    final granted = await SystemSettings.allFilesAccess();
+    if (!mounted) return;
+    setState(() {
+      _allFiles = granted;
+      _resolvedOrigin = null;
+    });
+    if (granted != true) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('未获得权限，升级包仍读本机备份'),
+      ));
+      return;
+    }
+    _link.logInfo(
+      '已获得所有文件访问权限',
+      detail: '之后每次都直接读你选的那个原文件 —— 重编一版覆盖掉,下发的就是新的那份',
+    );
+    await _refreshOtaFile();
   }
 
   /// OTA 全链路下发:0xE0 → 0xE1 → 0x13 → 连热点 → TCP(EBXF 头 + 正文 → EBXR)
@@ -710,34 +999,30 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   Future<void> _otaTransfer() async {
     if (_busy) return;
 
-    final path = _cfg.otaFilePath;
-    if (path == null || path.isEmpty) {
+    if (_cfg.otaFilePath == null) {
       _link.logError('未选择 OTA 升级包,未发起升级', detail: '先用「选择升级包」挑一个本地文件');
       return;
     }
 
-    // 发送前**必须**再查一次存在性,不能信界面上那个体积:配置里的路径可能是上次
+    // 发送前**必须**重新定位一次,不能信界面上那个体积:配置里的路径可能是上次
     // (甚至上个月)存下来的,而进页面那一次 stat 之后文件也还可能被删/被换。少这
     // 一步,故障会推迟到 readAsBytes 抛异常 —— 那时设备已经收下 Offer 停在 WaitSta,
     // 得等 §5.5 的 60 s 超时才能再试一次。
-    final file = File(path);
-    var exists = false;
-    try {
-      exists = await file.exists();
-    } catch (_) {
-      exists = false;
-    }
-    if (!exists) {
+    //
+    // 定位仍是「原文件优先」:原包换了新版本,这一步就自动读到新的那份。
+    final src = await _locateOtaFile();
+    if (src == null) {
       await _refreshOtaFile();
-      _link.logError('OTA 升级包已不存在,未发起升级', detail: path);
+      _link.logError('OTA 升级包已读不到,未发起升级', detail: _otaWhereText());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('升级包已不存在,请重新选择'),
+        content: const Text('升级包已读不到,请重新选择'),
         duration: const Duration(seconds: 4),
         backgroundColor: Theme.of(context).colorScheme.error,
       ));
       return;
     }
+    final file = File(src.path);
     if (!mounted) return;
 
     setState(() {
@@ -752,7 +1037,7 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     try {
       body = await file.readAsBytes();
     } catch (e) {
-      _link.logError('读取 OTA 升级包失败', detail: '$path\n$e');
+      _link.logError('读取 OTA 升级包失败', detail: '${src.path}\n$e');
       if (mounted) {
         setState(() {
           _otaBusy = false;
@@ -767,7 +1052,7 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     if (body.isEmpty) {
       // 0 字节包直接拦掉:Offer 报 size=0 没有任何意义,设备要么回 0xE6 要么把空
       // 文件当成一次「成功」刷写,后者比失败更麻烦。
-      _link.logError('OTA 升级包是空文件,未发起升级', detail: path);
+      _link.logError('OTA 升级包是空文件,未发起升级', detail: src.path);
       setState(() {
         _otaBusy = false;
         _otaStage = EBadgeXferStage.failed;
@@ -789,16 +1074,15 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
       );
     }
 
-    final name = _otaXferName(path);
-    final base = _baseName(path);
+    final name = _otaXferName();
+    final base = _cfg.otaFileName ?? _baseName(src.path);
     _link.logInfo(
       '升级包已就绪',
       detail: '$name ${body.length}B '
           'file_type=${EBadgeFileType.name(_otaFileType)}'
           // 名字被裁过就把原名一起记上:设备侧按名字落盘,对不上时第一件要确认的
           // 就是「我选的和它收到的是不是同一个名字」。
-          '${name == base ? '' : '(原名 $base,已裁到 ${EBadgeLimits.fileName}B)'}'
-          '\n$path',
+          '${name == base ? '' : '(原名 $base,已裁到 ${EBadgeLimits.fileName}B)'}',
     );
 
     final session = EBadgeTransferSession(
@@ -834,17 +1118,21 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
     }
   }
 
-  /// 会话里用的文件名:取路径最后一段,并裁到 §2.8 的 23 字节。
+  /// 会话里用的文件名:**用户选的那个原始文件名**,裁到 §2.8 的 23 字节。
+  ///
+  /// 用记下来的原名而不是从路径切最后一段:Android 上那个路径指向副本,而副本落地时
+  /// 撞名 file_picker 会改名(`fw (1).bin`)—— 设备日志里认包全靠这个名字,报一个被
+  /// 选择器改过的名字等于把线索改掉了。没记到原名(旧配置)才退回切路径。
   ///
   /// 这个名字**两处都要上线**:0xE0 的 TLV_NAME,以及数据面那 40 字节 EBXF 头。所以
   /// 裁不是保险而是硬要求 —— 两边写字符串走的 [EBadgeCodec.str] 遇到超长名字**直接
   /// 抛**,而真实固件包名一上手就超(`ebadge_fw_v1.2.3_release.bin` 已经 28 字节)。
   /// 裁在页面这一层做是刻意的 —— 编解码层不替调用方决定截断,见 [EBadgeCodec.fitStr]。
-  static String _otaXferName(String path) {
-    final base = _baseName(path);
-    return EBadgeCodec.fitStr(
-        base.isEmpty ? 'ota.bin' : base, EBadgeLimits.fileName);
-  }
+  String _otaXferName() =>
+      _otaXferNameOf(_cfg.otaFileName ?? _baseName(_cfg.otaFilePath ?? ''));
+
+  static String _otaXferNameOf(String raw) =>
+      EBadgeCodec.fitStr(raw.isEmpty ? 'ota.bin' : raw, EBadgeLimits.fileName);
 
   /// 会话里报的 file_type。§2.7 那张表里没有「固件」这一档,取
   /// [EBadgeFileType.bin](0x06)—— 它是唯一不宣称内容格式的一项。
@@ -868,11 +1156,18 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
   /// 判空 path,而列表字面量里放不进局部变量。
   Widget _buildOtaFileRow() {
     final path = _cfg.otaFilePath;
+    if (path == null) return const _OtaFileRow.empty();
     final size = _otaSize;
+    final name = _cfg.otaFileName ?? _baseName(path);
     return _OtaFileRow(
-      path: path,
+      name: name,
+      // 原始位置优先显示路径,连原生都解不出才显示 URI 本身 —— URI 虽然不能拿去核对
+      // 文件,但至少能看出这包来自下载目录还是别的 provider,比只给一个副本路径强。
+      origin: _otaOrigin ?? _cfg.otaFileUri,
+      originIsUri: _otaOrigin == null && _cfg.otaFileUri != null,
       sizeText: size == null ? null : _otaSizeText(size),
-      xferName: path == null ? null : _otaXferName(path),
+      xferName: _otaXferName(),
+      baseName: name,
       missing: _otaMissing,
     );
   }
@@ -1306,27 +1601,8 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
           _XferProgress(stage: _xferStage, detail: _xferDetail),
         const _Hint(
           '按 §5.4 完整时序跑:0x10 Offer → 0x11 同意 → 0x13 AP_INFO → '
-          '连设备热点 → TCP 推 EBXF(40B 头)+ 正文 → 收 EBXR → 等 0x15 DONE。',
-        ),
-        _Hint(
-          '「测试图体积」选的是同一尺寸($_demoImageSize×$_demoImageSize)下不同'
-          '字节量的正文,从 ~6K 到 ~115K —— 尺寸各档一致,差的只有体积,所以'
-          '「小的能过、大的过不去」直接指向字节数/分块/超时,不会和分辨率混在一起。'
-          '各档独立缓存,来回切不重编;当前档为 ${_demoPreset.label}'
-          '(q=${_demoPreset.quality})。'
-          '文件名带档位标识,几档轮着传不会在设备上互相覆盖。',
-        ),
-        const _Hint(
-          '下面的开关决定正文封装:不带头(默认)= 只发裸 JFIF(file_type 报 JPEG),'
-          '与 §5.2 字面上的「原始文件字节」一致;带头 = 8B gui header + '
-          '4B JPEG 长度 + 4B 对齐 + 裸 JFIF(与图片页一致,file_type 报 BIN)。'
-          '同一档的两种封装共用同一份 JPEG 字节,切换不会重编,所以两次传输比的是'
-          '同一张图。首次点按要先编码,约几百毫秒;之后复用同一份,CRC32 每次一致。'
-          '「导出测试图」存的就是当前档位 + 当前开关下要发的那份字节 —— 带头时'
-          '在电脑上看图要先跳过前 16 字节。'
-          '本区的档位与开关(以及下方帧源、日志自动滚动)会记住,下次进来沿用 ——'
-          '调试要反复进出页面,每次回到默认档很容易把上一轮的结论套到这一轮上。'
-          '注意:连热点期间本机所有网络请求都走设备热点(无外网),会话结束自动恢复。',
+          '连设备热点 → TCP 推 EBXF(40B 头)+ 正文 → 收 EBXR → 等 0x15 DONE。'
+          '连热点期间本机所有网络请求都走设备热点(无外网),会话结束自动恢复。',
         ),
         const SizedBox(height: 16),
         const _SectionLabel('OTA 升级(0xE0–0xE6,协议文档之外)'),
@@ -1338,6 +1614,9 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
             onTap: _otaOffer,
           ),
           _OtaPickButton(enabled: !_busy, onTap: _pickOtaFile),
+          // 只在真的缺权限时出现,授权完自己消失(null = 这个系统版本没这回事)。
+          if (_allFiles == false)
+            _AllFilesButton(enabled: !_busy, onTap: _requestAllFilesAccess),
           _OtaButton(
             busy: _otaBusy,
             // 没有可用的包时禁用,而不是让人点下去再报错 —— 那一下会把 Offer 发出去,
@@ -1350,55 +1629,11 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
         if (_otaStage != EBadgeXferStage.idle || _otaBusy)
           _XferProgress(stage: _otaStage, detail: _otaDetail),
         const _Hint(
-          '0xE0–0xE6 不在协议 §3 的命令表里(那一段既未定义也未保留),和 0xFF DEBUG '
-          '一样是厂商私有扩展。它是把 §5 传图那一组**整段平移**出来的:0xE0 OFFER ← '
-          '0x10、0xE1 确认 ← 0x11、0xE4 进度 ← 0x14、0xE5 成功 ← 0x15、0xE6 失败 ← '
-          '0x16,每条的参数区结构和被平移的那条逐字节一致。所以左边那个「OTA」按钮只'
-          '发 0xE0 那一帧看设备认不认,「OTA 升级」才跑完整链路。',
-        ),
-        const _Hint(
-          '0xE2/0xE3 **刻意空着**:热点那两条(0x12 GET_AP_INFO / 0x13 AP_INFO)两条'
-          '链路**共用**—— 设备起的是同一个 AP、同一个 TCP 端口,再造一对命令只会让固件'
-          '多一份一模一样的实现。「0xE_ 里缺的正好是共用的那两条」这件事本身就是文档。',
-        ),
-        const _Hint(
-          '数据面和传图**完全一样**:40 字节 EBXF 头 + 正文,然后必须等设备回 8 字节 '
-          'EBXR 应答。头里的 name/type/size/crc32 就是 0xE0 里那四条(§5.2 校验规则'
-          '第 3 条要求两处的 CRC32 必须相同,所以整份包只算一次 CRC,两处共用)。'
-          'EBXR 只说明「字节收全并通过校验」,最终成败仍以 BLE 的 0xE5/0xE6 为准 ——'
-          '那才是设备刷完之后给的结论(§5.3 对传图本来就这么规定)。',
-        ),
-        const _Hint(
-          'Offer 里 type 恒为 BIN(0x06):§2.7 那张表里没有「固件」这一档,而 BIN 是'
-          '唯一不宣称内容格式的一项,固件包自己带签名/校验、由设备刷写时验。这个值'
-          '**不给调用方选** —— 一旦帧里写 JPEG、头里写 BIN,设备按 §5.2 直接 close,'
-          '而现场表现只是「连上就断」,离根因太远。size 和 crc32 都取自按下按钮那一刻'
-          '现读的那份字节:报小了设备收够就收工、剩下的全丢,报大了它一直等到超时。',
-        ),
-        const _Hint(
-          '升级包从本地文件选,**只记路径**(不复制文件),下次进页面直接沿用、不用'
-          '再选一遍;进页面时会 stat 一次确认文件还在,不在就红字提示重选。'
-          '每次下发前还会再查一遍存在性并重读内容 —— 报的长度和 CRC32 必须属于这一次'
-          '真正推出去的那份。「OTA」那一帧也要现读整个包才能算 CRC32,几十 MB 的包'
-          '按下去会等一会儿。'
-          '文件名按 §2.8 裁到 ${EBadgeLimits.fileName} 字节(裁过会同时记下原名)——'
-          '真实固件包名一上手就超,不裁会直接抛。'
-          '存储不足只提示不拦:0x1A 报的余量是壁纸分区的,升级包大概率落在别的分区。',
-        ),
-        const _Hint(
-          '放行条件比传图多一条**容错**:正常路径等 0xE1,但设备若跳过它直接报 0x13 '
-          'AP_INFO,也按同意处理、直接去连热点 —— 固件先前的实现是「自检过了就把热点'
-          '起起来报 AP_INFO」,而 0x13 的信息量本来就比 decision=1 更足(热点已经能'
-          '连)。这条容忍只在 0xE1 一直没来时生效。设备要拒绝仍然走 0xE6,所以放宽它'
-          '不会把失败当成功。传图那条链路不变 ——§5.4 规定它必须先回 0x11,先来 0x13 '
-          '属于固件时序出错,替它兜着只会把问题藏到更靠后的阶段。',
-        ),
-        const _Hint(
-          '0xE5 的 file_id **当可选**处理:那条 TLV 在 0x15 里的意思是「入库成了第几张'
-          '壁纸」,固件包没有对应物,很可能压根不带。拿 0x15 的严格解析去解,结果是一次'
-          '**已经刷完的升级**因为少一条无意义的 TLV 被等到 20 s 超时、报成失败 —— 这是'
-          '最不该出现的误报。0xE5 里唯一必选的是 size:它和本机发出的字节数一对账,才'
-          '知道设备到底收全了没有。',
+          '0xE0–0xE6 是厂商私有扩展,把 §5 传图那一组整段平移出来:0xE0 OFFER ← 0x10、'
+          '0xE1 确认 ← 0x11、0xE4 进度 ← 0x14、0xE5 成功 ← 0x15、0xE6 失败 ← 0x16'
+          '(热点那两条 0x12/0x13 两条链路共用,所以 0xE2/0xE3 空着)。'
+          '「OTA」只发 0xE0 那一帧看设备认不认,「OTA 升级」才跑完整链路。'
+          '设备跳过 0xE1 直接报 0x13 AP_INFO 也按同意处理。',
         ),
         const SizedBox(height: 16),
         const _SectionLabel('同屏预览(§6 全链路,V1.3 新增)'),
@@ -1453,47 +1688,11 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
           ),
         _Hint(
           '按 §6.4 时序跑:0x08 OFFER(fps=$_streamFps)→ 0x09 DECISION → '
-          '0x13 AP_INFO → 连热点 → TCP 连续推「14B 流头 + JPEG」直到手动停止。'
-          '帧率跟着帧源走(内置帧固定 '
-          '${EBadgeStreamSource.builtin.defaultFps} fps、摄像头由滑条给,'
-          '$kEBadgeStreamFpsMin–$kEBadgeStreamFpsMax),设备可回 decision=2 '
-          '协商成更低的值。'
+          '0x13 AP_INFO → 连热点 → TCP 连续推「14B 流头 + '
+          '${EBadgeStreamCameraSource.size}×${EBadgeStreamCameraSource.size} '
+          'JPEG」直到手动停止,设备可回 decision=2 协商成更低的帧率。'
           '与 §5 的区别:流头只有 14 字节且不带文件名,EBXR 应答是可选的,'
           '设备侧帧间隔超 3 s 就会自行清理会话。',
-        ),
-        _Hint(
-          _cfg.streamSource == EBadgeStreamSource.builtin
-              ? '推的是现场生成的 ${EBadgeStreamDemoFrames.count} 张 '
-                  '${EBadgeStreamDemoFrames.width}×'
-                  '${EBadgeStreamDemoFrames.height} '
-                  '测试帧(黑底 + 半幅白块四格轮转并印帧号,便于肉眼判断卡帧/丢帧)。'
-                  '画面固定、每帧体积固定,设备屏上任何异常都能归因到协议实现。'
-                  '首次点按要先编这四帧(纯 Dart 编码,约几百毫秒),之后复用。'
-                  '本源按 ${EBadgeStreamSource.builtin.defaultFps} fps 推 ——'
-                  '每秒落一帧,能逐帧对着设备屏核帧号;十倍速下白块转一圈只要 '
-                  '400 ms,看着就是一片闪烁,反而读不出丢了哪一帧。'
-                  '这也是 3 s 帧超时下的安全底线:再慢就只能跳一次 tick。'
-                  '本源没有滑条 —— 帧率和画面都是它的固定量,可调就失去对照价值了。'
-              : '推的是摄像头实时画面,'
-                  '${EBadgeStreamCameraSource.size}×'
-                  '${EBadgeStreamCameraSource.size} JPEG '
-                  '(每帧独立成一个完整 JFIF,设备可逐帧解)。画面和每帧体积都在变,'
-                  '压的是真实负载下的时序 —— 这是固定帧测不出来的,所以帧率和质量'
-                  '都做成滑条:一边往上推帧率、往下压质量,一边看进度里的「跳 N 帧」'
-                  '从第几档开始攒,那个拐点就是这条链路的真实容量。'
-                  '质量能边推边调(原生每帧现场读),帧率要停下来才能改。'
-                  '只保留最新一帧,推不及的会被顶掉'
-                  '(「顶掉」数不是故障:相机按 fps 一直产,设备协商的 fps 可能更低,'
-                  '差额就落在这里),所以延迟不会越攒越大。',
-        ),
-        const _Hint(
-          '尺寸三条链路统一 ${EBadgeStreamCameraSource.size}×'
-          '${EBadgeStreamCameraSource.size} —— §6.2 的流头不带宽高,设备只能按 '
-          'JPEG 自身的 SOF 解,发别的尺寸就会把「设备缩放对不对」也混成变量。'
-          '摄像头帧源复用的是拍照投屏那套原生编码器的 JPEG 分支(GL 阶段把裁切/'
-          '旋转/缩放烘进输出,所以 466 不必是相机支持的尺寸);两页不会同时存活,'
-          '退页面或停推流都会把相机交还。'
-          '注意:不能用 H.264 —— 那是带 SPS/PPS 和帧间依赖的码流,单帧拿出来解不开。',
         ),
         const SizedBox(height: 16),
         const _SectionLabel('私有调试(协议文档之外)'),
@@ -2580,6 +2779,42 @@ class _OtaPickButton extends StatelessWidget {
   }
 }
 
+/// 「授权读原文件」按钮 —— 去要 Android 11+ 的「所有文件访问权限」。
+///
+/// **只在没这个权限时才挂到界面上**,授权完就永久消失,所以它不需要显示当前状态,
+/// 也不该配一段说明文字:出现即等于「点我能让升级包永远读到最新的那份」。
+///
+/// 用 tertiary 色而不是 error:缺这个权限并不是错误 —— 不授权也能刷,只是读的是选包
+/// 那一刻的备份。
+class _AllFilesButton extends StatelessWidget {
+  const _AllFilesButton({required this.enabled, required this.onTap});
+
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return OutlinedButton(
+      onPressed: enabled ? onTap : null,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        visualDensity: VisualDensity.compact,
+        foregroundColor: cs.tertiary,
+        side: BorderSide(color: cs.tertiary.withValues(alpha: 0.5)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.lock_open, size: 16),
+          SizedBox(width: 7),
+          Text('授权读原文件', style: TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
 /// 「OTA 升级(全链路)」按钮。
 ///
 /// 与 [_XferButton] 同形不复用:两者的禁用条件不一样 —— 传图的正文是内置的、随时
@@ -2637,14 +2872,33 @@ class _OtaButton extends StatelessWidget {
 /// 这类调试里最常见的假故障。
 class _OtaFileRow extends StatelessWidget {
   const _OtaFileRow({
-    required this.path,
+    required this.name,
+    required this.origin,
+    required this.originIsUri,
     required this.sizeText,
     required this.xferName,
+    required this.baseName,
     required this.missing,
   });
 
-  /// null = 从没选过。
-  final String? path;
+  /// 从没选过。
+  const _OtaFileRow.empty()
+      : name = null,
+        origin = null,
+        originIsUri = false,
+        sizeText = null,
+        xferName = null,
+        baseName = null,
+        missing = false;
+
+  /// 用户选的那个文件的原始名;null = 从没选过。
+  final String? name;
+
+  /// 用户选的那个文件在哪 —— 反解出来的路径,或(反解不出时)SAF URI 原文。
+  final String? origin;
+
+  /// [origin] 是 URI 而不是路径。要在界面上说明白:URI 拿不去核对文件。
+  final bool originIsUri;
 
   /// null = stat 不到(没选过,或选过的文件已经没了)。
   final String? sizeText;
@@ -2653,7 +2907,10 @@ class _OtaFileRow extends StatelessWidget {
   /// 不显示。
   final String? xferName;
 
-  /// 有路径但文件已不存在。和「没选过」要说不一样的话。
+  /// 裁之前的原名,用来判断要不要显示上面那一行。
+  final String? baseName;
+
+  /// 选过但已经读不到。和「没选过」要说不一样的话。
   final bool missing;
 
   static const _pathStyle = TextStyle(
@@ -2663,11 +2920,16 @@ class _OtaFileRow extends StatelessWidget {
     color: AppTheme.textSecondary,
   );
 
+  static const _noteStyle = TextStyle(
+    fontSize: 11,
+    color: AppTheme.textSecondary,
+  );
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final p = path;
-    if (p == null) {
+    final n = name;
+    if (n == null) {
       return const Padding(
         padding: EdgeInsets.only(top: 8),
         child: Text(
@@ -2676,7 +2938,6 @@ class _OtaFileRow extends StatelessWidget {
         ),
       );
     }
-    final base = _baseName(p);
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Column(
@@ -2692,7 +2953,7 @@ class _OtaFileRow extends StatelessWidget {
               const SizedBox(width: 5),
               Expanded(
                 child: Text(
-                  base,
+                  n,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -2717,24 +2978,28 @@ class _OtaFileRow extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 2, left: 19),
               child: Text(
-                '上次选的文件已不存在,请重新选择',
+                '上次选的包已读不到,请重新选择',
                 style: TextStyle(fontSize: 11, color: cs.error),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.only(top: 2, left: 19),
-            // 路径可选中:要贴进问题单,也要能拷到电脑上比对同一份文件的 CRC。
-            child: SelectableText(p, style: _pathStyle),
-          ),
-          if (xferName != null && xferName != base)
+          // 只显示**用户选的那个位置**,不显示本机备份的路径:备份是内部实现,页面每次
+          // 进来都会自动把它刷新(见 `_syncOtaStash`),用户不需要知道它存在。而「这一个
+          // 包是哪来的」是看这块信息的第一个问题,答案只能是原始位置。
+          if (origin != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, left: 19),
+              // 可选中:要贴进问题单,也要能拷到电脑上比对同一份文件的 CRC。
+              child: SelectableText(
+                originIsUri ? '$origin(URI)' : origin!,
+                style: _pathStyle,
+              ),
+            ),
+          if (xferName != null && xferName != baseName)
             Padding(
               padding: const EdgeInsets.only(top: 2, left: 19),
               child: Text(
                 '发出去记作:$xferName(原名超 ${EBadgeLimits.fileName}B,已裁)',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppTheme.textSecondary,
-                ),
+                style: _noteStyle,
               ),
             ),
         ],
