@@ -87,12 +87,12 @@ class WatchModelNotifier extends StateNotifier<WatchModelState> {
 }
 
 final watchModelProvider =
-    StateNotifierProvider.autoDispose<WatchModelNotifier, WatchModelState>((ref) {
+    StateNotifierProvider.autoDispose<WatchModelNotifier, WatchModelState>(
+        (ref) {
   final ble = ref.read(bleManagerProvider);
   return WatchModelNotifier(
     commandAvailable: () => ble.commandAvailable,
-    isBound: () =>
-        ref.read(watchBindProvider).phase == WatchBindPhase.success,
+    isBound: () => ref.read(watchBindProvider).phase == WatchBindPhase.success,
     sendCommand: ble.sendCommand,
     notifications: ble.commandNotifications,
   );

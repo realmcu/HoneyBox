@@ -42,7 +42,8 @@ class BleCmd {
   static const int remoteControl = 0x0F; // command
   static const int fileTransfer = 0x10; // command
   static const int naviProj = 0x11; // command (FFD1/FFD2) + stream (FFD3/FFD4)
-  static const int watchModel = 0x12; // command: canonical device-state snapshot
+  static const int watchModel =
+      0x12; // command: canonical device-state snapshot
 
   /// 该 CMD 跑在哪条 GATT 特征上。除 [stream] 外全部走命令通道。
   /// 注意 [naviProj] 的控制消息走 command 通道、数据帧走独立的 stream 通道。

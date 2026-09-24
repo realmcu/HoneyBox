@@ -192,7 +192,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
     // 语义上和真实设备一致(输入不匹配的过滤词一并被隐藏)。
     final debugOn = ref.watch(appSettingsProvider).debugMode;
     final debugDevice = ScanDevice(
-      deviceId: '${kDebugDeviceIdPrefix}${widget.appTitle.toLowerCase()}-debug',
+      deviceId: '$kDebugDeviceIdPrefix${widget.appTitle.toLowerCase()}-debug',
       name: '${widget.appTitle}-debug',
       rssi: -42,
       connectable: true,
@@ -513,7 +513,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
                         ),
                         const SizedBox(height: 24),
                         Text('正在搜索附近的 ${widget.appTitle} 设备…',
-                          style: tt.bodyLarge),
+                            style: tt.bodyLarge),
                         const SizedBox(height: 12),
                         Text('下拉可重新扫描', style: tt.bodySmall),
                       ]
