@@ -1,4 +1,5 @@
 import '../../../services/watch_health_protocol.dart';
+import '../../../services/watch_model_protocol.dart';
 
 enum WatchHealthPeriod { day, week, month }
 
@@ -94,11 +95,20 @@ class WatchHealthSnapshot {
     required List<WatchSportRecord> sportRecords,
     required List<WatchSleepRecord> sleepRecords,
   })  : sportRecords = List.unmodifiable(sportRecords),
-        sleepRecords = List.unmodifiable(sleepRecords);
+        sleepRecords = List.unmodifiable(sleepRecords),
+        _model = null;
+
+  WatchHealthSnapshot.fromModel({
+    required this.syncedAt,
+    required WatchModelSnapshot model,
+  })  : sportRecords = const [],
+        sleepRecords = const [],
+        _model = model;
 
   final DateTime syncedAt;
   final List<WatchSportRecord> sportRecords;
   final List<WatchSleepRecord> sleepRecords;
+  final WatchModelSnapshot? _model;
 
   DateTime get _today =>
       DateTime.utc(syncedAt.year, syncedAt.month, syncedAt.day);
@@ -119,15 +129,19 @@ class WatchHealthSnapshot {
   /// the heart-rate list UI; each entry is a 15-minute average, not a sample.
   List<WatchSportRecord> get heartRateBuckets => _todayHeartRateBuckets;
 
-  int get steps => _todaySport.fold(0, (sum, record) => sum + record.steps);
+  int get steps =>
+      _model?.steps ?? _todaySport.fold(0, (sum, record) => sum + record.steps);
 
   int get distanceMeters =>
+      _model?.distanceMeters ??
       _todaySport.fold(0, (sum, record) => sum + record.distanceMeters);
 
-  double get caloriesKcal => _todaySport.fold(
-        0,
-        (sum, record) => sum + record.caloriesDeciKcal / 10,
-      );
+  double get caloriesKcal => _model != null
+      ? _model!.caloriesDeciKcal / 10
+      : _todaySport.fold(
+          0,
+          (sum, record) => sum + record.caloriesDeciKcal / 10,
+        );
 
   int? get latestHeartRate => _todayHeartRateBuckets.isEmpty
       ? null
@@ -220,6 +234,15 @@ class WatchHealthSnapshot {
         heartRate: _average(heartRates),
       ));
     }
+    if (_model != null) {
+      final now = _model!.wallClock ?? syncedAt;
+      final slot = (now.hour ~/ 4).clamp(0, points.length - 1);
+      points[slot] = WatchHealthTrendPoint(
+        label: points[slot].label,
+        steps: _model!.steps,
+        heartRate: null,
+      );
+    }
     return WatchHealthTrend(
       label: '今天 · 分时趋势',
       summary: '今日累计 ${_number(steps)} 步',
@@ -244,6 +267,13 @@ class WatchHealthSnapshot {
         steps: daySteps,
         heartRate: _average(heartRates),
       ));
+    }
+    if (_model != null && points.isNotEmpty) {
+      points[points.length - 1] = WatchHealthTrendPoint(
+        label: points.last.label,
+        steps: _model!.steps,
+        heartRate: null,
+      );
     }
     final totalSteps = points.fold(0, (sum, point) => sum + point.steps);
     return WatchHealthTrend(

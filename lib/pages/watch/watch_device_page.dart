@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
 import '../../providers/watch_bind_provider.dart';
+import '../../providers/watch_model_provider.dart';
 import '../../theme/app_theme.dart';
 import '../shared/app_drawer.dart';
 import '../device/widgets/action_card.dart';
@@ -43,6 +44,10 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
       curve: Curves.easeOut,
     );
     _fadeController.forward();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(watchBindProvider.notifier).bind();
+    });
   }
 
   @override
@@ -127,8 +132,14 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final bindState = ref.watch(watchBindProvider);
+    final modelState = ref.watch(watchModelProvider);
+    final bound = bindState.phase == WatchBindPhase.success;
 
     ref.listen<WatchBindState>(watchBindProvider, (previous, next) {
+      if (previous?.phase != WatchBindPhase.success &&
+          next.phase == WatchBindPhase.success) {
+        ref.read(watchModelProvider.notifier).refresh();
+      }
       if (next.message == null || next.message == previous?.message) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -220,7 +231,12 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
                 ),
               ),
               // Watch 状态摘要卡（青绿渐变，Watch 专属 accent）。
-              _WatchSummaryCard(deviceName: widget.deviceName),
+              _WatchSummaryCard(
+                deviceName: widget.deviceName,
+                state: modelState,
+                onRefresh: () =>
+                    ref.read(watchModelProvider.notifier).refresh(),
+              ),
               const SizedBox(height: 16),
               Expanded(
                 child: GridView.count(
@@ -233,7 +249,9 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
                       .map((a) => ActionCard(
                             icon: a.icon,
                             title: a.title,
-                            onTap: () => _open(a.route),
+                            enabled: bound,
+                            disabledMessage: '请先完成设备绑定',
+                            onTap: bound ? () => _open(a.route) : null,
                           ))
                       .toList(),
                 ),
@@ -310,12 +328,25 @@ class _WatchBindButton extends StatelessWidget {
 /// 协议接入前统一显示 "—"，避免展示假数据。
 class _WatchSummaryCard extends StatelessWidget {
   final String deviceName;
+  final WatchModelState state;
+  final VoidCallback onRefresh;
 
-  const _WatchSummaryCard({required this.deviceName});
+  const _WatchSummaryCard({
+    required this.deviceName,
+    required this.state,
+    required this.onRefresh,
+  });
 
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
+    final model = state.snapshot;
+    final batteryLabel = model?.batteryValid == true
+        ? '电量 ${model!.batteryPercent}%${model.charging ? ' · 充电中' : ''}'
+        : '电量 —';
+    final firmwareLabel = model == null || model.firmwareVersion.isEmpty
+        ? '固件 —'
+        : '固件 ${model.firmwareVersion}';
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -354,14 +385,22 @@ class _WatchSummaryCard extends StatelessWidget {
                     style: tt.titleMedium?.copyWith(
                         color: Colors.white, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
-                const Wrap(
+                Wrap(
                   spacing: 8,
                   runSpacing: 6,
                   children: [
-                    _SummaryChip(icon: Icons.battery_full, label: '电量 —'),
-                    _SummaryChip(icon: Icons.memory, label: '固件 —'),
-                    _SummaryChip(
+                    _SummaryChip(icon: Icons.battery_full, label: batteryLabel),
+                    _SummaryChip(icon: Icons.memory, label: firmwareLabel),
+                    const _SummaryChip(
                         icon: Icons.bluetooth_connected, label: 'BLE 已连接'),
+                    if (state.loading)
+                      const _SummaryChip(icon: Icons.sync, label: '读取中'),
+                    if (state.errorMessage != null)
+                      _SummaryChip(
+                        icon: Icons.refresh,
+                        label: '重试读取',
+                        onTap: onRefresh,
+                      ),
                   ],
                 ),
               ],
@@ -376,12 +415,13 @@ class _WatchSummaryCard extends StatelessWidget {
 class _SummaryChip extends StatelessWidget {
   final IconData icon;
   final String label;
+  final VoidCallback? onTap;
 
-  const _SummaryChip({required this.icon, required this.label});
+  const _SummaryChip({required this.icon, required this.label, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final content = Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.18),
@@ -397,6 +437,13 @@ class _SummaryChip extends StatelessWidget {
         ],
       ),
     );
+    return onTap == null
+        ? content
+        : InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(20),
+            child: content,
+          );
   }
 }
 

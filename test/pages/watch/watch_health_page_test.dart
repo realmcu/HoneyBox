@@ -1,24 +1,50 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:honeybox/pages/watch/health/watch_health_data.dart';
 import 'package:honeybox/pages/watch/health/watch_health_provider.dart';
 import 'package:honeybox/pages/watch/pages/watch_health_page.dart';
+import 'package:honeybox/providers/watch_bind_provider.dart';
 import 'package:honeybox/theme/app_theme.dart';
 
 import '../../helpers/watch_health_fixture.dart';
 
 class _ImmediateRepository implements WatchHealthRepository {
+  int syncCount = 0;
+
   @override
   Future<WatchHealthSnapshot> sync(String deviceId) async {
+    syncCount++;
     return watchHealthFixture();
   }
 }
 
-Widget buildPage() {
+class _TestBindNotifier extends WatchBindNotifier {
+  _TestBindNotifier({required bool bound})
+      : super(
+          commandAvailable: () => true,
+          sendCommand: (_) => 1,
+          notifications: const Stream.empty(),
+          userId: Uint8List(32),
+        ) {
+    if (bound) {
+      state = const WatchBindState(
+        WatchBindPhase.success,
+        timeSyncPhase: WatchTimeSyncPhase.synced,
+      );
+    }
+  }
+}
+
+Widget _buildPage(
+    {required _ImmediateRepository repository, bool bound = true}) {
   return ProviderScope(
     overrides: [
-      watchHealthRepositoryProvider.overrideWithValue(_ImmediateRepository()),
+      watchHealthRepositoryProvider.overrideWithValue(repository),
+      watchBindProvider.overrideWith((ref) => _TestBindNotifier(bound: bound)),
     ],
     child: MaterialApp(
       theme: AppTheme.lightTheme,
@@ -31,17 +57,31 @@ Widget buildPage() {
 }
 
 void main() {
-  testWidgets('starts with an explicit unsynchronized state', (tester) async {
-    await tester.pumpWidget(buildPage());
+  testWidgets('automatically synchronizes once when opened while bound',
+      (tester) async {
+    final repository = _ImmediateRepository();
+    await tester.pumpWidget(_buildPage(repository: repository));
+    await tester.pumpAndSettle();
 
     expect(find.text('HoneyBox Watch S1'), findsOneWidget);
-    expect(find.text('尚未同步健康数据'), findsOneWidget);
-    expect(find.text('同步手表后即可查看'), findsOneWidget);
-    expect(find.text('1,000'), findsNothing);
+    expect(find.text('1,000'), findsOneWidget);
+    expect(repository.syncCount, 1);
+  });
+
+  testWidgets('does not synchronize automatically while unbound',
+      (tester) async {
+    final repository = _ImmediateRepository();
+    await tester.pumpWidget(_buildPage(repository: repository, bound: false));
+    await tester.pumpAndSettle();
+
+    expect(find.text('设备尚未绑定'), findsWidgets);
+    expect(repository.syncCount, 0);
   });
 
   testWidgets('synchronizes and renders the health dashboard', (tester) async {
-    await tester.pumpWidget(buildPage());
+    final repository = _ImmediateRepository();
+    await tester.pumpWidget(_buildPage(repository: repository));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('watch-health-sync')));
     await tester.pumpAndSettle();
@@ -50,6 +90,7 @@ void main() {
     expect(find.text('78'), findsOneWidget);
     expect(find.text('4:00'), findsOneWidget);
     expect(find.text('最近同步：12:00'), findsOneWidget);
+    expect(repository.syncCount, 2);
 
     await tester.drag(find.byType(ListView), const Offset(0, -1000));
     await tester.pumpAndSettle();
@@ -60,8 +101,8 @@ void main() {
 
   testWidgets('switches to the weekly trend without another sync',
       (tester) async {
-    await tester.pumpWidget(buildPage());
-    await tester.tap(find.byKey(const Key('watch-health-sync')));
+    final repository = _ImmediateRepository();
+    await tester.pumpWidget(_buildPage(repository: repository));
     await tester.pumpAndSettle();
 
     await tester.drag(find.byType(ListView), const Offset(0, -320));
@@ -78,8 +119,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(buildPage());
-    await tester.tap(find.byKey(const Key('watch-health-sync')));
+    await tester.pumpWidget(_buildPage(repository: _ImmediateRepository()));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);

@@ -17,14 +17,6 @@ const String _kFallbackFilter = 'eBadge';
 
 /// 调试模式下注入到扫描列表首行的虚拟设备。id 前缀 `DEBUG:` 触发
 /// [BleNotifier.connect] 的旁路(不调用真实 BLE 栈)。
-final ScanDevice _kDebugDevice = ScanDevice(
-  deviceId: '${kDebugDeviceIdPrefix}ebadge-debug',
-  name: 'eBadge-debug',
-  rssi: -42,
-  connectable: true,
-  debug: true,
-);
-
 class ScanPage extends ConsumerStatefulWidget {
   /// BLE-name prefix filter applied by default when the page opens.
   final String defaultDeviceFilter;
@@ -32,10 +24,15 @@ class ScanPage extends ConsumerStatefulWidget {
   /// AppBar title (e.g. "eBadge" / "Watch"). Used verbatim.
   final String appTitle;
 
+  /// Optional advertised service UUID used by the BLE stack to restrict scan
+  /// results to devices belonging to this application.
+  final String? requiredServiceUuid;
+
   const ScanPage({
     super.key,
     this.defaultDeviceFilter = _kFallbackFilter,
     this.appTitle = 'eBadge',
+    this.requiredServiceUuid,
   });
 
   @override
@@ -77,7 +74,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
     // watching it while this page is alive.
     Future.microtask(() async {
       await _checkLocationService();
-      if (mounted && !_locationOff) _bleNotifier.startScan();
+      if (mounted && !_locationOff) {
+        _bleNotifier.startScan(serviceUuid: widget.requiredServiceUuid);
+      }
     });
     _locationPoll = Timer.periodic(
       const Duration(seconds: 2),
@@ -125,7 +124,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
     if (off) {
       _bleNotifier.stopScan();
     } else {
-      _bleNotifier.startScan();
+      _bleNotifier.startScan(serviceUuid: widget.requiredServiceUuid);
     }
   }
 
@@ -135,7 +134,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
       _shakeBanner();
       return;
     }
-    _bleNotifier.startScan();
+    _bleNotifier.startScan(serviceUuid: widget.requiredServiceUuid);
   }
 
   void _shakeBanner() => _shakeCtl.forward(from: 0);
@@ -147,7 +146,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
     if (_locationOff) {
       _shakeBanner();
     } else {
-      await _bleNotifier.startScan();
+      await _bleNotifier.startScan(serviceUuid: widget.requiredServiceUuid);
     }
     // Keep the pull-to-refresh spinner up briefly so the gesture feels alive;
     // scanning itself continues in the background afterwards.
@@ -189,10 +188,17 @@ class _ScanPageState extends ConsumerState<ScanPage>
 
     final bleState = ref.watch(bleNotifierProvider);
     final all = ref.watch(scannedDevicesProvider);
-    // 调试模式:首行注入虚拟 eBadge-debug,让它也走 _applyFilter,
+    // 调试模式:首行注入当前应用的虚拟设备,让它也走 _applyFilter,
     // 语义上和真实设备一致(输入不匹配的过滤词一并被隐藏)。
     final debugOn = ref.watch(appSettingsProvider).debugMode;
-    final base = debugOn ? <ScanDevice>[_kDebugDevice, ...all] : all;
+    final debugDevice = ScanDevice(
+      deviceId: '${kDebugDeviceIdPrefix}${widget.appTitle.toLowerCase()}-debug',
+      name: '${widget.appTitle}-debug',
+      rssi: -42,
+      connectable: true,
+      debug: true,
+    );
+    final base = debugOn ? <ScanDevice>[debugDevice, ...all] : all;
     final devices = _applyFilter(base);
     final scanning = bleState == BleState.scanning;
 
@@ -352,13 +358,14 @@ class _ScanPageState extends ConsumerState<ScanPage>
           spacing: 8,
           runSpacing: 8,
           children: [
-            _filterChip(
-              cs,
-              label: 'eBadge',
-              selected: _filter.trim() == widget.defaultDeviceFilter,
-              onSelected: (sel) =>
-                  _filterCtrl.text = sel ? widget.defaultDeviceFilter : '',
-            ),
+            if (widget.defaultDeviceFilter.isNotEmpty)
+              _filterChip(
+                cs,
+                label: widget.appTitle,
+                selected: _filter.trim() == widget.defaultDeviceFilter,
+                onSelected: (sel) =>
+                    _filterCtrl.text = sel ? widget.defaultDeviceFilter : '',
+              ),
             _filterChip(
               cs,
               label: '仅可连接',
@@ -505,7 +512,8 @@ class _ScanPageState extends ConsumerState<ScanPage>
                               size: 36, color: cs.primary),
                         ),
                         const SizedBox(height: 24),
-                        Text('正在搜索附近的 eBadge 设备…', style: tt.bodyLarge),
+                        Text('正在搜索附近的 ${widget.appTitle} 设备…',
+                          style: tt.bodyLarge),
                         const SizedBox(height: 12),
                         Text('下拉可重新扫描', style: tt.bodySmall),
                       ]

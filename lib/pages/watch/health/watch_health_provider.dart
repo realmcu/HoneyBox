@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../providers/ble_provider.dart';
+import '../../../providers/watch_bind_provider.dart';
 import '../../../services/watch_health_repository.dart';
 import 'watch_health_data.dart';
 
@@ -41,15 +42,25 @@ class WatchHealthNotifier extends StateNotifier<WatchHealthState> {
   WatchHealthNotifier({
     required WatchHealthRepository repository,
     required String deviceId,
+    required bool Function() isBound,
   })  : _repository = repository,
         _deviceId = deviceId,
+        _isBound = isBound,
         super(const WatchHealthState());
 
   final WatchHealthRepository _repository;
   final String _deviceId;
+  final bool Function() _isBound;
 
   Future<void> sync() async {
     if (state.phase == WatchHealthSyncPhase.syncing) return;
+    if (!_isBound()) {
+      state = state.copyWith(
+        phase: WatchHealthSyncPhase.failure,
+        errorMessage: '请先完成设备绑定',
+      );
+      return;
+    }
     state = state.copyWith(
       phase: WatchHealthSyncPhase.syncing,
       clearError: true,
@@ -77,7 +88,7 @@ class WatchHealthNotifier extends StateNotifier<WatchHealthState> {
 
 final watchHealthRepositoryProvider = Provider<WatchHealthRepository>((ref) {
   final bleManager = ref.read(bleManagerProvider);
-  return WatchHealthBleRepository(
+  return WatchHealthModelRepository(
     commandAvailable: () => bleManager.commandAvailable,
     sendCommand: bleManager.sendCommand,
     notifications: bleManager.commandNotifications,
@@ -89,5 +100,6 @@ final watchHealthProvider = StateNotifierProvider.autoDispose
   return WatchHealthNotifier(
     repository: ref.watch(watchHealthRepositoryProvider),
     deviceId: deviceId,
+    isBound: () => ref.read(watchBindProvider).phase == WatchBindPhase.success,
   );
 });

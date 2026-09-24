@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../providers/watch_bind_provider.dart';
 import '../../../services/watch_health_protocol.dart';
 import '../../../theme/app_theme.dart';
 import '../health/watch_health_data.dart';
 import '../health/watch_health_provider.dart';
 
-class WatchHealthPage extends ConsumerWidget {
+class WatchHealthPage extends ConsumerStatefulWidget {
   const WatchHealthPage({
     super.key,
     required this.deviceName,
@@ -17,11 +18,29 @@ class WatchHealthPage extends ConsumerWidget {
   final String deviceId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final provider = watchHealthProvider(deviceId);
+  ConsumerState<WatchHealthPage> createState() => _WatchHealthPageState();
+}
+
+class _WatchHealthPageState extends ConsumerState<WatchHealthPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          ref.read(watchBindProvider).phase != WatchBindPhase.success) {
+        return;
+      }
+      ref.read(watchHealthProvider(widget.deviceId).notifier).sync();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = watchHealthProvider(widget.deviceId);
     final state = ref.watch(provider);
     final notifier = ref.read(provider.notifier);
     final syncing = state.phase == WatchHealthSyncPhase.syncing;
+    final bound = ref.watch(watchBindProvider).phase == WatchBindPhase.success;
 
     ref.listen(provider, (previous, next) {
       if (next.phase != WatchHealthSyncPhase.failure ||
@@ -40,7 +59,7 @@ class WatchHealthPage extends ConsumerWidget {
           IconButton(
             key: const Key('watch-health-sync'),
             tooltip: '同步健康数据',
-            onPressed: syncing ? null : notifier.sync,
+            onPressed: syncing || !bound ? null : notifier.sync,
             icon: syncing
                 ? const SizedBox.square(
                     dimension: 20,
@@ -61,14 +80,16 @@ class WatchHealthPage extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
               children: [
                 _SyncHeader(
-                  deviceName: deviceName,
+                  deviceName: widget.deviceName,
                   state: state,
+                  bound: bound,
                   onSync: notifier.sync,
                 ),
                 if (state.snapshot == null)
                   _EmptyState(
                     syncing: syncing,
                     failed: state.phase == WatchHealthSyncPhase.failure,
+                    bound: bound,
                     onSync: notifier.sync,
                   )
                 else ...[
@@ -104,11 +125,13 @@ class _SyncHeader extends StatelessWidget {
   const _SyncHeader({
     required this.deviceName,
     required this.state,
+    required this.bound,
     required this.onSync,
   });
 
   final String deviceName;
   final WatchHealthState state;
+  final bool bound;
   final VoidCallback onSync;
 
   @override
@@ -117,11 +140,13 @@ class _SyncHeader extends StatelessWidget {
     final failed = state.phase == WatchHealthSyncPhase.failure;
     final status = syncing
         ? '正在同步健康数据...'
-        : failed
-            ? '同步失败 · 可重新尝试'
-            : state.snapshot == null
-                ? '尚未同步健康数据'
-                : '最近同步：${_time(state.snapshot!.syncedAt)}';
+        : !bound
+            ? '设备尚未绑定'
+            : failed
+                ? '同步失败 · 可重新尝试'
+                : state.snapshot == null
+                    ? '尚未同步健康数据'
+                    : '最近同步：${_time(state.snapshot!.syncedAt)}';
     return Container(
       padding: const EdgeInsets.only(bottom: 14),
       decoration: const BoxDecoration(
@@ -160,7 +185,7 @@ class _SyncHeader extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         OutlinedButton.icon(
-          onPressed: syncing ? null : onSync,
+          onPressed: syncing || !bound ? null : onSync,
           icon: syncing
               ? const SizedBox.square(
                   dimension: 15,
@@ -185,11 +210,13 @@ class _EmptyState extends StatelessWidget {
   const _EmptyState({
     required this.syncing,
     required this.failed,
+    required this.bound,
     required this.onSync,
   });
 
   final bool syncing;
   final bool failed;
+  final bool bound;
   final VoidCallback onSync;
 
   @override
@@ -206,22 +233,26 @@ class _EmptyState extends StatelessWidget {
         Text(
           syncing
               ? '正在读取手表数据'
-              : failed
-                  ? '同步未完成'
-                  : '同步手表后即可查看',
+              : !bound
+                  ? '请先绑定手表'
+                  : failed
+                      ? '同步未完成'
+                      : '同步手表后即可查看',
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
         Text(
           syncing
               ? '等待手表返回运动、睡眠和心率记录'
-              : failed
-                  ? '请确认手表保持连接，然后重新同步'
-                  : '数据由已连接的手表提供',
+              : !bound
+                  ? '连接后需先完成绑定，才能同步健康数据'
+                  : failed
+                      ? '请确认手表保持连接，然后重新同步'
+                      : '数据由已连接的手表提供',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium,
         ),
-        if (!syncing) ...[
+        if (!syncing && bound) ...[
           const SizedBox(height: 22),
           FilledButton.icon(
             onPressed: onSync,

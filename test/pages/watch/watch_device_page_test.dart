@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:honeybox/pages/watch/watch_device_page.dart';
+import 'package:honeybox/pages/device/widgets/action_card.dart';
 import 'package:honeybox/providers/watch_bind_provider.dart';
+import 'package:honeybox/providers/watch_model_provider.dart';
 import 'package:honeybox/theme/app_theme.dart';
 
 void main() {
@@ -40,6 +42,12 @@ void main() {
             clock: clock ?? () => DateTime(2024, 7, 27, 15, 42, 36),
           );
         }),
+        watchModelProvider.overrideWith((ref) => WatchModelNotifier(
+              commandAvailable: () => false,
+              isBound: () => false,
+              sendCommand: (_) => null,
+              notifications: const Stream.empty(),
+            )),
       ],
       child: MaterialApp(
         theme: AppTheme.lightTheme,
@@ -51,21 +59,19 @@ void main() {
     );
   }
 
-  testWidgets('replaces WiFi provisioning with the manual bind action',
+  testWidgets('starts automatic binding instead of WiFi provisioning',
       (tester) async {
     await tester.pumpWidget(buildPage());
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('WiFi 配网'), findsNothing);
-    expect(find.text('绑定设备'), findsOneWidget);
+    expect(find.text('绑定中...'), findsOneWidget);
+    expect(sent.where((frame) => frame.first == 0x03), hasLength(1));
   });
 
   testWidgets('shows binding progress and then the success state',
       (tester) async {
     await tester.pumpWidget(buildPage());
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('绑定设备'));
     await tester.pump();
 
     expect(sent, hasLength(1));
@@ -83,6 +89,23 @@ void main() {
     expect(find.text('重试同步'), findsNothing);
   });
 
+  testWidgets('locks feature cards until binding succeeds', (tester) async {
+    await tester.pumpWidget(buildPage());
+    await tester.pump();
+
+    var cards = tester.widgetList<ActionCard>(find.byType(ActionCard)).toList();
+    expect(cards, isNotEmpty);
+    expect(cards.every((card) => !card.enabled && card.onTap == null), isTrue);
+
+    notifications.add(
+      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
+    );
+    await tester.pump();
+
+    cards = tester.widgetList<ActionCard>(find.byType(ActionCard)).toList();
+    expect(cards.every((card) => card.enabled && card.onTap != null), isTrue);
+  });
+
   testWidgets('keeps bound state and retries only time synchronization',
       (tester) async {
     var calls = 0;
@@ -95,10 +118,8 @@ void main() {
         return calls == 2 ? null : 1;
       },
     ));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('绑定设备'));
     await tester.pump();
+
     notifications.add(
       Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
     );

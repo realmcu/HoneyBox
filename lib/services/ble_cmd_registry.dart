@@ -42,6 +42,7 @@ class BleCmd {
   static const int remoteControl = 0x0F; // command
   static const int fileTransfer = 0x10; // command
   static const int naviProj = 0x11; // command (FFD1/FFD2) + stream (FFD3/FFD4)
+  static const int watchModel = 0x12; // command: canonical device-state snapshot
 
   /// 该 CMD 跑在哪条 GATT 特征上。除 [stream] 外全部走命令通道。
   /// 注意 [naviProj] 的控制消息走 command 通道、数据帧走独立的 stream 通道。
@@ -67,6 +68,12 @@ abstract class BleCmdWatchNotificationKey {
   static const int pushNotification = 0x01; // App → Dev
   // 0x02 (app filter list) / 0x03 (master enable) 已在协议 spec 保留但未实现 —
   // 尚无 builder,故本表也不列。
+}
+
+/// Canonical watch model snapshot (CMD 0x12).
+abstract class BleCmdWatchModelKey {
+  static const int get = 0x01; // App -> Dev
+  static const int snapshot = 0x02; // Dev -> App
 }
 
 /// Watch sport / health data (CMD 0x05) sub-command keys.

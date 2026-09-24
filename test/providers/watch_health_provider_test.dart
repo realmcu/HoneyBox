@@ -25,6 +25,7 @@ void main() {
     final notifier = WatchHealthNotifier(
       repository: repository,
       deviceId: 'watch-01',
+      isBound: () => true,
     );
 
     expect(notifier.state.phase, WatchHealthSyncPhase.idle);
@@ -48,6 +49,7 @@ void main() {
     final notifier = WatchHealthNotifier(
       repository: repository,
       deviceId: 'watch-02',
+      isBound: () => true,
     );
 
     await notifier.sync();
@@ -62,6 +64,7 @@ void main() {
     final notifier = WatchHealthNotifier(
       repository: repository,
       deviceId: 'watch-03',
+      isBound: () => true,
     );
     await notifier.sync();
 
@@ -70,5 +73,20 @@ void main() {
     expect(notifier.state.period, WatchHealthPeriod.week);
     expect(notifier.state.trend?.summary, '日均 143 步');
     expect(repository.requestedDeviceIds, hasLength(1));
+  });
+
+  test('does not synchronize before the watch is bound', () async {
+    final repository = _Repository(result: watchHealthFixture());
+    final notifier = WatchHealthNotifier(
+      repository: repository,
+      deviceId: 'watch-04',
+      isBound: () => false,
+    );
+
+    await notifier.sync();
+
+    expect(repository.requestedDeviceIds, isEmpty);
+    expect(notifier.state.phase, WatchHealthSyncPhase.failure);
+    expect(notifier.state.errorMessage, '请先完成设备绑定');
   });
 }

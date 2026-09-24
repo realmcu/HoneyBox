@@ -100,7 +100,7 @@ class BleNotifier extends StateNotifier<BleState> {
     super.dispose();
   }
 
-  Future<void> startScan() async {
+  Future<void> startScan({String? serviceUuid}) async {
     state = BleState.scanning;
     final devicesNotifier = _ref.read(scannedDevicesProvider.notifier);
     devicesNotifier.clear();
@@ -118,7 +118,7 @@ class BleNotifier extends StateNotifier<BleState> {
         rssi: result.rssi,
         connectable: result.advertisementData.connectable,
       ));
-    });
+    }, serviceUuid: serviceUuid);
   }
 
   void stopScan() {

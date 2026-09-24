@@ -246,7 +246,10 @@ class BleManager {
 
   /// Start scanning for BLE devices. Each discovered device is reported via
   /// [onDeviceFound].
-  Future<void> startScan(void Function(ScanResult) onDeviceFound) async {
+  Future<void> startScan(
+    void Function(ScanResult) onDeviceFound, {
+    String? serviceUuid,
+  }) async {
     if (_disposed) return;
     stopScan();
 
@@ -287,11 +290,14 @@ class BleManager {
       // is not applicable on Windows desktop, so branch the call by platform.
       if (Platform.isAndroid) {
         await FlutterBluePlus.startScan(
+          withServices: serviceUuid == null ? const [] : [Guid(serviceUuid)],
           androidScanMode: AndroidScanMode.lowLatency,
           androidUsesFineLocation: true,
         );
       } else {
-        await FlutterBluePlus.startScan();
+        await FlutterBluePlus.startScan(
+          withServices: serviceUuid == null ? const [] : [Guid(serviceUuid)],
+        );
       }
     } catch (e) {
       stopScan();
