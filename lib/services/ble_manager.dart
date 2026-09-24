@@ -21,6 +21,33 @@ import 'l1_engine.dart';
 import 'l2_file_transfer.dart';
 
 // ---------------------------------------------------------------------------
+// Services
+// ---------------------------------------------------------------------------
+
+// Navigation Projection Service: control (FFD1/FFD2, with L1) + data
+// (FFD3/FFD4, raw L2). These keep the substring match `connect` has always
+// used, so firmware that moves them between vendor base UUIDs still matches.
+const String _naviCtrlTxUuid = 'FFD1';
+const String _naviCtrlRxUuid = 'FFD2';
+const String _naviDataTxUuid = 'FFD3';
+const String _naviDataRxUuid = 'FFD4';
+
+/// Short-UUID → role, used only to annotate the GATT dump logged after service
+/// discovery (see [BleManager._logGattTable]). Anything not listed prints
+/// without an annotation — the dump is a debugging aid, so unknown
+/// characteristics must still show up.
+const Map<String, String> _knownCharRoles = {
+  'FFC1': 'command tx (L1)',
+  'FFC2': 'command rx (L1 notify)',
+  'FFC4': 'stream tx (KS_OPEN/FRAME/CLOSE)',
+  'FFC5': 'stream rx (KS_ACK/CREDIT/REPORT)',
+  _naviCtrlTxUuid: 'navi ctrl tx (L1)',
+  _naviCtrlRxUuid: 'navi ctrl rx (L1 notify)',
+  _naviDataTxUuid: 'navi data tx (raw L2 JPEG)',
+  _naviDataRxUuid: 'navi data rx (raw L2 notify)',
+};
+
+// ---------------------------------------------------------------------------
 // Connection state
 // ---------------------------------------------------------------------------
 
@@ -31,8 +58,37 @@ class _JwNotifyBinding {
   StreamSubscription<List<int>>? subscription;
 }
 
+/// Media channels matched out of one discovered service table. Produced by
+/// [BleManager._matchMediaChannels], consumed by both the initial [connect]
+/// wiring and [_rediscoverServices] — one matching rule, two call sites.
+class _MediaChannels {
+  const _MediaChannels({
+    this.streamTx,
+    this.streamRx,
+    this.naviCtrlTx,
+    this.naviCtrlRx,
+    this.naviDataTx,
+    this.naviDataRx,
+  });
+
+  final BleGattEndpoint<BluetoothCharacteristic>? streamTx;
+  final BluetoothCharacteristic? streamRx;
+  final BleGattEndpoint<BluetoothCharacteristic>? naviCtrlTx;
+  final BluetoothCharacteristic? naviCtrlRx;
+  final BleGattEndpoint<BluetoothCharacteristic>? naviDataTx;
+  final BluetoothCharacteristic? naviDataRx;
+
+  bool get streamReady => streamTx != null && streamRx != null;
+
+  bool get naviReady =>
+      naviCtrlTx != null &&
+      naviCtrlRx != null &&
+      naviDataTx != null &&
+      naviDataRx != null;
+}
+
 class _BleConnectionResources {
-  const _BleConnectionResources({
+  _BleConnectionResources({
     required this.device,
     required this.mtu,
     required this.writeQueue,
@@ -43,6 +99,7 @@ class _BleConnectionResources {
     this.streamRx,
     this.commandNotificationSub,
     this.streamNotificationSub,
+    this.servicesResetSub,
     this.l1,
     this.session,
     this.jwTransport,
@@ -64,10 +121,20 @@ class _BleConnectionResources {
   final StreamSubscription<BluetoothConnectionState> connectionStateSub;
   final BleGattEndpoint<BluetoothCharacteristic>? commandTx;
   final BluetoothCharacteristic? commandRx;
-  final BleGattEndpoint<BluetoothCharacteristic>? streamTx;
-  final BluetoothCharacteristic? streamRx;
+
+  /// Stream and navi-data channels are re-matched in place by
+  /// [BleManager._rediscoverServices], so they are mutable: re-discovery swaps
+  /// them on the live connection instead of republishing the whole resource set
+  /// (which would tear down the command channel's L1 engine mid-transfer).
+  BleGattEndpoint<BluetoothCharacteristic>? streamTx;
+  BluetoothCharacteristic? streamRx;
   final StreamSubscription<List<int>>? commandNotificationSub;
-  final StreamSubscription<List<int>>? streamNotificationSub;
+  StreamSubscription<List<int>>? streamNotificationSub;
+
+  /// GAP Service Changed (0x2A05) subscription — fires when the device tells us
+  /// its service table changed, so we can re-discover instead of trusting a
+  /// stale Android cache. See [BleManager._rediscoverServices].
+  final StreamSubscription<void>? servicesResetSub;
   final L1Engine? l1;
   final FileTransferSession? session;
   final JwRawChannel? jwTransport;
@@ -76,10 +143,10 @@ class _BleConnectionResources {
   final _JwNotifyBinding? jwNotify;
   final BleGattEndpoint<BluetoothCharacteristic>? naviCtrlTx;
   final BluetoothCharacteristic? naviCtrlRx;
-  final BleGattEndpoint<BluetoothCharacteristic>? naviDataTx;
-  final BluetoothCharacteristic? naviDataRx;
+  BleGattEndpoint<BluetoothCharacteristic>? naviDataTx;
+  BluetoothCharacteristic? naviDataRx;
   final StreamSubscription<List<int>>? naviCtrlSub;
-  final StreamSubscription<List<int>>? naviDataSub;
+  StreamSubscription<List<int>>? naviDataSub;
   final L1Engine? naviL1;
 
   bool get commandReady =>
@@ -458,6 +525,7 @@ class BleManager {
     StreamSubscription<BluetoothConnectionState>? connectionStateSub;
     StreamSubscription<List<int>>? commandNotificationSub;
     StreamSubscription<List<int>>? streamNotificationSub;
+    StreamSubscription<void>? servicesResetSub;
     L1Engine? l1;
     FileTransferSession? transferSession;
     var setupReleased = false;
@@ -478,6 +546,7 @@ class BleManager {
       setupReleased = true;
       await commandNotificationSub?.cancel();
       await streamNotificationSub?.cancel();
+      await servicesResetSub?.cancel();
       await connectionStateSub?.cancel();
       l1?.reset();
       writeQueue.dispose();
@@ -569,11 +638,21 @@ class BleManager {
         }
       }
 
+      // Re-discover whenever the device reports its service table changed
+      // (GAP Service Changed, 0x2A05). Subscribed AFTER the first discovery
+      // because `discoverServices()` is what enables that indication.
+      servicesResetSub = device.onServicesReset.listen((_) {
+        debugPrint('BleManager: device reported Services Changed (0x2A05)');
+        unawaited(_rediscoverServices());
+      });
+
       final profile = BleGattProfile.select(characteristics);
       final commandTx = profile.commandReady ? profile.commandTx : null;
       final commandRx = profile.commandReady ? profile.commandRx : null;
-      var streamTx = profile.streamReady ? profile.streamTx : null;
-      var streamRx = profile.streamReady ? profile.streamRx : null;
+      // Same matching rules as [_rediscoverServices], from the same code.
+      final media = _matchMediaChannels(characteristics);
+      var streamTx = media.streamReady ? media.streamTx : null;
+      var streamRx = media.streamReady ? media.streamRx : null;
 
       // Resolve the MTU exactly once after discovery, regardless of which pair
       // is available. Both protocols use the actual negotiated value.
@@ -689,17 +768,7 @@ class BleManager {
           streamNotificationSub = streamRx.onValueReceived.listen((data) {
             if (!_disposed &&
                 _connectionOwner.isCurrent(connectionGeneration)) {
-              // Counting every FFC5 notification separates "the device went
-              // quiet" from "only some message types stopped arriving".
-              _streamNotifyCount++;
-              if (_streamNotifyCount <= 4 || _streamNotifyCount % 10 == 0) {
-                final key = data.length > 2 ? data[2] : -1;
-                debugPrint(
-                  'BleManager: FFC5 #$_streamNotifyCount '
-                  'len=${data.length} key=0x${key.toRadixString(16)}',
-                );
-              }
-              _streamNotifyController.add(Uint8List.fromList(data));
+              _publishStreamNotification(data);
             }
           });
           debugPrint('BleManager: Stream Service ready (FFC4/FFC5)');
@@ -715,48 +784,19 @@ class BleManager {
         }
       }
 
-      BluetoothCharacteristic? naviCtrlTxChar;
-      BluetoothCharacteristic? naviCtrlRxChar;
-      BluetoothCharacteristic? naviDataTxChar;
-      BluetoothCharacteristic? naviDataRxChar;
-      for (final characteristic in characteristics) {
-        final uuid = characteristic.uuid.toUpperCase();
-        if (uuid.contains('FFD1') &&
-            (characteristic.write || characteristic.writeWithoutResponse)) {
-          naviCtrlTxChar = characteristic.value;
-        }
-        if (uuid.contains('FFD2') &&
-            (characteristic.notify || characteristic.indicate)) {
-          naviCtrlRxChar = characteristic.value;
-        }
-        if (uuid.contains('FFD3') && characteristic.writeWithoutResponse) {
-          naviDataTxChar = characteristic.value;
-        }
-        if (uuid.contains('FFD4') &&
-            (characteristic.notify || characteristic.indicate)) {
-          naviDataRxChar = characteristic.value;
-        }
-      }
+      BluetoothCharacteristic? naviCtrlRxChar = media.naviCtrlRx;
+      BluetoothCharacteristic? naviDataRxChar = media.naviDataRx;
 
       BleGattEndpoint<BluetoothCharacteristic>? naviCtrlTx;
       BleGattEndpoint<BluetoothCharacteristic>? naviDataTx;
       StreamSubscription<List<int>>? naviCtrlSub;
       StreamSubscription<List<int>>? naviDataSub;
       L1Engine? naviL1;
-      if (naviCtrlTxChar != null &&
-          naviCtrlRxChar != null &&
-          naviDataTxChar != null &&
-          naviDataRxChar != null) {
+      if (media.naviReady) {
         try {
-          final ctrlTx = BleGattEndpoint<BluetoothCharacteristic>(
-            naviCtrlTxChar,
-            withoutResponse: true,
-          );
-          final dataTx = BleGattEndpoint<BluetoothCharacteristic>(
-            naviDataTxChar,
-            withoutResponse: true,
-          );
-          await naviCtrlRxChar.setNotifyValue(true);
+          final ctrlTx = media.naviCtrlTx!;
+          final dataTx = media.naviDataTx!;
+          await naviCtrlRxChar!.setNotifyValue(true);
           if (!await keepCurrent()) return false;
           naviCtrlSub = naviCtrlRxChar.onValueReceived.listen((data) {
             if (_connectionOwner.isCurrent(connectionGeneration)) {
@@ -779,7 +819,7 @@ class BleManager {
               _naviCtrlL2Controller.add(payload);
             }
           };
-          await naviDataRxChar.setNotifyValue(true);
+          await naviDataRxChar!.setNotifyValue(true);
           if (!await keepCurrent()) return false;
           naviDataSub = naviDataRxChar.onValueReceived.listen((data) {
             if (!_disposed &&
@@ -817,6 +857,7 @@ class BleManager {
         streamRx: streamRx,
         commandNotificationSub: commandNotificationSub,
         streamNotificationSub: streamNotificationSub,
+        servicesResetSub: servicesResetSub,
         l1: l1,
         session: transferSession,
         naviCtrlTx: naviCtrlTx,
@@ -875,6 +916,295 @@ class BleManager {
       }
       return false;
     }
+  }
+
+  /// Media channels matched out of a discovered service table: the raw-L2
+  /// stream pair plus all four navigation channels.
+  _MediaChannels _matchMediaChannels(
+    List<BleGattCharacteristic<BluetoothCharacteristic>> characteristics,
+  ) {
+    final profile = BleGattProfile.select(characteristics);
+    BluetoothCharacteristic? naviCtrlTxChar;
+    BluetoothCharacteristic? naviCtrlRxChar;
+    BluetoothCharacteristic? naviDataTxChar;
+    BluetoothCharacteristic? naviDataRxChar;
+    for (final characteristic in characteristics) {
+      final uuid = characteristic.uuid.toUpperCase();
+      if (uuid.contains('FFD1') &&
+          (characteristic.write || characteristic.writeWithoutResponse)) {
+        naviCtrlTxChar = characteristic.value;
+      }
+      if (uuid.contains('FFD2') &&
+          (characteristic.notify || characteristic.indicate)) {
+        naviCtrlRxChar = characteristic.value;
+      }
+      if (uuid.contains('FFD3') && characteristic.writeWithoutResponse) {
+        naviDataTxChar = characteristic.value;
+      }
+      if (uuid.contains('FFD4') &&
+          (characteristic.notify || characteristic.indicate)) {
+        naviDataRxChar = characteristic.value;
+      }
+    }
+    return _MediaChannels(
+      streamTx: profile.streamTx,
+      streamRx: profile.streamRx,
+      naviCtrlTx: naviCtrlTxChar == null
+          ? null
+          : BleGattEndpoint<BluetoothCharacteristic>(
+              naviCtrlTxChar,
+              withoutResponse: true,
+            ),
+      naviCtrlRx: naviCtrlRxChar,
+      naviDataTx: naviDataTxChar == null
+          ? null
+          : BleGattEndpoint<BluetoothCharacteristic>(
+              naviDataTxChar,
+              withoutResponse: true,
+            ),
+      naviDataRx: naviDataRxChar,
+    );
+  }
+
+  /// Flatten a discovered service table into the endpoint-agnostic shape
+  /// [BleGattProfile.select] takes. Used by [_rediscoverServices] so it matches
+  /// characteristics by exactly the same rules [connect] does.
+  List<BleGattCharacteristic<BluetoothCharacteristic>> _collectCharacteristics(
+    List<BluetoothService> services,
+  ) {
+    return <BleGattCharacteristic<BluetoothCharacteristic>>[
+      for (final s in services)
+        for (final c in s.characteristics)
+          BleGattCharacteristic<BluetoothCharacteristic>(
+            c,
+            c.uuid.toString(),
+            write: c.properties.write,
+            writeWithoutResponse: c.properties.writeWithoutResponse,
+            notify: c.properties.notify,
+            indicate: c.properties.indicate,
+          ),
+    ];
+  }
+
+  /// Re-run service discovery on the live connection and re-wire whatever
+  /// appeared or vanished. Safe to call at any time while connected.
+  ///
+  /// **Why this exists.** Android caches each device's GATT service table on
+  /// disk, keyed by MAC and surviving app restarts. When firmware gains a
+  /// service, `discoverServices()` keeps returning the stale table — it
+  /// succeeds, it just answers with yesterday's truth. The symptom is a
+  /// capability that silently reads as unsupported: the Stream Service
+  /// (FFC4/FFC5) went missing this way while the very same device enumerated
+  /// it fine from a host with no cache.
+  ///
+  /// The standard cure is the GAP Service Changed indication (0x2A05), which
+  /// this device does expose. [connect] subscribes to it; this method is what
+  /// that subscription runs, and it's also the hook for a manual refresh.
+  ///
+  /// Only stream/navi notify subscriptions are rebuilt here. The command
+  /// channel is deliberately left alone: re-attaching its notify would mean
+  /// tearing down the L1 engine mid-flight and with it any in-progress file
+  /// transfer. If the command characteristics themselves changed, a full
+  /// reconnect is the honest answer, and [commandAvailable] still reports the
+  /// truth to callers.
+  ///
+  /// The rebuilt channels are written into the live [_BleConnectionResources]
+  /// instead of republishing the resource set, so the command channel — and any
+  /// file transfer riding it — keeps its generation.
+  Future<bool> _rediscoverServices() async {
+    final resources = _connectionOwner.value;
+    final device = resources?.device;
+    if (_disposed || resources == null || device == null) return false;
+    try {
+      final hadStream = streamAvailable;
+      final hadNavi = naviProjAvailable;
+
+      await device.discoverServices();
+      // A disconnect (or a reconnect to another device) during discovery makes
+      // everything below meaningless — and mutating a retired resource set
+      // would resurrect subscriptions the teardown already cancelled.
+      if (_disposed || !identical(_connectionOwner.value, resources)) {
+        return false;
+      }
+
+      // Drop only the channels this method is allowed to rebuild, so a
+      // characteristic that genuinely disappeared stops reading as available.
+      await resources.streamNotificationSub?.cancel();
+      resources.streamNotificationSub = null;
+      resources.streamTx = null;
+      resources.streamRx = null;
+      await resources.naviDataSub?.cancel();
+      resources.naviDataSub = null;
+      resources.naviDataTx = null;
+      resources.naviDataRx = null;
+
+      final services = device.servicesList;
+      _logGattTable(services);
+      final media = _matchMediaChannels(_collectCharacteristics(services));
+      resources.streamTx = media.streamTx;
+      resources.streamRx = media.streamRx;
+      resources.naviDataTx = media.naviDataTx;
+      resources.naviDataRx = media.naviDataRx;
+
+      if (media.streamReady) await _setUpStreamNotify(resources);
+      if (media.naviDataRx != null) await _setUpNaviDataNotify(resources);
+
+      if (!identical(_connectionOwner.value, resources)) return false;
+      _setStreamAvailable(resources.streamReady);
+
+      debugPrint('BleManager: re-discovered services — '
+          'stream=${hadStream ? "on" : "off"}→'
+          '${resources.streamReady ? "on" : "off"}, '
+          'naviData=${hadNavi ? "on" : "off"}→'
+          '${resources.naviDataRx != null ? "on" : "off"}');
+      return true;
+    } catch (e) {
+      debugPrint('BleManager: re-discover failed: $e');
+      return false;
+    }
+  }
+
+  /// Force Android to throw away its cached GATT table, then re-discover.
+  ///
+  /// This is the manual escape hatch for the staleness described in
+  /// [_rediscoverServices] — needed because the automatic path depends on the
+  /// firmware actually raising 0x2A05 when it changes its service table, and a
+  /// device that forgets to do that leaves the app looking at a table that will
+  /// never correct itself.
+  ///
+  /// Android-only and **best-effort by nature**: `clearGattCache` reaches
+  /// `BluetoothGatt.refresh()`, a method Google never made public, so some ROMs
+  /// simply no-op. Treat a `true` return as "re-discovery ran", not as "the
+  /// cache was definitely purged" — on a ROM that ignores the refresh, the
+  /// service table can come back identical. When that happens, clearing the
+  /// system Bluetooth app's data (or re-pairing) is the remaining option.
+  ///
+  /// Returns false if not connected, not on Android, or re-discovery threw.
+  Future<bool> refreshServices() async {
+    final device = _connectionOwner.value?.device;
+    if (_disposed || device == null || _state != BleState.connected) {
+      debugPrint('BleManager: refreshServices skipped — not connected');
+      return false;
+    }
+    if (Platform.isAndroid) {
+      try {
+        await device.clearGattCache();
+        debugPrint('BleManager: cleared Android GATT cache');
+      } catch (e) {
+        // Expected on ROMs that block the reflective refresh() call. Carry on:
+        // a plain re-discovery still picks up anything the cache did drop.
+        debugPrint('BleManager: clearGattCache failed (continuing): $e');
+      }
+    }
+    return _rediscoverServices();
+  }
+
+  /// Subscribe to the Stream Service notify (FFC5). On failure both stream
+  /// characteristics are dropped so [streamAvailable] reports false rather than
+  /// leaving a write path whose replies nobody is listening for.
+  Future<void> _setUpStreamNotify(_BleConnectionResources resources) async {
+    final rx = resources.streamRx;
+    if (rx == null) return;
+    try {
+      await rx.setNotifyValue(true);
+      if (_disposed || !identical(_connectionOwner.value, resources)) return;
+      resources.streamNotificationSub = rx.onValueReceived.listen((data) {
+        if (!_disposed && identical(_connectionOwner.value, resources)) {
+          _publishStreamNotification(data);
+        }
+      });
+      debugPrint('BleManager: Stream Service ready (FFC4/FFC5)');
+    } catch (e) {
+      debugPrint('BleManager: Stream Service FFC5 subscribe failed: $e');
+      resources.streamTx = null;
+      resources.streamRx = null;
+    }
+  }
+
+  /// Subscribe to the navi data notify (FFD4).
+  Future<void> _setUpNaviDataNotify(_BleConnectionResources resources) async {
+    final rx = resources.naviDataRx;
+    if (rx == null) return;
+    await rx.setNotifyValue(true);
+    if (_disposed || !identical(_connectionOwner.value, resources)) return;
+    resources.naviDataSub = rx.onValueReceived.listen((data) {
+      if (!_disposed && identical(_connectionOwner.value, resources)) {
+        _naviDataNotifyController.add(Uint8List.fromList(data));
+      }
+    });
+  }
+
+  /// Count, log and forward one FFC5 notification.
+  ///
+  /// Counting every notification separates "the device went quiet" from "only
+  /// some message types stopped arriving". Shared by the initial subscription in
+  /// [connect] and the rebuilt one in [_rediscoverServices] so both report the
+  /// same way.
+  void _publishStreamNotification(List<int> data) {
+    _streamNotifyCount++;
+    if (_streamNotifyCount <= 4 || _streamNotifyCount % 10 == 0) {
+      final key = data.length > 2 ? data[2] : -1;
+      debugPrint(
+        'BleManager: FFC5 #$_streamNotifyCount '
+        'len=${data.length} key=0x${key.toRadixString(16)}',
+      );
+    }
+    _streamNotifyController.add(Uint8List.fromList(data));
+  }
+
+  /// Dumps the full discovered GATT table — every service with its
+  /// characteristics, their properties and descriptors. Runs once per connect,
+  /// right after `discoverServices()`, before any characteristic matching, so
+  /// the log shows what the device *actually* exposes even when the expected
+  /// FFC1/FFC2 pair is missing and the connection degrades to GATT-only. Also
+  /// runs on every re-discovery, where a changed table is the whole point.
+  ///
+  /// Known UUIDs get a role annotation from [_knownCharRoles]; unknown ones
+  /// print bare, which is the point — this dump is how new firmware
+  /// characteristics get noticed.
+  void _logGattTable(List<BluetoothService> services) {
+    var charCount = 0;
+    for (final s in services) {
+      charCount += s.characteristics.length;
+    }
+    debugPrint('BleManager: ── GATT table ─────────────────────────────────');
+    debugPrint('BleManager: device  $_deviceName ($_deviceId)');
+    debugPrint(
+      'BleManager: ${services.length} service(s), $charCount characteristic(s)',
+    );
+
+    for (final s in services) {
+      debugPrint(
+        'BleManager: ┌ service ${s.uuid} '
+        '(${s.characteristics.length} char, primary=${s.isPrimary})',
+      );
+      for (final c in s.characteristics) {
+        final short = c.uuid.toString().toUpperCase();
+        final role = _knownCharRoles.entries
+            .firstWhere(
+              (e) => short.contains(e.key),
+              orElse: () => const MapEntry('', ''),
+            )
+            .value;
+        final props = <String>[
+          if (c.properties.read) 'read',
+          if (c.properties.write) 'write',
+          if (c.properties.writeWithoutResponse) 'writeNR',
+          if (c.properties.notify) 'notify',
+          if (c.properties.indicate) 'indicate',
+        ];
+        debugPrint(
+          'BleManager: │  char ${c.uuid} '
+          '[${props.isEmpty ? 'none' : props.join(',')}]'
+          '${role.isEmpty ? '' : '  ← $role'}',
+        );
+        for (final d in c.descriptors) {
+          debugPrint('BleManager: │    descriptor ${d.uuid}');
+        }
+      }
+      debugPrint('BleManager: └');
+    }
+    debugPrint('BleManager: ───────────────────────────────────────────────');
   }
 
   /// Gracefully disconnect and clean up.
@@ -1237,6 +1567,7 @@ class BleManager {
     resources.writeQueue.dispose();
     unawaited(resources.commandNotificationSub?.cancel());
     unawaited(resources.streamNotificationSub?.cancel());
+    unawaited(resources.servicesResetSub?.cancel());
     unawaited(resources.naviCtrlSub?.cancel());
     unawaited(resources.naviDataSub?.cancel());
     unawaited(resources.connectionStateSub.cancel());
