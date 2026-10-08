@@ -13,6 +13,10 @@ if (localPropertiesFile.exists()) {
     localPropertiesFile.withInputStream { localProperties.load(it) }
 }
 
+// Explicit side-load test package; uses a debug certificate in both modes.
+final boolean realtekSdkTestBuild = providers.gradleProperty("realtekSdkTestBuild")
+    .getOrElse("false").toBoolean()
+
 final String amapDebugKey = localProperties.getProperty("AMAP_DEBUG_KEY")?.trim()
 final String amapReleaseKey = localProperties.getProperty("AMAP_RELEASE_KEY")?.trim()
 final String releaseStoreFile = localProperties.getProperty("RELEASE_STORE_FILE")?.trim()
@@ -43,6 +47,7 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.honeygui.honeybox"
+        manifestPlaceholders["HONEYBOX_APP_LABEL"] = "HoneyBox"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -85,33 +90,49 @@ android {
 
     buildTypes {
         debug {
+            if (realtekSdkTestBuild) {
+                applicationIdSuffix = ".realtektest"
+                manifestPlaceholders["HONEYBOX_APP_LABEL"] = "HoneyBox Realtek Test"
+            }
             manifestPlaceholders["AMAP_KEY"] = amapDebugKey ?: ""
         }
         release {
-            manifestPlaceholders["AMAP_KEY"] = amapReleaseKey ?: ""
-            signingConfig = signingConfigs.release
+            if (realtekSdkTestBuild) {
+                applicationIdSuffix = ".realtektest"
+                manifestPlaceholders["HONEYBOX_APP_LABEL"] = "HoneyBox Realtek Test"
+                manifestPlaceholders["AMAP_KEY"] = amapDebugKey ?: ""
+                signingConfig = signingConfigs.debug
+            } else {
+                manifestPlaceholders["AMAP_KEY"] = amapReleaseKey ?: ""
+                signingConfig = signingConfigs.release
+            }
             minifyEnabled = true
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
 
     applicationVariants.configureEach { variant ->
-        def requiredAmapKey = variant.buildType.name == "release" ? amapReleaseKey : amapDebugKey
-        def amapProperty = variant.buildType.name == "release" ? "AMAP_RELEASE_KEY" : "AMAP_DEBUG_KEY"
+        def testVariant = realtekSdkTestBuild && variant.buildType.name in ["debug", "release"]
+        def productionRelease = variant.buildType.name == "release" && !testVariant
+        def requiredAmapKey = productionRelease ? amapReleaseKey : amapDebugKey
+        def amapProperty = productionRelease ? "AMAP_RELEASE_KEY" : "AMAP_DEBUG_KEY"
         def validateAmapConfiguration = tasks.register(
             "validate${variant.name.capitalize()}AmapConfiguration"
         ) {
             doLast {
-                // Debug builds may run without map services; release artifacts must carry
-                // a key registered for this application ID and the release signing SHA1.
-                if (variant.buildType.name == "release" &&
-                    (requiredAmapKey == null || requiredAmapKey.isEmpty())) {
+                if (testVariant && (variant.applicationId != "com.honeygui.honeybox.realtektest" ||
+                        variant.signingConfig?.name != "debug")) {
+                    throw new GradleException("Realtek test builds require their isolated package and debug certificate.")
+                }
+                if ((requiredAmapKey == null || requiredAmapKey.isEmpty()) && testVariant) {
+                    logger.warn("Realtek SDK test APK: AMap key absent; map/navigation unavailable.")
+                } else if (productionRelease && (requiredAmapKey == null || requiredAmapKey.isEmpty())) {
                     throw new GradleException(
                         "Missing ${amapProperty} in android/local.properties. " +
                         "AMap requires a key registered for com.honeygui.honeybox and this build's signing SHA1."
                     )
                 }
-                if (variant.buildType.name == "release") {
+                if (productionRelease) {
                     def missingSigningProperties = [
                         RELEASE_STORE_FILE: releaseStoreFile,
                         RELEASE_STORE_PASSWORD: releaseStorePassword,

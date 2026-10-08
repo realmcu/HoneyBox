@@ -1,10 +1,10 @@
 name: honeybox
 description: HoneyBox device debugging and content management application.
 publish_to: 'none'
-version: 0.8.22+13
+version: 0.8.23+17
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
   flutter:

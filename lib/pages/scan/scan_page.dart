@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../providers/ble_provider.dart';
+import '../../services/jw/jw_scan_policy.dart';
 import '../../services/app_settings.dart';
 import '../../services/system_settings.dart';
 import '../shared/app_drawer.dart';
@@ -23,6 +24,8 @@ class ScanPage extends ConsumerStatefulWidget {
 
   /// AppBar title (e.g. "eBadge" / "Watch"). Used verbatim.
   final String appTitle;
+  final bool acceptJwCandidates;
+  final VoidCallback? onBrowseSavedHistory;
 
   /// Optional advertised service UUID used by the BLE stack to restrict scan
   /// results to devices belonging to this application.
@@ -32,6 +35,8 @@ class ScanPage extends ConsumerStatefulWidget {
     super.key,
     this.defaultDeviceFilter = _kFallbackFilter,
     this.appTitle = 'eBadge',
+    this.acceptJwCandidates = false,
+    this.onBrowseSavedHistory,
     this.requiredServiceUuid,
   });
 
@@ -45,6 +50,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
       TextEditingController(text: widget.defaultDeviceFilter);
   late String _filter = widget.defaultDeviceFilter;
   bool _onlyConnectable = false;
+  bool _filterEdited = false;
   String? _connectingId;
   bool _locationOff = false;
   late BleNotifier _bleNotifier;
@@ -63,7 +69,10 @@ class _ScanPageState extends ConsumerState<ScanPage>
     _bleNotifier = ref.read(bleNotifierProvider.notifier);
     _filterCtrl.addListener(() {
       if (_filter != _filterCtrl.text) {
-        setState(() => _filter = _filterCtrl.text);
+        setState(() {
+          _filter = _filterCtrl.text;
+          _filterEdited = true;
+        });
       }
     });
     _shakeCtl = AnimationController(
@@ -90,7 +99,11 @@ class _ScanPageState extends ConsumerState<ScanPage>
     _locationPoll?.cancel();
     _shakeCtl.dispose();
     _filterCtrl.dispose();
-    _bleNotifier.stopScan();
+    // Publish scan state after consumers finish unmounting. A synchronous
+    // notifier update here can rebuild an already defunct sibling element.
+    Future.microtask(() {
+      if (_bleNotifier.mounted) _bleNotifier.stopScan();
+    });
     super.dispose();
   }
 
@@ -157,7 +170,8 @@ class _ScanPageState extends ConsumerState<ScanPage>
     setState(() => _connectingId = device.deviceId);
     ref
         .read(bleNotifierProvider.notifier)
-        .connect(device.deviceId, device.name)
+        .connect(device.deviceId, device.name,
+            allowJw: widget.acceptJwCandidates)
         .then((success) {
       if (!mounted) return;
       // On success the root gate swaps to the device page automatically once
@@ -175,9 +189,12 @@ class _ScanPageState extends ConsumerState<ScanPage>
     final q = _filter.trim().toLowerCase();
     return all.where((d) {
       if (_onlyConnectable && !d.connectable) return false;
-      if (q.isEmpty) return true;
-      return d.name.toLowerCase().contains(q) ||
-          d.deviceId.toLowerCase().contains(q);
+      return JwScanPolicy.matches(
+          query: q,
+          isDefaultWatchFilter: widget.acceptJwCandidates &&
+              !_filterEdited &&
+              widget.defaultDeviceFilter == 'Watch',
+          device: d);
     }).toList();
   }
 
@@ -213,6 +230,12 @@ class _ScanPageState extends ConsumerState<ScanPage>
         foregroundColor: cs.onPrimary,
         systemOverlayStyle: SystemUiOverlayStyle.light,
         actions: [
+          if (widget.onBrowseSavedHistory != null)
+            TextButton.icon(
+                onPressed: widget.onBrowseSavedHistory,
+                icon: const Icon(Icons.history),
+                label: const Text('已保存历史'),
+                style: TextButton.styleFrom(foregroundColor: cs.onPrimary)),
           if (scanning)
             TextButton.icon(
               onPressed: _bleNotifier.stopScan,

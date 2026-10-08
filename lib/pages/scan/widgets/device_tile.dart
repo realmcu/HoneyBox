@@ -64,18 +64,19 @@ class DeviceTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 7),
-                    Row(
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         if (rssi != null) ...[
                           Text('$rssi dBm', style: tt.labelMedium),
-                          const SizedBox(width: 10),
                         ],
                         _Tag(
                           label: connectable ? '可连接' : '不可连接',
                           color: connectable ? cs.secondary : cs.outline,
                         ),
                         if (debug) ...[
-                          const SizedBox(width: 6),
                           const _Tag(
                             label: '调试',
                             color: Color(0xFFF57C00), // Colors.orange[700]

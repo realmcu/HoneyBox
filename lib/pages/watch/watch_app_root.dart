@@ -4,22 +4,32 @@ import '../../providers/ble_provider.dart';
 import '../../providers/current_app_provider.dart';
 import '../scan/scan_page.dart';
 import 'watch_device_page.dart';
-
-/// Firmware advertising marker from `hmi_ble_gap_init.c`.
-/// This is intentionally independent of the user-editable Bluetooth name.
-const String _watchAdvertisedServiceUuid =
-    '000001ff-3c17-d293-8e48-14fe2e4da212';
+import 'jw_device_page.dart';
+import 'jw_history_page.dart';
 
 /// Watch 应用根：结构与 EBadgeAppRoot 一致。
 /// [PopScope] 保证返回 Launcher 时 disconnect + 清 currentApp（spec §4.4）。
-class WatchAppRoot extends ConsumerWidget {
+class WatchAppRoot extends ConsumerStatefulWidget {
   const WatchAppRoot({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<WatchAppRoot> createState() => _WatchAppRootState();
+}
+
+class _WatchAppRootState extends ConsumerState<WatchAppRoot> {
+  bool _leaving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_leaving) return const SizedBox.shrink();
     ref.listen<ConnectedDeviceInfo?>(connectedDeviceProvider, (prev, next) {
-      if (prev != null && next == null) {
-        Navigator.of(context).popUntil((r) => r.settings.name == '/watch-root');
+      // A popped route remains mounted during its exit animation. Its delayed
+      // disconnect must not pop the Launcher after this route left the stack.
+      if (prev != null && next == null && !_leaving) {
+        Navigator.of(context).popUntil((r) =>
+            r.settings.name == '/watch-root' ||
+            (r.settings.name?.startsWith('/jw-history') ?? false) ||
+            (r.settings.name?.startsWith('/jw-health') ?? false));
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('设备已断开')),
         );
@@ -28,20 +38,30 @@ class WatchAppRoot extends ConsumerWidget {
 
     final connected = ref.watch(connectedDeviceProvider);
     final child = connected != null
-        ? WatchDevicePage(
-            deviceName: connected.name,
-            deviceId: connected.deviceId,
-          )
-        : const ScanPage(
-            defaultDeviceFilter: '',
+        ? connected.isJw
+            ? JwDevicePage(
+                deviceName: connected.name, deviceId: connected.deviceId)
+            : WatchDevicePage(
+                deviceName: connected.name,
+                deviceId: connected.deviceId,
+              )
+        : ScanPage(
+            defaultDeviceFilter: 'Watch',
             appTitle: 'Watch',
-            requiredServiceUuid: _watchAdvertisedServiceUuid,
+            // Broad scan preserves FD50/manufacturer-only JW adverts. Shared
+            // legacy adverts are candidates too; discovered GATT selects SDK.
+            acceptJwCandidates: true,
+            onBrowseSavedHistory: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                    settings: const RouteSettings(name: '/jw-history-devices'),
+                    builder: (_) => const JwSavedHistoryDevicesPage())),
           );
 
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) return;
+        _leaving = true;
         ref.read(bleNotifierProvider.notifier).disconnect();
         ref.read(currentAppProvider.notifier).state = null;
       },

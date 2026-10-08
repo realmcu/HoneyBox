@@ -1,0 +1,400 @@
+{
+  "schema": 1,
+  "firmwareHead": "91dc0a6077d118969fbd25126283d06f1d6107fa",
+  "deviceDate": "2026-10-04",
+  "provenance": {
+    "method": "Actual firmware portable packers, actual bitfield types and extracted exercise serialization; generated in scratch without firmware writes or board commands. Expected values specified independently from synthetic inputs.",
+    "sourceSha256": {
+      "inc/health_algo.h": "b1c2fa32d80508e8cd64f4af240954422728ba6ec9e371be20a688b743214564",
+      "communicate/communicate_sync_history_data.c": "43913000b2ef50f98d1c57a3fd2076b69d3b7d055a208be045f2c7af36b599b0",
+      "module/hrv/hrv_record.c": "535f6c451e79cbb33293bc5bff30b8655222bf056f803e7c638b37fe9cbdcc45",
+      "module/metab/metab_daily.c": "0ddf3b3613024242103585b56b26c0625d6ff0644a76675e78e09bbbd03db75f",
+      "module/readiness/readiness_output.c": "8c9be03abcc75ea3325e87c8bb79aa701bdc39238a9e6c7ffec369e0ab028492",
+      "module/readiness/readiness_model.c": "714cd4e6f4a07fe98890b9d371d3e4fd70ac1069dfc18d8ab9276c2ae696bedd"
+    },
+    "probeScriptSha256": "5affc601b1367eda2abe31828402fa21bcee109a888dc1eb00a1d12d1ac00f24",
+    "probeOutputSha256": "024ef373652e09239f0fbcd4ec82cdb03e60d6e11c9fcde50769d8be0f9d946e",
+    "localEpochSeconds": 844424100,
+    "legacyUnixOffsetSeconds": 946656000
+  },
+  "vectors": [
+    {
+      "name": "steps",
+      "key": 2,
+      "payloadHex": "3544000104726960b26e0315",
+      "l2Hex": "050002000c3544000104726960b26e0315",
+      "l1Hex": "ab400011eedc0064050002000c3544000104726960b26e0315",
+      "sequence": 100,
+      "expected": {
+        "date": "2026-10-04",
+        "minute": 525,
+        "steps": 1234,
+        "distanceMeters": 789,
+        "energyCalories": 45678,
+        "activeMinutes": 12,
+        "mode": 2
+      }
+    },
+    {
+      "name": "sleep",
+      "key": 3,
+      "payloadHex": "3544000105460002",
+      "l2Hex": "05000300083544000105460002",
+      "l1Hex": "ab40000db6fe006505000300083544000105460002",
+      "sequence": 101,
+      "expected": {
+        "date": "2026-10-04",
+        "minute": 1350,
+        "mode": 2
+      }
+    },
+    {
+      "name": "heart_temperature",
+      "key": 41,
+      "payloadHex": "354400010003816f02671748",
+      "l2Hex": "050029000c354400010003816f02671748",
+      "l1Hex": "ab40001117ac0066050029000c354400010003816f02671748",
+      "sequence": 102,
+      "expected": {
+        "date": "2026-10-04",
+        "minute": 615,
+        "second": 23,
+        "heartRateBpm": 72,
+        "skinTemperatureCelsius": 36.7,
+        "heatStress": 2,
+        "worn": true,
+        "compensated": true
+      }
+    },
+    {
+      "name": "blood_pressure",
+      "key": 19,
+      "payloadHex": "35440001000002bc21444f7a",
+      "l2Hex": "050013000c35440001000002bc21444f7a",
+      "l1Hex": "ab4000117eff0067050013000c35440001000002bc21444f7a",
+      "sequence": 103,
+      "expected": {
+        "date": "2026-10-04",
+        "minute": 700,
+        "second": 33,
+        "systolicMmHg": 122,
+        "diastolicMmHg": 79,
+        "heartRateBpm": 68
+      }
+    },
+    {
+      "name": "blood_oxygen",
+      "key": 44,
+      "payloadHex": "354403202c626360",
+      "l2Hex": "05002c0008354403202c626360",
+      "l1Hex": "ab40000d1838006805002c0008354403202c626360",
+      "sequence": 104,
+      "expected": {
+        "date": "2026-10-04",
+        "minute": 800,
+        "second": 44,
+        "percent": 98,
+        "highPercent": 99,
+        "lowPercent": 96
+      }
+    },
+    {
+      "name": "exercise",
+      "key": 22,
+      "payloadHex": "354400010002671700001e0a0200010500000d80000009c40000a410966e4100",
+      "l2Hex": "0500160020354400010002671700001e0a0200010500000d80000009c40000a410966e4100",
+      "l1Hex": "ab400025c4d700690500160020354400010002671700001e0a0200010500000d80000009c40000a410966e4100",
+      "sequence": 105,
+      "expected": {
+        "date": "2026-10-04",
+        "minute": 615,
+        "second": 23,
+        "mode": 0,
+        "durationMinutes": 30,
+        "durationSeconds": 10,
+        "pauseCount": 2,
+        "pauseMinutes": 1,
+        "pauseSeconds": 5,
+        "steps": 3456,
+        "distanceMeters": 2500,
+        "energyCalories": 42000,
+        "heartRateMax": 150,
+        "heartRateAverage": 110,
+        "heartRateMin": 65
+      }
+    },
+    {
+      "name": "hrv",
+      "key": 60,
+      "payloadHex": "016ac1b6a42f0000",
+      "l2Hex": "05003c0008016ac1b6a42f0000",
+      "l1Hex": "ab40000dad6b006a05003c0008016ac1b6a42f0000",
+      "sequence": 106,
+      "expected": {
+        "wireVersion": 1,
+        "wireUnixSeconds": 1791080100,
+        "localEpochSeconds": 844424100,
+        "sdnnMilliseconds": 47,
+        "sampleCount": null,
+        "flags": null
+      }
+    },
+    {
+      "name": "pressure",
+      "key": 91,
+      "payloadHex": "a4e3543239000000",
+      "l2Hex": "05005b0008a4e3543239000000",
+      "l1Hex": "ab40000d29ae006b05005b0008a4e3543239000000",
+      "sequence": 107,
+      "expected": {
+        "localEpochSeconds": 844424100,
+        "value": 57
+      }
+    },
+    {
+      "name": "metab_v3",
+      "key": 96,
+      "payloadHex": "8053543203378403e00137332f0026003d003c00625e0246f1ff0c00a4015a001e004100393000004101500027010100",
+      "l2Hex": "05006000308053543203378403e00137332f0026003d003c00625e0246f1ff0c00a4015a001e004100393000004101500027010100",
+      "l1Hex": "ab400035f355006c05006000308053543203378403e00137332f0026003d003c00625e0246f1ff0c00a4015a001e004100393000004101500027010100",
+      "sequence": 108,
+      "expected": {
+        "wireVersion": 3,
+        "dayEpochSeconds": 844387200,
+        "flags": 55,
+        "wearMinutes": 900,
+        "restStartMinute": 480,
+        "restHeartRateBpm": 55,
+        "nightHeartRateP10": 51,
+        "sdnnMedianMs": 47,
+        "sdnnP25Ms": 38,
+        "sdnnP75Ms": 61,
+        "sdnnCount": 60,
+        "spo2MeanPercent": 98,
+        "spo2MinPercent": 94,
+        "spo2Lt90Count": 2,
+        "dayHeartRateAverageBpm": 70,
+        "skinTemperatureMeanCelsius": -1.5,
+        "skinTemperatureRangeCelsius": 1.2,
+        "sleepMinutes": 420,
+        "deepSleepMinutes": 90,
+        "sleepOnsetMinute": 30,
+        "activeMinutes": 65,
+        "steps": 12345,
+        "energyRaw": 321,
+        "energyKilocalories": 321,
+        "sedentaryMaxMinutes": 80,
+        "stressAverage": 39,
+        "heartRatePeriodMinutes": 1,
+        "flags2": 1
+      }
+    },
+    {
+      "name": "metab_v2",
+      "key": 96,
+      "payloadHex": "8053543202378403e00137332f0026003d003c00625e0246f1ff0c00a4015a001e00410039300000007d500027010100",
+      "l2Hex": "05006000308053543202378403e00137332f0026003d003c00625e0246f1ff0c00a4015a001e00410039300000007d500027010100",
+      "l1Hex": "ab40003559ed006d05006000308053543202378403e00137332f0026003d003c00625e0246f1ff0c00a4015a001e00410039300000007d500027010100",
+      "sequence": 109,
+      "expected": {
+        "wireVersion": 2,
+        "energyRaw": 32000,
+        "energyKilocalories": 32
+      }
+    },
+    {
+      "name": "metab_missing",
+      "key": 96,
+      "payloadHex": "8053543203000000ffff00000000000000000000000000000000000000000000ffff0000000000000000000000ff0200",
+      "l2Hex": "05006000308053543203000000ffff00000000000000000000000000000000000000000000ffff0000000000000000000000ff0200",
+      "l1Hex": "ab400035659c006e05006000308053543203000000ffff00000000000000000000000000000000000000000000ffff0000000000000000000000ff0200",
+      "sequence": 110,
+      "expected": {
+        "wireVersion": 3,
+        "flags": 0,
+        "restStartMinute": null,
+        "sleepOnsetMinute": null,
+        "restHeartRateBpm": null,
+        "sdnnMedianMs": null,
+        "spo2MeanPercent": null,
+        "skinTemperatureMeanCelsius": null,
+        "sleepMinutes": null,
+        "heartRatePeriodMinutes": null,
+        "flags2": 2
+      }
+    },
+    {
+      "name": "readiness_ok",
+      "key": 100,
+      "payloadHex": "ea070a04000352fe030937002f00a40103000000",
+      "l2Hex": "0500640014ea070a04000352fe030937002f00a40103000000",
+      "l1Hex": "ab4000190bab006f0500640014ea070a04000352fe030937002f00a40103000000",
+      "sequence": 111,
+      "expected": {
+        "date": "2026-10-04",
+        "availability": 0,
+        "tier": 3,
+        "score": 82,
+        "hrContribution": -2,
+        "hrvContribution": 3,
+        "baselineNights": 9,
+        "restHeartRateBpm": 55,
+        "flags": 0,
+        "sdnnMedianMs": 47,
+        "sleepMinutes": 420,
+        "algorithmVersion": 3
+      }
+    },
+    {
+      "name": "readiness_learning",
+      "key": 100,
+      "payloadHex": "ea070a040500ff00000937042f00ffff03000000",
+      "l2Hex": "0500640014ea070a040500ff00000937042f00ffff03000000",
+      "l1Hex": "ab40001970c300700500640014ea070a040500ff00000937042f00ffff03000000",
+      "sequence": 112,
+      "expected": {
+        "date": "2026-10-04",
+        "availability": 5,
+        "tier": 0,
+        "score": null,
+        "hrContribution": 0,
+        "hrvContribution": 0,
+        "baselineNights": 9,
+        "flags": 4,
+        "sleepMinutes": null,
+        "algorithmVersion": 3
+      }
+    }
+  ],
+  "controls": [
+    {
+      "name": "history_request",
+      "key": 1,
+      "payloadHex": "",
+      "l2Hex": "0500010000",
+      "l1Hex": "ab400005c09d00c80500010000",
+      "note": "L1 noAck flag is fixture transport selection, not a mandatory outbound host setting."
+    },
+    {
+      "name": "start",
+      "key": 7,
+      "payloadHex": "000001010001020001030001040001050001060001",
+      "l2Hex": "0500070015000001010001020001030001040001050001060001",
+      "l1Hex": "ab40001a617500c90500070015000001010001020001030001040001050001060001",
+      "note": "L1 noAck flag is fixture transport selection, not a mandatory outbound host setting."
+    },
+    {
+      "name": "traditional_end",
+      "key": 8,
+      "payloadHex": "",
+      "l2Hex": "0500080000",
+      "l1Hex": "ab400005c24d00ca0500080000",
+      "note": "L1 noAck flag is fixture transport selection, not a mandatory outbound host setting."
+    },
+    {
+      "name": "pressure_end",
+      "key": 91,
+      "payloadHex": "6f7665726f766572",
+      "l2Hex": "05005b00086f7665726f766572",
+      "l1Hex": "ab40000d0a7800cb05005b00086f7665726f766572",
+      "note": "L1 noAck flag is fixture transport selection, not a mandatory outbound host setting."
+    },
+    {
+      "name": "metabolism_end",
+      "key": 96,
+      "payloadHex": "6f7665726f766572",
+      "l2Hex": "05006000086f7665726f766572",
+      "l1Hex": "ab40000d2ea200cc05006000086f7665726f766572",
+      "note": "L1 noAck flag is fixture transport selection, not a mandatory outbound host setting."
+    },
+    {
+      "name": "readiness_end",
+      "key": 100,
+      "payloadHex": "6f7665726f766572",
+      "l2Hex": "05006400086f7665726f766572",
+      "l1Hex": "ab40000d1eb700cd05006400086f7665726f766572",
+      "note": "L1 noAck flag is fixture transport selection, not a mandatory outbound host setting."
+    },
+    {
+      "name": "application_success",
+      "key": 28,
+      "payloadHex": "",
+      "l2Hex": "05001c0000",
+      "l1Hex": "ab400005c60d00ce05001c0000",
+      "note": "L1 noAck flag is fixture transport selection, not a mandatory outbound host setting."
+    }
+  ],
+  "negativeCases": [
+    {
+      "name": "readiness_unknown_algorithm",
+      "key": 100,
+      "payloadHex": "ea070a04000352fe030937002f00a40104000000",
+      "expected": "quarantineAndNoApplicationAck"
+    },
+    {
+      "name": "metab_unknown_version",
+      "key": 96,
+      "payloadHex": "8053543204378403e00137332f0026003d003c00625e0246f1ff0c00a4015a001e004100393000004101500027010100",
+      "expected": "quarantineAndNoApplicationAck"
+    },
+    {
+      "name": "steps_truncated",
+      "key": 2,
+      "payloadHex": "3544000104726960b26e03",
+      "expected": "quarantineAndNoApplicationAck"
+    },
+    {
+      "name": "readiness_invalid_date",
+      "key": 100,
+      "payloadHex": "ea070220000352fe030937002f00a40103000000",
+      "expected": "quarantineAndNoApplicationAck"
+    },
+    {
+      "name": "pressure_marker_prefix_plus_trailing_byte",
+      "key": 91,
+      "payloadHex": "6f7665726f76657258",
+      "expected": "NotAnEndMarkerAndInvalidRecordLength"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "end_before_modern",
+      "expectApplicationAckAfter": "AllExpectedMarkersAndDurableCommit"
+    },
+    {
+      "name": "same_payload_new_sequence",
+      "expect": "DeduplicateRecordAndDoNotFillMissingCount"
+    },
+    {
+      "name": "sequence_wrap",
+      "sequences": [
+        65534,
+        65535,
+        0,
+        1
+      ],
+      "expect": "continuous"
+    },
+    {
+      "name": "sequence_gap",
+      "sequences": [
+        100,
+        102
+      ],
+      "expect": "NoApplicationAck"
+    },
+    {
+      "name": "flush_failure",
+      "expect": "PartialRetainedNoApplicationAck"
+    },
+    {
+      "name": "old_readiness_revision_replay",
+      "expect": "KeepLatestFirstObservedDistinctPayload"
+    },
+    {
+      "name": "saturated_start_count",
+      "count": 65535,
+      "expect": "UseEndAndMarkersWithoutExactCountClaim"
+    }
+  ]
+}

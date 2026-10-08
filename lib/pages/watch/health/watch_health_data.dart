@@ -137,7 +137,7 @@ class WatchHealthSnapshot {
       _todaySport.fold(0, (sum, record) => sum + record.distanceMeters);
 
   double get caloriesKcal => _model != null
-      ? _model!.caloriesDeciKcal / 10
+      ? _model.caloriesDeciKcal / 10
       : _todaySport.fold(
           0,
           (sum, record) => sum + record.caloriesDeciKcal / 10,
@@ -235,11 +235,11 @@ class WatchHealthSnapshot {
       ));
     }
     if (_model != null) {
-      final now = _model!.wallClock ?? syncedAt;
+      final now = _model.wallClock ?? syncedAt;
       final slot = (now.hour ~/ 4).clamp(0, points.length - 1);
       points[slot] = WatchHealthTrendPoint(
         label: points[slot].label,
-        steps: _model!.steps,
+        steps: _model.steps,
         heartRate: null,
       );
     }
@@ -271,7 +271,7 @@ class WatchHealthSnapshot {
     if (_model != null && points.isNotEmpty) {
       points[points.length - 1] = WatchHealthTrendPoint(
         label: points.last.label,
-        steps: _model!.steps,
+        steps: _model.steps,
         heartRate: null,
       );
     }

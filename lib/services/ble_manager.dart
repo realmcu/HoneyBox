@@ -4,8 +4,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'android_ble_permissions.dart';
 
+import 'jw/jw_gatt_profile.dart';
+import 'jw/jw_raw_channel.dart';
+import 'jw/jw_transport.dart';
 import 'l1_engine.dart';
 import 'l2_file_transfer.dart';
 
@@ -138,6 +141,10 @@ class BleManager {
   // BLE objects
   // --------------------------------------------------------------------------
 
+  JwRawChannel? _jwTransport;
+  JwTransport? get jwTransport => _jwTransport;
+  StreamController<Uint8List>? _jwNotifyController;
+  StreamController<void>? _jwDisconnectController;
   BluetoothDevice? _device;
   BluetoothCharacteristic? _txChar; // FFC1 - write
   BluetoothCharacteristic? _rxChar; // FFC2 - notify
@@ -236,12 +243,7 @@ class BleManager {
   /// directly from the Win32 process without capability declarations.
   Future<bool> _ensureBlePermissions() async {
     if (!Platform.isAndroid) return true;
-    final scan = await Permission.bluetoothScan.request();
-    final connect = await Permission.bluetoothConnect.request();
-    if (scan.isGranted && connect.isGranted) return true;
-
-    final location = await Permission.locationWhenInUse.request();
-    return location.isGranted || location.isLimited;
+    return requestAndroidBlePermissions();
   }
 
   /// Start scanning for BLE devices. Each discovered device is reported via
@@ -323,7 +325,8 @@ class BleManager {
   // --------------------------------------------------------------------------
 
   /// Connect to a BLE device and show the UI. Returns true on success.
-  Future<bool> connect(String deviceId, String deviceName) async {
+  Future<bool> connect(String deviceId, String deviceName,
+      {bool allowJw = false}) async {
     if (_disposed) return false;
     stopScan();
     _setState(BleState.connecting);
@@ -339,7 +342,7 @@ class BleManager {
       // HoneyBox is an internal debugging tool and uses the nonprofit tier.
       await _device!.connect(
         license: License.nonprofit,
-        timeout: const Duration(seconds: 10),
+        timeout: Duration(seconds: allowJw ? 20 : 10),
       );
       debugPrint('BleManager: connected, discovering services');
 
@@ -357,6 +360,102 @@ class BleManager {
 
       final services = _device!.servicesList;
       _logGattTable(services);
+      // Select JW before touching any legacy characteristic or protocol engine.
+      for (final service in services) {
+        final chars = {
+          for (final c in service.characteristics)
+            JwGattProfile.normalize(c.uuid.toString()): c
+        };
+        final tx = chars[JwGattProfile.tx];
+        final rx = chars[JwGattProfile.rx];
+        if (!JwGattProfile.matches(service.uuid.toString(), chars.keys.toSet(),
+            txWrite: tx?.properties.write ?? false,
+            rxNotify: rx?.properties.notify ?? false,
+            allowJw: allowJw)) {
+          continue;
+        }
+        final device = _device!;
+        try {
+          _mtu = await device.requestMtu(247);
+        } catch (_) {
+          _mtu = 23;
+        }
+        final notifications = StreamController<Uint8List>.broadcast(sync: true);
+        final disconnected = StreamController<void>.broadcast(sync: true);
+        _jwNotifyController = notifications;
+        _jwDisconnectController = disconnected;
+        BluetoothCharacteristic? alert;
+        for (final service in services) {
+          if (JwGattProfile.normalize(service.uuid.toString()) !=
+              JwGattProfile.normalize('1802')) {
+            continue;
+          }
+          for (final c in service.characteristics) {
+            if (JwGattProfile.normalize(c.uuid.toString()) ==
+                    JwGattProfile.normalize('2a06') &&
+                (c.properties.write || c.properties.writeWithoutResponse)) {
+              alert = c;
+            }
+          }
+        }
+        final alertEndpoint = alert;
+        late final JwRawChannel port;
+        port = JwRawChannel(
+            mtu: _mtu,
+            notifications: notifications.stream,
+            disconnected: disconnected.stream,
+            subscribeFn: () async {
+              _notificationSub = rx!.onValueReceived.listen((bytes) {
+                if (!_disposed &&
+                    _jwTransport == port &&
+                    !notifications.isClosed) {
+                  notifications.add(Uint8List.fromList(bytes));
+                }
+              });
+              try {
+                if (!await rx.setNotifyValue(true)) {
+                  throw StateError('FF03 subscription refused');
+                }
+              } catch (_) {
+                await _notificationSub?.cancel();
+                _notificationSub = null;
+                rethrow;
+              }
+            },
+            writeFn: (bytes, {required bool withResponse}) async {
+              await tx!.write(bytes, withoutResponse: !withResponse);
+            },
+            readFn: (uuid) async {
+              for (final s in services) {
+                for (final c in s.characteristics) {
+                  if (JwGattProfile.normalize(c.uuid.toString()) ==
+                      JwGattProfile.normalize(uuid)) {
+                    return Uint8List.fromList(await c.read());
+                  }
+                }
+              }
+              return null;
+            },
+            disconnectFn: () async {
+              // Deferred close of an old session must not own a new connection.
+              if (_jwTransport != port || !identical(_device, device)) return;
+              await disconnect();
+            },
+            immediateAlertWithResponse:
+                alertEndpoint?.properties.write ?? false,
+            immediateAlertWriteFn: alertEndpoint == null
+                ? null
+                : (bytes) async {
+                    await alertEndpoint.write(bytes,
+                        withoutResponse: !alertEndpoint.properties.write);
+                  });
+        _jwTransport = port;
+        await port.subscribe();
+        debugPrint(
+            'BleManager: JW FF03 ready; FF02 response writes, MTU=$_mtu');
+        _setState(BleState.connected);
+        return true;
+      }
       for (final s in services) {
         for (final c in s.characteristics) {
           final uuid = c.uuid.toString().toUpperCase();
@@ -744,6 +843,15 @@ class BleManager {
   }
 
   void _cleanup() {
+    if (_jwDisconnectController != null && !_jwDisconnectController!.isClosed) {
+      _jwDisconnectController!.add(null);
+    }
+    _jwTransport?.invalidate();
+    _jwTransport = null;
+    _jwNotifyController?.close();
+    _jwDisconnectController?.close();
+    _jwNotifyController = null;
+    _jwDisconnectController = null;
     _scanActive = false;
     _notificationSub?.cancel();
     _notificationSub = null;

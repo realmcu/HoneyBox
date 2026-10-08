@@ -1,0 +1,817 @@
+{
+  "schemaVersion": 1,
+  "kind": "offline_configuration_contracts_not_board_data",
+  "contract": "v101S200",
+  "sources": {
+    "sdkSettingsBuilder": {
+      "path": "ws-ble-sdk/components/ws-sdk-demo-wechat/ws-ble-sdk/jw-ble-sdk/layer/builder/SettingsPacketBuilder.js",
+      "sha256": "2b0a268ce2da10aa6af76fc00816ef86ad4f5572cceb3c552fa258294e6cf6a3"
+    },
+    "sdkFeatureBuilder": {
+      "path": "ws-ble-sdk/components/ws-sdk-demo-wechat/ws-ble-sdk/jw-ble-sdk/layer/builder/FeaturePacketBuilder.js",
+      "sha256": "9b2bd46c219e5730c78590bd411f154ed735a0e69610d85185f371066841c35a"
+    },
+    "firmwareSetting": {
+      "path": "G:/Sourcecode/8762D/V101/v101_8762d_develop/RTL8762D/sdk-4.0.0/src/app/wristband/communicate/communicate_parse_setting.c",
+      "sha256": "3a6e0bcca8a7662b11f825effd81405b871cd78ef86e573f131d87e776ba9b59"
+    },
+    "firmwareHealth": {
+      "path": "G:/Sourcecode/8762D/V101/v101_8762d_develop/RTL8762D/sdk-4.0.0/src/app/wristband/communicate/communicate_parse_health.c",
+      "sha256": "b6257b3cf6f6004118d309452c7b8d1c10b2b7a8797038e4696bdc0688012a35"
+    },
+    "firmwareReadback": {
+      "path": "G:/Sourcecode/8762D/V101/v101_8762d_develop/RTL8762D/sdk-4.0.0/src/app/wristband/communicate/communicate_task.c",
+      "sha256": "31a3f04bfbe9803db36819d5329f147557485c9c5c4783a7f1e37eaf9b7d4cb2"
+    },
+    "firmwareSetters": {
+      "path": "G:/Sourcecode/8762D/V101/v101_8762d_develop/RTL8762D/sdk-4.0.0/src/app/wristband/communicate/communicate_func_api.c",
+      "sha256": "e742fc8811294149d8c3c0a79cd48894a8e3bba45c3273a795cd5cc35478bf27"
+    },
+    "s200Config": {
+      "path": "G:/Sourcecode/8762D/V101/v101_8762d_develop/RTL8762D/sdk-4.0.0/app_user/S200/evb_stack_img_base/customer_config.h",
+      "sha256": "dc1619a3eb59a2bde667e9bd920539f7fcacf3f1325eea867c904130886b0e4f"
+    }
+  },
+  "domains": [
+    {
+      "domain": "hourSystem",
+      "beforeRaw": "00",
+      "targetRaw": "01",
+      "setRaw": "01",
+      "restoreSetRaw": "00",
+      "packets": [
+        {
+          "role": "read",
+          "command": 2,
+          "key": 66,
+          "value": "",
+          "seq": 4608,
+          "l2": "0200420000",
+          "l1": "ab000005d4d912000200420000"
+        },
+        {
+          "role": "beforeResponse",
+          "command": 2,
+          "key": 67,
+          "value": "00",
+          "seq": 4609,
+          "l2": "020043000100",
+          "l1": "ab000006f6151201020043000100"
+        },
+        {
+          "role": "set",
+          "command": 2,
+          "key": 65,
+          "value": "01",
+          "seq": 4610,
+          "l2": "020041000101",
+          "l1": "ab0000068ed51202020041000101"
+        },
+        {
+          "role": "targetResponse",
+          "command": 2,
+          "key": 67,
+          "value": "01",
+          "seq": 4611,
+          "l2": "020043000101",
+          "l1": "ab00000636d41203020043000101"
+        },
+        {
+          "role": "restore",
+          "command": 2,
+          "key": 65,
+          "value": "00",
+          "seq": 4612,
+          "l2": "020041000100",
+          "l1": "ab0000064e141204020041000100"
+        },
+        {
+          "role": "restoredResponse",
+          "command": 2,
+          "key": 67,
+          "value": "00",
+          "seq": 4613,
+          "l2": "020043000100",
+          "l1": "ab000006f6151205020043000100"
+        }
+      ]
+    },
+    {
+      "domain": "distanceUnit",
+      "beforeRaw": "00",
+      "targetRaw": "01",
+      "setRaw": "01",
+      "restoreSetRaw": "00",
+      "packets": [
+        {
+          "role": "read",
+          "command": 2,
+          "key": 69,
+          "value": "",
+          "seq": 4614,
+          "l2": "0200450000",
+          "l1": "ab000005156812060200450000"
+        },
+        {
+          "role": "beforeResponse",
+          "command": 2,
+          "key": 70,
+          "value": "00",
+          "seq": 4615,
+          "l2": "020046000100",
+          "l1": "ab0000063a151207020046000100"
+        },
+        {
+          "role": "set",
+          "command": 2,
+          "key": 68,
+          "value": "01",
+          "seq": 4616,
+          "l2": "020044000101",
+          "l1": "ab00000642d51208020044000101"
+        },
+        {
+          "role": "targetResponse",
+          "command": 2,
+          "key": 70,
+          "value": "01",
+          "seq": 4617,
+          "l2": "020046000101",
+          "l1": "ab000006fad41209020046000101"
+        },
+        {
+          "role": "restore",
+          "command": 2,
+          "key": 68,
+          "value": "00",
+          "seq": 4618,
+          "l2": "020044000100",
+          "l1": "ab0000068214120a020044000100"
+        },
+        {
+          "role": "restoredResponse",
+          "command": 2,
+          "key": 70,
+          "value": "00",
+          "seq": 4619,
+          "l2": "020046000100",
+          "l1": "ab0000063a15120b020046000100"
+        }
+      ]
+    },
+    {
+      "domain": "screenLightTime",
+      "beforeRaw": "0a05",
+      "targetRaw": "0f05",
+      "setRaw": "0f",
+      "restoreSetRaw": "0a",
+      "packets": [
+        {
+          "role": "read",
+          "command": 2,
+          "key": 75,
+          "value": "",
+          "seq": 4620,
+          "l2": "02004b0000",
+          "l1": "ab000005d609120c02004b0000"
+        },
+        {
+          "role": "beforeResponse",
+          "command": 2,
+          "key": 76,
+          "value": "0a05",
+          "seq": 4621,
+          "l2": "02004c00020a05",
+          "l1": "ab0000076d55120d02004c00020a05"
+        },
+        {
+          "role": "set",
+          "command": 2,
+          "key": 74,
+          "value": "0f",
+          "seq": 4622,
+          "l2": "02004a00010f",
+          "l1": "ab0000066e56120e02004a00010f"
+        },
+        {
+          "role": "targetResponse",
+          "command": 2,
+          "key": 76,
+          "value": "0f05",
+          "seq": 4623,
+          "l2": "02004c00020f05",
+          "l1": "ab0000073d56120f02004c00020f05"
+        },
+        {
+          "role": "restore",
+          "command": 2,
+          "key": 74,
+          "value": "0a",
+          "seq": 4624,
+          "l2": "02004a00010a",
+          "l1": "ab0000066d96121002004a00010a"
+        },
+        {
+          "role": "restoredResponse",
+          "command": 2,
+          "key": 76,
+          "value": "0a05",
+          "seq": 4625,
+          "l2": "02004c00020a05",
+          "l1": "ab0000076d55121102004c00020a05"
+        }
+      ],
+      "readSemantics": "current_and_firmware_default; SET is current byte only"
+    },
+    {
+      "domain": "screenBrightness",
+      "beforeRaw": "3c1e",
+      "targetRaw": "501e",
+      "setRaw": "50",
+      "restoreSetRaw": "3c",
+      "packets": [
+        {
+          "role": "read",
+          "command": 2,
+          "key": 84,
+          "value": "",
+          "seq": 4626,
+          "l2": "0200540000",
+          "l1": "ab000005103812120200540000"
+        },
+        {
+          "role": "beforeResponse",
+          "command": 2,
+          "key": 85,
+          "value": "3c1e",
+          "seq": 4627,
+          "l2": "02005500023c1e",
+          "l1": "ab000007041f121302005500023c1e"
+        },
+        {
+          "role": "set",
+          "command": 2,
+          "key": 83,
+          "value": "50",
+          "seq": 4628,
+          "l2": "020053000150",
+          "l1": "ab0000060a111214020053000150"
+        },
+        {
+          "role": "targetResponse",
+          "command": 2,
+          "key": 85,
+          "value": "501e",
+          "seq": 4629,
+          "l2": "0200550002501e",
+          "l1": "ab000007043212150200550002501e"
+        },
+        {
+          "role": "restore",
+          "command": 2,
+          "key": 83,
+          "value": "3c",
+          "seq": 4630,
+          "l2": "02005300013c",
+          "l1": "ab0000062711121602005300013c"
+        },
+        {
+          "role": "restoredResponse",
+          "command": 2,
+          "key": 85,
+          "value": "3c1e",
+          "seq": 4631,
+          "l2": "02005500023c1e",
+          "l1": "ab000007041f121702005500023c1e"
+        }
+      ],
+      "readSemantics": "current_and_firmware_default; SET is current byte only"
+    },
+    {
+      "domain": "heartRateAuto",
+      "beforeRaw": "0000",
+      "targetRaw": "0101",
+      "setRaw": "0101",
+      "restoreSetRaw": "0001",
+      "packets": [
+        {
+          "role": "read",
+          "command": 5,
+          "key": 17,
+          "value": "",
+          "seq": 4632,
+          "l2": "0500110000",
+          "l1": "ab000005059c12180500110000"
+        },
+        {
+          "role": "beforeResponse",
+          "command": 5,
+          "key": 18,
+          "value": "0000",
+          "seq": 4633,
+          "l2": "05001200020000",
+          "l1": "ab000007c34c121905001200020000"
+        },
+        {
+          "role": "set",
+          "command": 5,
+          "key": 14,
+          "value": "0101",
+          "seq": 4634,
+          "l2": "05000e00020101",
+          "l1": "ab000007515d121a05000e00020101"
+        },
+        {
+          "role": "targetResponse",
+          "command": 5,
+          "key": 18,
+          "value": "0101",
+          "seq": 4635,
+          "l2": "05001200020101",
+          "l1": "ab000007938c121b05001200020101"
+        },
+        {
+          "role": "restore",
+          "command": 5,
+          "key": 14,
+          "value": "0001",
+          "seq": 4636,
+          "l2": "05000e00020001",
+          "l1": "ab000007c15c121c05000e00020001"
+        },
+        {
+          "role": "restoredResponse",
+          "command": 5,
+          "key": 18,
+          "value": "0000",
+          "seq": 4637,
+          "l2": "05001200020000",
+          "l1": "ab000007c34c121d05001200020000"
+        }
+      ]
+    },
+    {
+      "domain": "bloodOxygenAuto",
+      "beforeRaw": "0000",
+      "targetRaw": "0101",
+      "setRaw": "0101",
+      "restoreSetRaw": "0000",
+      "packets": [
+        {
+          "role": "read",
+          "command": 5,
+          "key": 52,
+          "value": "",
+          "seq": 4638,
+          "l2": "0500340000",
+          "l1": "ab000005ce8d121e0500340000"
+        },
+        {
+          "role": "beforeResponse",
+          "command": 5,
+          "key": 53,
+          "value": "0000",
+          "seq": 4639,
+          "l2": "05003500020000",
+          "l1": "ab000007c478121f05003500020000"
+        },
+        {
+          "role": "set",
+          "command": 5,
+          "key": 51,
+          "value": "0101",
+          "seq": 4640,
+          "l2": "05003300020101",
+          "l1": "ab0000079430122005003300020101"
+        },
+        {
+          "role": "targetResponse",
+          "command": 5,
+          "key": 53,
+          "value": "0101",
+          "seq": 4641,
+          "l2": "05003500020101",
+          "l1": "ab00000794b8122105003500020101"
+        },
+        {
+          "role": "restore",
+          "command": 5,
+          "key": 51,
+          "value": "0000",
+          "seq": 4642,
+          "l2": "05003300020000",
+          "l1": "ab000007c4f0122205003300020000"
+        },
+        {
+          "role": "restoredResponse",
+          "command": 5,
+          "key": 53,
+          "value": "0000",
+          "seq": 4643,
+          "l2": "05003500020000",
+          "l1": "ab000007c478122305003500020000"
+        }
+      ]
+    },
+    {
+      "domain": "bloodPressureAuto",
+      "beforeRaw": "0000",
+      "targetRaw": "0100",
+      "setRaw": "0101",
+      "restoreSetRaw": "0001",
+      "packets": [
+        {
+          "role": "read",
+          "command": 5,
+          "key": 62,
+          "value": "",
+          "seq": 4644,
+          "l2": "05003e0000",
+          "l1": "ab000005ccad122405003e0000"
+        },
+        {
+          "role": "beforeResponse",
+          "command": 5,
+          "key": 63,
+          "value": "0000",
+          "seq": 4645,
+          "l2": "05003f00020000",
+          "l1": "ab000007c5e0122505003f00020000"
+        },
+        {
+          "role": "set",
+          "command": 5,
+          "key": 61,
+          "value": "0101",
+          "seq": 4646,
+          "l2": "05003d00020101",
+          "l1": "ab0000075559122605003d00020101"
+        },
+        {
+          "role": "targetResponse",
+          "command": 5,
+          "key": 63,
+          "value": "0100",
+          "seq": 4647,
+          "l2": "05003f00020100",
+          "l1": "ab00000755e1122705003f00020100"
+        },
+        {
+          "role": "restore",
+          "command": 5,
+          "key": 61,
+          "value": "0001",
+          "seq": 4648,
+          "l2": "05003d00020001",
+          "l1": "ab000007c558122805003d00020001"
+        },
+        {
+          "role": "restoredResponse",
+          "command": 5,
+          "key": 63,
+          "value": "0000",
+          "seq": 4649,
+          "l2": "05003f00020000",
+          "l1": "ab000007c5e0122905003f00020000"
+        },
+        {
+          "role": "companionRead",
+          "command": 5,
+          "key": 38,
+          "value": "",
+          "seq": 4864,
+          "l2": "0500260000",
+          "l1": "ab000005cb2d13000500260000"
+        },
+        {
+          "role": "companionDisplayOffResponse",
+          "command": 5,
+          "key": 39,
+          "value": "00000000",
+          "seq": 4865,
+          "l2": "050027000400000000",
+          "l1": "ab00000992991301050027000400000000"
+        },
+        {
+          "role": "companionDisplayOnResponse",
+          "command": 5,
+          "key": 39,
+          "value": "80000000",
+          "seq": 4866,
+          "l2": "050027000480000000",
+          "l1": "ab00000952b01302050027000480000000"
+        },
+        {
+          "role": "companionDisplayOffSet",
+          "command": 5,
+          "key": 37,
+          "value": "00000000",
+          "seq": 4867,
+          "l2": "050025000400000000",
+          "l1": "ab00000952ba1303050025000400000000"
+        },
+        {
+          "role": "companionDisplayOnSet",
+          "command": 5,
+          "key": 37,
+          "value": "80000000",
+          "seq": 4868,
+          "l2": "050025000480000000",
+          "l1": "ab00000992931304050025000480000000"
+        }
+      ],
+      "companionBeforeRaw": "80000000",
+      "companionTargetRaw": "80000000"
+    },
+    {
+      "domain": "temperatureConfig",
+      "beforeRaw": "00000001",
+      "targetRaw": "00000005",
+      "setRaw": "00000005",
+      "restoreSetRaw": "00000001",
+      "packets": [
+        {
+          "role": "read",
+          "command": 5,
+          "key": 35,
+          "value": "",
+          "seq": 4650,
+          "l2": "0500230000",
+          "l1": "ab000005ca3d122a0500230000"
+        },
+        {
+          "role": "beforeResponse",
+          "command": 5,
+          "key": 36,
+          "value": "00000001",
+          "seq": 4651,
+          "l2": "050024000400000001",
+          "l1": "ab000009526b122b050024000400000001"
+        },
+        {
+          "role": "set",
+          "command": 5,
+          "key": 34,
+          "value": "00000005",
+          "seq": 4652,
+          "l2": "050022000400000005",
+          "l1": "ab000009910c122c050022000400000005"
+        },
+        {
+          "role": "targetResponse",
+          "command": 5,
+          "key": 36,
+          "value": "00000005",
+          "seq": 4653,
+          "l2": "050024000400000005",
+          "l1": "ab000009916a122d050024000400000005"
+        },
+        {
+          "role": "restore",
+          "command": 5,
+          "key": 34,
+          "value": "00000001",
+          "seq": 4654,
+          "l2": "050022000400000001",
+          "l1": "ab000009520d122e050022000400000001"
+        },
+        {
+          "role": "restoredResponse",
+          "command": 5,
+          "key": 36,
+          "value": "00000001",
+          "seq": 4655,
+          "l2": "050024000400000001",
+          "l1": "ab000009526b122f050024000400000001"
+        }
+      ]
+    }
+  ],
+  "temperatureUnitPairs": [
+    {
+      "before": "00000000",
+      "target": "00000004"
+    },
+    {
+      "before": "00000001",
+      "target": "00000005"
+    },
+    {
+      "before": "00000002",
+      "target": "00000006"
+    },
+    {
+      "before": "00000003",
+      "target": "00000007"
+    },
+    {
+      "before": "00000004",
+      "target": "00000000"
+    },
+    {
+      "before": "00000005",
+      "target": "00000001"
+    },
+    {
+      "before": "00000006",
+      "target": "00000002"
+    },
+    {
+      "before": "00000007",
+      "target": "00000003"
+    }
+  ],
+  "boundaries": [
+    {
+      "domain": "hourSystem",
+      "value": 0,
+      "valid": true
+    },
+    {
+      "domain": "hourSystem",
+      "value": 1,
+      "valid": true
+    },
+    {
+      "domain": "hourSystem",
+      "value": -1,
+      "valid": false
+    },
+    {
+      "domain": "hourSystem",
+      "value": 2,
+      "valid": false
+    },
+    {
+      "domain": "distanceUnit",
+      "value": 0,
+      "valid": true
+    },
+    {
+      "domain": "distanceUnit",
+      "value": 1,
+      "valid": true
+    },
+    {
+      "domain": "distanceUnit",
+      "value": -1,
+      "valid": false
+    },
+    {
+      "domain": "distanceUnit",
+      "value": 2,
+      "valid": false
+    },
+    {
+      "domain": "screenLightTime",
+      "value": 3,
+      "valid": true
+    },
+    {
+      "domain": "screenLightTime",
+      "value": 30,
+      "valid": true
+    },
+    {
+      "domain": "screenLightTime",
+      "value": 2,
+      "valid": false
+    },
+    {
+      "domain": "screenLightTime",
+      "value": 31,
+      "valid": false
+    },
+    {
+      "domain": "screenBrightness",
+      "value": 20,
+      "valid": true
+    },
+    {
+      "domain": "screenBrightness",
+      "value": 100,
+      "valid": true
+    },
+    {
+      "domain": "screenBrightness",
+      "value": 19,
+      "valid": false
+    },
+    {
+      "domain": "screenBrightness",
+      "value": 101,
+      "valid": false
+    }
+  ],
+  "rejectedReadValues": [
+    {
+      "domain": "hourSystem",
+      "raw": "",
+      "reason": "length",
+      "disposition": "reject"
+    },
+    {
+      "domain": "hourSystem",
+      "raw": "02",
+      "reason": "enum",
+      "disposition": "reject"
+    },
+    {
+      "domain": "distanceUnit",
+      "raw": "0000",
+      "reason": "length",
+      "disposition": "reject"
+    },
+    {
+      "domain": "distanceUnit",
+      "raw": "ff",
+      "reason": "enum",
+      "disposition": "reject"
+    },
+    {
+      "domain": "screenLightTime",
+      "raw": "0205",
+      "reason": "range",
+      "disposition": "reject"
+    },
+    {
+      "domain": "screenLightTime",
+      "raw": "1f05",
+      "reason": "range",
+      "disposition": "reject"
+    },
+    {
+      "domain": "screenBrightness",
+      "raw": "131e",
+      "reason": "range",
+      "disposition": "reject"
+    },
+    {
+      "domain": "screenBrightness",
+      "raw": "651e",
+      "reason": "range",
+      "disposition": "reject"
+    },
+    {
+      "domain": "heartRateAuto",
+      "raw": "0001",
+      "reason": "noncanonical_read_only",
+      "disposition": "diagnostic_read_only"
+    },
+    {
+      "domain": "bloodOxygenAuto",
+      "raw": "0100",
+      "reason": "noncanonical_read_only",
+      "disposition": "diagnostic_read_only"
+    },
+    {
+      "domain": "bloodPressureAuto",
+      "raw": "010a",
+      "reason": "noncanonical_read_only",
+      "disposition": "diagnostic_read_only"
+    },
+    {
+      "domain": "temperatureConfig",
+      "raw": "80000001",
+      "reason": "reserved_read_only",
+      "disposition": "diagnostic_read_only"
+    }
+  ],
+  "bpCompanionCases": [
+    {
+      "enabled": 0,
+      "display": 0,
+      "probeEnabled": 1,
+      "expectedDisplay": 0
+    },
+    {
+      "enabled": 0,
+      "display": 1,
+      "probeEnabled": 1,
+      "expectedDisplay": 1
+    },
+    {
+      "enabled": 1,
+      "display": 0,
+      "probeEnabled": 0,
+      "expectedDisplay": 0
+    },
+    {
+      "enabled": 1,
+      "display": 1,
+      "probeEnabled": 0,
+      "expectedDisplay": 1
+    }
+  ],
+  "screenReadContractCorrection": {
+    "firmwareReadbackLines": [
+      725,
+      867
+    ],
+    "actualRaw": {
+      "screenLightTime": "0505",
+      "screenBrightness": "1e1e"
+    },
+    "previousPreparationReceipt": "Historical one-byte screen READ vectors superseded; one-byte SET vectors unchanged."
+  }
+}

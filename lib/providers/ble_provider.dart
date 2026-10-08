@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/ble_manager.dart' as manager;
+import '../services/jw/jw_scan_policy.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 // BLE state enum
 enum BleState { disconnected, scanning, connecting, connected, disconnecting }
@@ -17,6 +19,9 @@ class ScanDevice {
   final String name;
   final int rssi;
   final bool connectable;
+  final bool jwCandidate;
+  final DateTime? firstSeen;
+  final DateTime? identitySeen;
 
   /// 虚拟调试设备(仅供扫描页显示区分,不影响连接逻辑——连接旁路走
   /// [kDebugDeviceIdPrefix] 判定)。
@@ -28,6 +33,9 @@ class ScanDevice {
     required this.rssi,
     this.connectable = true,
     this.debug = false,
+    this.jwCandidate = false,
+    this.firstSeen,
+    this.identitySeen,
   });
 }
 
@@ -36,11 +44,13 @@ class ConnectedDeviceInfo {
   final String deviceId;
   final String name;
   final int mtu;
+  final bool isJw;
 
   ConnectedDeviceInfo({
     required this.deviceId,
     required this.name,
     required this.mtu,
+    this.isJw = false,
   });
 }
 
@@ -117,6 +127,11 @@ class BleNotifier extends StateNotifier<BleState> {
         name: displayName,
         rssi: result.rssi,
         connectable: result.advertisementData.connectable,
+        jwCandidate: JwScanPolicy.isCandidate(
+            serviceUuids: result.advertisementData.serviceUuids
+                .map((u) => u.toString())
+                .toSet(),
+            manufacturerData: result.advertisementData.manufacturerData),
       ));
     }, serviceUuid: serviceUuid);
   }
@@ -131,7 +146,8 @@ class BleNotifier extends StateNotifier<BleState> {
     }
   }
 
-  Future<bool> connect(String deviceId, String deviceName) async {
+  Future<bool> connect(String deviceId, String deviceName,
+      {bool allowJw = false}) async {
     // 调试模式旁路:虚拟设备不发起真实 GATT 连接,直接把
     // connectedDeviceProvider 置为一个"看起来已连"的 info,让
     // EBadgeAppRoot 自动切到 DevicePage。BleManager 不参与,不占资源。
@@ -156,12 +172,14 @@ class BleNotifier extends StateNotifier<BleState> {
     }
 
     state = BleState.connecting;
-    final success = await _bleManager.connect(deviceId, deviceName);
+    final success =
+        await _bleManager.connect(deviceId, deviceName, allowJw: allowJw);
     if (success) {
       _ref.read(connectedDeviceProvider.notifier).state = ConnectedDeviceInfo(
         deviceId: deviceId,
         name: deviceName,
-        mtu: 512,
+        mtu: _bleManager.mtu,
+        isJw: _bleManager.jwTransport != null,
       );
       state = BleState.connected;
     } else {
@@ -192,23 +210,41 @@ class ScannedDevicesNotifier extends StateNotifier<List<ScanDevice>> {
 
   void addDevice(ScanDevice device) {
     final index = state.indexWhere((d) => d.deviceId == device.deviceId);
+    final previous = index >= 0 ? state[index] : null;
+    final named = device.name.trim().isNotEmpty && device.name != '未知设备';
+    final name = named ? device.name : previous?.name ?? device.name;
+    final now = DateTime.now();
+    final merged = ScanDevice(
+        deviceId: device.deviceId,
+        name: name,
+        rssi: device.rssi,
+        connectable: device.connectable,
+        debug: device.debug,
+        jwCandidate: device.jwCandidate || (previous?.jwCandidate ?? false),
+        firstSeen: previous?.firstSeen ?? device.firstSeen ?? now,
+        identitySeen: previous?.identitySeen ??
+            device.identitySeen ??
+            (named ? now : null));
+    if (previous != null &&
+        previous.rssi == merged.rssi &&
+        previous.name == merged.name &&
+        previous.connectable == merged.connectable &&
+        previous.jwCandidate == merged.jwCandidate) {
+      return;
+    }
+    if (merged.jwCandidate &&
+        (previous == null ||
+            (!previous.jwCandidate) ||
+            (previous.identitySeen == null && merged.identitySeen != null))) {
+      debugPrint(
+          'JW scan: id=${merged.deviceId} first=${merged.firstSeen?.toUtc().toIso8601String()} identity=${merged.identitySeen?.toUtc().toIso8601String()} name=${merged.name}');
+    }
     if (index >= 0) {
-      // 已存在:仅在 rssi/name/connectable 任一变化时才写回,避免相同
-      // 内容触发无谓的 provider notify——扫描过程中大多数 result 只是
-      // 心跳复述,notify 风暴还会放大跨 session 遗留 listener 的时序问题
-      // (曾在退出→重进 eBadge 场景下引发对 defunct element 的
-      // markNeedsBuild 断言)。
-      final prev = state[index];
-      if (prev.rssi == device.rssi &&
-          prev.name == device.name &&
-          prev.connectable == device.connectable) {
-        return;
-      }
       final updated = [...state];
-      updated[index] = device;
+      updated[index] = merged;
       state = updated;
     } else {
-      state = [...state, device];
+      state = [...state, merged];
     }
   }
 
