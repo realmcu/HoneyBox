@@ -15,6 +15,10 @@ import 'package:honeybox/services/jw/health/jw_health_goals.dart';
 
 void main() {
   test('launch requires explicit mode and absolute isolated paths', () {
+    // Absolute paths must be native to the host: CI runs on Linux.
+    final root = Platform.isWindows ? 'C:' : '/tmp';
+    final receipt = '$root/receipt';
+    final fixture = '$root/fixture';
     expect(() => JwHealthAcceptanceOptions.parse([]), throwsArgumentError);
     expect(
         () => JwHealthAcceptanceOptions.parse(
@@ -23,17 +27,17 @@ void main() {
     expect(
         () => JwHealthAcceptanceOptions.parse([
               '--jw-health-mode=real',
-              '--jw-health-output=C:/receipt',
-              '--jw-health-fixture-data=C:/fixture'
+              '--jw-health-output=$receipt',
+              '--jw-health-fixture-data=$fixture'
             ]),
         throwsArgumentError);
     final options = JwHealthAcceptanceOptions.parse([
       '--jw-health-mode=fixture',
-      '--jw-health-output=C:/receipt',
-      '--jw-health-fixture-data=C:/fixture'
+      '--jw-health-output=$receipt',
+      '--jw-health-fixture-data=$fixture'
     ]);
     expect(options.mode, 'fixture');
-    expect(options.fixtureData!.path, 'C:/fixture');
+    expect(options.fixtureData!.path, fixture);
   });
 
   test(
