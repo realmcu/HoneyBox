@@ -1,0 +1,337 @@
+{
+  "schemaVersion": 1,
+  "kind": "synthetic_fixed_source_contract_vectors_not_board_data_not_product_tests",
+  "requests": {
+    "readAlarm": {
+      "command": 2,
+      "key": 3,
+      "value": "",
+      "l2Hex": "0200030000",
+      "replyCommand": 2,
+      "replyKey": 4,
+      "shape": "multiple5,0..100B"
+    },
+    "readSupportDeviceSport": {
+      "command": 2,
+      "key": 59,
+      "value": "",
+      "l2Hex": "02003b0000",
+      "replyCommand": 5,
+      "replyKey": 23,
+      "shape": "4B BE"
+    },
+    "checkSpO2MeasureEnable": {
+      "command": 5,
+      "key": 45,
+      "value": "02",
+      "l2Hex": "05002d000102",
+      "replyCommand": 5,
+      "replyKey": 46,
+      "shape": "1B enum2or3"
+    },
+    "queryDeviceSportStatus": {
+      "command": 5,
+      "key": 92,
+      "value": "00ff",
+      "l2Hex": "05005c000200ff",
+      "replyCommand": 5,
+      "replyKey": 93,
+      "shape": "3B result/state/UKtype"
+    }
+  },
+  "cases": [
+    {
+      "id": "alarm-empty",
+      "operation": "readAlarm",
+      "responseRawHex": "",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "records": 0
+        }
+      }
+    },
+    {
+      "id": "alarm-incomplete",
+      "operation": "readAlarm",
+      "responseRawHex": "00000000",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "alarm-too-many",
+      "operation": "readAlarm",
+      "responseRawHex": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "sports-source-mask",
+      "operation": "readSupportDeviceSport",
+      "responseRawHex": "0f3d6bfe",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "mask": 255683582,
+          "ukTypes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            11,
+            13,
+            14,
+            16,
+            18,
+            19,
+            20,
+            21,
+            24,
+            25,
+            26,
+            27
+          ]
+        }
+      }
+    },
+    {
+      "id": "sports-known-empty",
+      "operation": "readSupportDeviceSport",
+      "responseRawHex": "00000000",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "mask": 0,
+          "ukTypes": []
+        }
+      }
+    },
+    {
+      "id": "sports-short-not-defaultempty",
+      "operation": "readSupportDeviceSport",
+      "responseRawHex": "000000",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "sports-reserved-maskbit",
+      "operation": "readSupportDeviceSport",
+      "responseRawHex": "10000000",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "spo2-unavailable",
+      "operation": "checkSpO2MeasureEnable",
+      "responseRawHex": "02",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "availableReported": false
+        }
+      }
+    },
+    {
+      "id": "spo2-available",
+      "operation": "checkSpO2MeasureEnable",
+      "responseRawHex": "03",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "availableReported": true
+        }
+      }
+    },
+    {
+      "id": "spo2-controlmode-not-queryreply",
+      "operation": "checkSpO2MeasureEnable",
+      "responseRawHex": "01",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "spo2-missing",
+      "operation": "checkSpO2MeasureEnable",
+      "responseRawHex": null,
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "sport-idle",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "0000ff",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "result": 0,
+          "state": 0,
+          "sportType": 255
+        }
+      }
+    },
+    {
+      "id": "sport-running",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "000105",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "result": 0,
+          "state": 1,
+          "sportType": 5
+        }
+      }
+    },
+    {
+      "id": "sport-paused",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "000205",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "result": 0,
+          "state": 2,
+          "sportType": 5
+        }
+      }
+    },
+    {
+      "id": "sport-busy-not-success",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "030105",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "result": 3,
+          "state": 1,
+          "sportType": 5,
+          "operationAccepted": false
+        }
+      }
+    },
+    {
+      "id": "sport-unsupported-not-success",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "0200ff",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "result": 2,
+          "state": 0,
+          "sportType": 255,
+          "operationAccepted": false
+        }
+      }
+    },
+    {
+      "id": "sport-unknown-result",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "0500ff",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "sport-unknown-state",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "0003ff",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "sport-unknown-running-type",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "000100",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    },
+    {
+      "id": "sport-short",
+      "operation": "queryDeviceSportStatus",
+      "responseRawHex": "0000",
+      "expected": {
+        "stage": "invalid",
+        "fields": {}
+      }
+    }
+  ],
+  "cacheCases": [
+    {
+      "state": "notYetRead",
+      "expected": null,
+      "outgoingFrames": 0
+    },
+    {
+      "state": "knownEmpty",
+      "expected": [],
+      "outgoingFrames": 0
+    },
+    {
+      "state": "successfulMaskReadSameDevice",
+      "expected": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        11,
+        13,
+        14,
+        16,
+        18,
+        19,
+        20,
+        21,
+        24,
+        25,
+        26,
+        27
+      ],
+      "outgoingFrames": 0
+    },
+    {
+      "state": "deviceChangedOrDisconnected",
+      "expected": null,
+      "outgoingFrames": 0
+    }
+  ],
+  "observeDoesNotMeanZeroRAMDiagnosticMutation": true,
+  "forbiddenObserveValues": {
+    "5/45": [
+      "00",
+      "01"
+    ],
+    "5/92": [
+      "0105",
+      "02ff",
+      "03ff",
+      "04ff"
+    ]
+  }
+}

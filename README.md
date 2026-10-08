@@ -39,7 +39,7 @@ HoneyBox 是一款基于 Flutter 开发的内部设备调试工具，面向电�
 | 模块 | 状态 | 说明 |
 | --- | --- | --- |
 | eBadge | 可用 | BLE 扫描、连接、内容制作与传输已实现 |
-| Watch | 预览 | 已保留应用入口，业务功能尚未实现 |
+| Watch / JW | 已接入 | 设备与健康 UI、历史同步/离线记录、配置及协议控制台；以设备能力为准 |
 | 仪表盘 | 预览 | 已保留应用入口，业务功能尚未实现 |
 | 芯片配置 | 预留 | 当前为占位页面 |
 | OTA 升级 | 外部工具 | 由 Realtek OTA App 执行 |
@@ -236,9 +236,19 @@ git diff --check
 - Windows 不使用 Android 的运行时蓝牙与定位权限流程。
 - 首次连接、扫描或开启热点时，请按系统提示授予所需权限。
 - BLE 和 WiFi 功能依赖目标设备固件及对应服务正常工作。
-- Watch、仪表盘和芯片配置入口目前不代表功能已经完成。
+- Watch 功能由实际设备协议与能力决定；仪表盘和芯片配置仍为预留入口。
 - 请勿提交 `build/`、`windows/flutter/ephemeral/` 或本机插件 junction。
 
 ## 许可证与用途
 
 HoneyBox 是内部研发调试工具。项目连接 `flutter_blue_plus` 时声明 `License.nonprofit`，其使用方式以非商业调试场景为前提。如未来用途发生变化，应重新评估第三方依赖许可、Android 签名和发布配置。
+
+## Watch / JW（Realtek 方案）
+
+从 Watch 扫描列表选择设备，完整匹配 JW GATT 服务和特征后进入专用页面；原有 eBadge 与旧 Watch 协议入口保留。提供设备及能力查询、持久身份登录、配置读回、实时心率、历史同步与离线健康数据、运动记录，以及按能力和固件契约开放的协议控制台。
+
+详细使用方法、SDK 接口分层、能力限制及命令行验证方式见 [JW SDK 使用指南](docs/jw-sdk-guide.md)。Android 与 Windows 共用 Dart SDK 和 Flutter 界面；Android 真机 BLE 验收需单独完成，不能用 Windows 模拟界面或 APK 构建替代。
+
+开发入口为 `lib/main.dart`。本地检查使用 `flutter test`、`flutter analyze` 和 `dart format --output=none --set-exit-if-changed lib/ test/`；项目 CI 固定的 Flutter 版本见 `.github/workflows/flutter-ci.yml`。
+
+Windows 命令行工具 `tool/jw_sdk_acceptance.ps1` 直接复用生产扫描、provider、GATT 及 JW SDK。需 PowerShell 7、可用 Flutter Windows 构建环境和实际 BLE 设备。扫描可配置窗口、重试和取消；具体模式及参数见使用指南。新报告写入已忽略的 `output/`，过程记录不随源码发布。

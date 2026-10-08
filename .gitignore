@@ -105,3 +105,8 @@ refer/Android_OTA_SDK_v3.15.16.7z
 logcat.md
 *_logcat.txt
 *_logcat_latest.txt
+
+# Local planning and generated validation records are not release sources.
+/docs/superpowers/
+/docs/plans/
+/output/

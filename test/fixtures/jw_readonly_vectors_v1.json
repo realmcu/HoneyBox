@@ -1,0 +1,561 @@
+{
+  "schemaVersion": 1,
+  "kind": "synthetic_readonly_response_contracts_not_board_data_not_product_test_results",
+  "contract": "v101S200",
+  "proposedStatus": "design_pending_review",
+  "operations": {
+    "language": {
+      "requestCommand": 2,
+      "requestKey": 79,
+      "responseKey": 80,
+      "responseSize": 1,
+      "l2Hex": "02004f0000",
+      "capabilityBit": 43
+    },
+    "battery": {
+      "gattService": "180f",
+      "gattCharacteristic": "2a19",
+      "responseSize": 1
+    },
+    "health": {
+      "requestCommand": 5,
+      "requestKey": 58,
+      "responseKey": 59,
+      "responseSize": 8,
+      "l2Hex": "05003a0000",
+      "capabilityBit": 17
+    },
+    "wrist": {
+      "requestCommand": 2,
+      "requestKey": 43,
+      "responseKey": 44,
+      "responseSize": 1,
+      "l2Hex": "02002b0000",
+      "capabilityBit": 42
+    },
+    "dnd": {
+      "requestCommand": 2,
+      "requestKey": 72,
+      "responseKey": 73,
+      "responseSize": 3,
+      "l2Hex": "0200480000",
+      "capabilityBit": 35
+    },
+    "heatWindow": {
+      "requestCommand": 2,
+      "requestKey": 135,
+      "responseKey": 136,
+      "responseSize": 3,
+      "l2Hex": "0200870000",
+      "capabilityBit": 4
+    },
+    "highHrDiagnostic": {
+      "requestCommand": 2,
+      "requestKey": 118,
+      "responseKey": 119,
+      "responseSize": 2,
+      "l2Hex": "0200760000",
+      "capabilityBit": 11
+    }
+  },
+  "caseCount": 41,
+  "cases": [
+    {
+      "id": "language-0",
+      "operation": "language",
+      "responseRawHex": "00",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "value": 0
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "language-1",
+      "operation": "language",
+      "responseRawHex": "01",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "value": 1
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "language-2",
+      "operation": "language",
+      "responseRawHex": "02",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "value": 2
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "language-unknown",
+      "operation": "language",
+      "responseRawHex": "03",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "value outside0..2"
+    },
+    {
+      "id": "language-too-long",
+      "operation": "language",
+      "responseRawHex": "0100",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "not exactly1B"
+    },
+    {
+      "id": "battery-0",
+      "operation": "battery",
+      "responseRawHex": "00",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "value": 0
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "battery-70",
+      "operation": "battery",
+      "responseRawHex": "46",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "value": 70
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "battery-100",
+      "operation": "battery",
+      "responseRawHex": "64",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "value": 100
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "battery-over100",
+      "operation": "battery",
+      "responseRawHex": "65",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "battery101"
+    },
+    {
+      "id": "battery-null",
+      "operation": "battery",
+      "responseRawHex": null,
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "missing GATT value"
+    },
+    {
+      "id": "battery-too-long",
+      "operation": "battery",
+      "responseRawHex": "4600",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "not exactly1B"
+    },
+    {
+      "id": "health-idle",
+      "operation": "health",
+      "responseRawHex": "0000000000000000",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "reportedBits": 0
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "health-known-boundary",
+      "operation": "health",
+      "responseRawHex": "00000000000003ff",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "reportedBits": 1023
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "health-manual-and-exercise",
+      "operation": "health",
+      "responseRawHex": "0000000000000155",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "reportedBits": 341,
+          "hrManualReported": true,
+          "bpManualReported": true,
+          "spo2ManualReported": true,
+          "stressManualReported": true,
+          "exerciseReported": true,
+          "ecgReported": false
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "health-unknown-bit10",
+      "operation": "health",
+      "responseRawHex": "0000000000000400",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "unknown bit10 outside current10-bit contract"
+    },
+    {
+      "id": "health-short",
+      "operation": "health",
+      "responseRawHex": "00000000000000",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "not exactly8B"
+    },
+    {
+      "id": "health-js-only-bit12",
+      "operation": "health",
+      "responseRawHex": "0000000000001000",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "broader JS status field not currentFW contract"
+    },
+    {
+      "id": "wrist-off",
+      "operation": "wrist",
+      "responseRawHex": "00",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "savedEnabled": false
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "wrist-on",
+      "operation": "wrist",
+      "responseRawHex": "01",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "savedEnabled": true
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "wrist-invalid",
+      "operation": "wrist",
+      "responseRawHex": "02",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "switch not0/1"
+    },
+    {
+      "id": "dnd-cross-midnight-inactive",
+      "operation": "dnd",
+      "responseRawHex": "6c0180",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "enabled": true,
+          "startMinutes": 1320,
+          "endMinutes": 360,
+          "active": false
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "dnd-same-intent-active",
+      "operation": "dnd",
+      "responseRawHex": "ec0180",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "enabled": true,
+          "startMinutes": 1320,
+          "endMinutes": 360,
+          "active": true
+        }
+      },
+      "reason": "synthetic response contract",
+      "sameConfigurationAs": "dnd-cross-midnight-inactive"
+    },
+    {
+      "id": "dnd-disabled",
+      "operation": "dnd",
+      "responseRawHex": "000000",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "enabled": false,
+          "startMinutes": 0,
+          "endMinutes": 0,
+          "active": false
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "dnd-all-day",
+      "operation": "dnd",
+      "responseRawHex": "400000",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "enabled": true,
+          "startMinutes": 0,
+          "endMinutes": 0,
+          "active": false
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "dnd-hour24",
+      "operation": "dnd",
+      "responseRawHex": "700000",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "startHour24"
+    },
+    {
+      "id": "dnd-minute60",
+      "operation": "dnd",
+      "responseRawHex": "40003c",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "endMinute60"
+    },
+    {
+      "id": "dnd-long",
+      "operation": "dnd",
+      "responseRawHex": "006c0180",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "not exactly3B"
+    },
+    {
+      "id": "heat-window-cross-midnight",
+      "operation": "heatWindow",
+      "responseRawHex": "6c0180",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "timeWindowEnabled": true,
+          "startMinutes": 1320,
+          "endMinutes": 360
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "heat-window-disabled-all-day-allowed",
+      "operation": "heatWindow",
+      "responseRawHex": "000000",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "timeWindowEnabled": false,
+          "startMinutes": 0,
+          "endMinutes": 0,
+          "allDayAllowedByTimeGate": true
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "heat-equal-times-all-day",
+      "operation": "heatWindow",
+      "responseRawHex": "400000",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "timeWindowEnabled": true,
+          "startMinutes": 0,
+          "endMinutes": 0,
+          "allDayAllowedByTimeGate": true
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "heat-reserved-bit23",
+      "operation": "heatWindow",
+      "responseRawHex": "ec0180",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "unknown/reserved bit23 not DND runtime"
+    },
+    {
+      "id": "heat-hour24",
+      "operation": "heatWindow",
+      "responseRawHex": "700000",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "startHour24"
+    },
+    {
+      "id": "highHr-off",
+      "operation": "highHrDiagnostic",
+      "responseRawHex": "0000",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "reportedFlag": false,
+          "threshold": 0
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "highHr-flag-true-zero-threshold",
+      "operation": "highHrDiagnostic",
+      "responseRawHex": "0100",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "reportedFlag": true,
+          "threshold": 0
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "highHr-flag-false-threshold140",
+      "operation": "highHrDiagnostic",
+      "responseRawHex": "008c",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "reportedFlag": false,
+          "threshold": 140
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "highHr-threshold255-no-invented-medical-range",
+      "operation": "highHrDiagnostic",
+      "responseRawHex": "01ff",
+      "expected": {
+        "stage": "success",
+        "fields": {
+          "reportedFlag": true,
+          "threshold": 255
+        }
+      },
+      "reason": "synthetic response contract"
+    },
+    {
+      "id": "highHr-invalid-flag",
+      "operation": "highHrDiagnostic",
+      "responseRawHex": "028c",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "flag not0/1"
+    },
+    {
+      "id": "highHr-short",
+      "operation": "highHrDiagnostic",
+      "responseRawHex": "01",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "not exactly2B"
+    },
+    {
+      "id": "language-wrong-command",
+      "operation": "language",
+      "responseRawHex": "01",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "wrongcommand",
+      "responseCommand": 5,
+      "responseKey": 80
+    },
+    {
+      "id": "dnd-wrong-response-key",
+      "operation": "dnd",
+      "responseRawHex": "6c0180",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "wrongkey",
+      "responseCommand": 2,
+      "responseKey": 72
+    },
+    {
+      "id": "health-multiple-fields",
+      "operation": "health",
+      "responseRawHex": "0000000000000000",
+      "expected": {
+        "stage": "invalid",
+        "rawRetained": true
+      },
+      "reason": "more than one field",
+      "responseFieldCount": 2
+    }
+  ],
+  "excludedRequests": {
+    "02/28": "can pair on iOS",
+    "02/26": "response mutates runtime on_off",
+    "05/19[02]": "ignored by currentS200 branch"
+  },
+  "noProductCode": true,
+  "newDeviceCommands": 0
+}
