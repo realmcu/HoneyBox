@@ -1,0 +1,14 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - '**/*.g.dart'
+    - build/**
+
+linter:
+  rules:
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - avoid_print
+    - prefer_single_quotes
+    - prefer_const_literals_to_create_immutables

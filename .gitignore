@@ -50,6 +50,9 @@ build/
 macos/
 *.xcworkspace
 xcuserdata/
+# ws_watch_demo 的独立运行工程需要 macOS 平台目录
+!packages/ws_watch_demo/example/macos/
+!packages/ws_watch_demo/example/macos/Runner.xcworkspace
 
 # Linux
 linux/
