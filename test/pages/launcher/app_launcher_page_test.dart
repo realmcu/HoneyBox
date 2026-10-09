@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:honeybox/pages/launcher/app_launcher_page.dart';
 import 'package:honeybox/pages/launcher/app_catalog.dart';
 import 'package:honeybox/pages/launcher/widgets/app_card.dart';
+import 'package:honeybox/providers/current_app_provider.dart';
+import 'package:ws_watch_demo/ws_watch_demo.dart';
 
 void main() {
   Widget wrap(Widget child) => ProviderScope(
@@ -43,5 +45,27 @@ void main() {
     expect(find.text('检查更新'), findsOneWidget);
     expect(find.text('设置'), findsNothing);
     expect(find.text('缓存管理'), findsNothing);
+  });
+
+  testWidgets('WS Watch 入口打开 Demo 首页，返回后清空当前应用', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: AppLauncherPage()),
+    ));
+
+    await tester.ensureVisible(find.text('WS Watch'));
+    await tester.tap(find.text('WS Watch'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(WSWatchDemoHome), findsOneWidget);
+    expect(container.read(currentAppProvider), AppId.wsWatch);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(WSWatchDemoHome), findsNothing);
+    expect(container.read(currentAppProvider), isNull);
   });
 }
