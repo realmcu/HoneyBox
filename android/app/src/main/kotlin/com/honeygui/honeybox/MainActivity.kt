@@ -1,9 +1,18 @@
 package com.honeygui.honeybox
 
+import android.content.ContentUris
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.Settings
+import com.example.map1.MapFeature
+import com.example.map1.navi.NaviCaptureService
+import com.example.map1.navi.NaviFramePreview
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -26,10 +35,14 @@ class MainActivity : FlutterActivity() {
     private val converterChannelName = "ebadge/converter"
     private val systemChannelName = "ebadge/system"
     private val playerChannelName = "ebadge/player"
+    private val mapChannelName = "honeybox/map"
+    private val naviChannelName = "honeybox/navi"
 
     private var encoder: CameraEncoder? = null
     private var eventSink: EventChannel.EventSink? = null
     private var hotspot: HotspotManager? = null
+    private var sta: EBadgeStaManager? = null
+    private var captureExporter: CaptureFileExporter? = null
 
     // In-page video preview players (native MediaPlayer → Flutter texture),
     // keyed by their texture id. One at a time in practice, but keyed for safety.
@@ -47,6 +60,32 @@ class MainActivity : FlutterActivity() {
         NotificationListener.registerChannels(flutterEngine, applicationContext)
 
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        val exporter = CaptureFileExporter(this)
+        captureExporter = exporter
+        MethodChannel(messenger, "honeybox/capture-export").setMethodCallHandler(exporter::handle)
+        MethodChannel(messenger, "honeybox/capture-power").setMethodCallHandler { call, result ->
+            if (call.method == "keepAwake") {
+                if (call.arguments == true) {
+                    window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                result.success(null)
+            } else if (call.method == "moveToBack") {
+                moveTaskToBack(true)
+                result.success(null)
+            } else if (call.method == "keepAlive") {
+                val text = call.argument<String>("text")
+                if (text != null) {
+                    CaptureKeepAliveService.start(this, text)
+                } else {
+                    CaptureKeepAliveService.stop(this)
+                }
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
         textureRegistry = flutterEngine.renderer
 
         EventChannel(messenger, eventChannelName).setStreamHandler(
@@ -157,6 +196,27 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "isHotspotActive" -> result.success(hotspot?.isActive ?: false)
+                // ── eBadge 传图数据面：手机作 STA 连设备 SoftAP（协议 §5）──
+                // 方向和上面的 hotspot 相反，两者不可同时生效。
+                "joinAp" -> {
+                    val ssid = call.argument<String>("ssid")
+                    if (ssid.isNullOrEmpty()) {
+                        result.error("bad_args", "缺少 ssid", null)
+                    } else {
+                        ensureSta().connect(
+                            ssid = ssid,
+                            password = call.argument<String>("password") ?: "",
+                            // 默认 60s 对齐协议 §5.5「Decision 同意 → STA 关联成功」。
+                            timeoutMs = call.argument<Int>("timeoutMs") ?: 60_000,
+                            result = result,
+                        )
+                    }
+                }
+                "leaveAp" -> {
+                    sta?.disconnect()
+                    result.success(null)
+                }
+                "isApJoined" -> result.success(sta?.isConnected ?: false)
                 else -> result.notImplemented()
             }
         }
@@ -214,10 +274,149 @@ class MainActivity : FlutterActivity() {
                         result.error("no_activity", e.message, null)
                     }
                 }
+                // 三态:true 有「所有文件访问权限」、false 没有、null 这个系统版本压根
+                // 没这个概念(< Android 11)。**不要**换成 permission_handler 查:它
+                // 在 SDK < 30 上也会调 Environment.isExternalStorageManager(),那是个
+                // API 30 才有的方法,在 Android 10 上直接 NoSuchMethodError 崩掉
+                // (permission_handler_android 12.1.0 PermissionManager.java:518)。
+                "allFilesAccess" -> {
+                    result.success(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            Environment.isExternalStorageManager()
+                        } else {
+                            null
+                        },
+                    )
+                }
+                "resolveUriPath" -> {
+                    result.success(resolveMediaPath(call.argument<String>("uri")))
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(messenger, mapChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "open" -> {
+                    MapFeature.open(
+                        this,
+                        object : MapFeature.OpenCallback {
+                            override fun onOpened() {
+                                result.success(null)
+                            }
+
+                            override fun onDeclined() {
+                                result.error("privacy_declined", "未同意高德地图隐私授权", null)
+                            }
+
+                            override fun onError(error: Throwable) {
+                                result.error(
+                                    "map_open_failed",
+                                    error.message ?: "无法打开地图功能",
+                                    null,
+                                )
+                            }
+                        },
+                    )
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(messenger, naviChannelName).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startCapture" -> {
+                    val width = call.argument<Int>("width") ?: NaviCaptureService.DEFAULT_JPG_WIDTH
+                    val height = call.argument<Int>("height") ?: NaviCaptureService.DEFAULT_JPG_HEIGHT
+                    val fps = call.argument<Int>("fps") ?: 5
+                    val speed = call.argument<Int>("speed") ?: 60
+                    val startLat = call.argument<Double>("startLat") ?: 31.314
+                    val startLng = call.argument<Double>("startLng") ?: 120.728
+                    val endLat = call.argument<Double>("endLat") ?: 31.325
+                    val endLng = call.argument<Double>("endLng") ?: 120.629
+                    val intent = NaviCaptureService.newIntent(
+                        context = this,
+                        host = "", // BLE 模式: 不走 TCP
+                        port = 0,
+                        fps = fps,
+                        speed = speed,
+                        dpi = NaviCaptureService.DEFAULT_VIRTUAL_DISPLAY_DPI,
+                        width = width,
+                        height = height,
+                        startLat = startLat,
+                        startLng = startLng,
+                        endLat = endLat,
+                        endLng = endLng,
+                    )
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    result.success(null)
+                }
+                "stopCapture" -> {
+                    startService(NaviCaptureService.stopIntent(this))
+                    result.success(null)
+                }
+                "pollFrame" -> {
+                    val frame = NaviFramePreview.latestFrame.value
+                    if (frame != null) {
+                        result.success(mapOf(
+                            "seq" to frame.seq,
+                            "jpeg" to frame.jpeg,
+                        ))
+                    } else {
+                        result.success(null)
+                    }
+                }
+                "isRunning" -> result.success(NaviFramePreview.running.value)
                 else -> result.notImplemented()
             }
         }
     }
+
+    /**
+     * `content://` → 绝对路径;解不出返回 **null**。绝不猜 —— 猜出来的路径会被当成
+     * 「你选的那个文件」拿去核对,错的比没有更坏。
+     *
+     * 只补 Dart 侧 `EBadgeDebugConfig.originalPathOf` 解不动的那两类(纯字符串就能
+     * 算出来的 `file:` / `raw:` / `primary:相对路径` 它自己处理了,不必过一趟通道):
+     *
+     * - MediaStore 直接给的 `content://media/...` —— 查 `_data` 列;
+     * - documents provider 的 `msf:<数字>`(Android 11+ 的下载目录就是这个形状)——
+     *   冒号后面那串数字是 `MediaStore.Files` 的主键,回查一次拿 `_data`。
+     *
+     * 拿到路径**不等于读得到**:没有「所有文件访问权限」时分区存储照样拦。调用方
+     * 自己 `File().exists()` 复核一遍再决定要不要记进配置。
+     */
+    private fun resolveMediaPath(uriStr: String?): String? {
+        if (uriStr.isNullOrEmpty()) return null
+        val uri = runCatching { Uri.parse(uriStr) }.getOrNull() ?: return null
+        if (uri.scheme == "file") return uri.path?.takeIf { it.isNotEmpty() }
+        queryDataColumn(uri)?.let { return it }
+        val docId = runCatching {
+            if (DocumentsContract.isDocumentUri(this, uri)) {
+                DocumentsContract.getDocumentId(uri)
+            } else {
+                null
+            }
+        }.getOrNull() ?: return null
+        // `primary:Download/fw.bin` 这种切出来不是数字 → toLongOrNull() 给 null,直接
+        // 放弃(Dart 侧已经把它算出来了)。
+        val id = docId.substringAfterLast(':').toLongOrNull() ?: return null
+        val files = MediaStore.Files.getContentUri("external")
+        return queryDataColumn(ContentUris.withAppendedId(files, id))
+    }
+
+    /** 查一个 content URI 的 `_data`(绝对路径)列;没这一列 / 查不动 / 值为空都给 null。 */
+    private fun queryDataColumn(uri: Uri): String? = runCatching {
+        contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)
+            ?.use { c ->
+                val i = c.getColumnIndex(MediaStore.MediaColumns.DATA)
+                if (i >= 0 && c.moveToFirst()) c.getString(i)?.takeIf { it.isNotEmpty() } else null
+            }
+    }.getOrNull()
 
     private fun handleThumbnail(call: MethodCall, result: MethodChannel.Result) {
         val path = call.argument<String>("path")
@@ -270,7 +469,7 @@ class MainActivity : FlutterActivity() {
     }
 
     // Decode a cached CVID/AVI back into downscaled preview frames (Cinepak is
-    // not decodable by any platform player — preview uses the native media core decoder.
+    // not decodable by any platform player — see [CinepakDecoder]).
     private fun handleDecodeCvid(call: MethodCall, result: MethodChannel.Result) {
         val path = call.argument<String>("path")
         if (path == null) {
@@ -509,6 +708,14 @@ class MainActivity : FlutterActivity() {
         return created
     }
 
+    private fun ensureSta(): EBadgeStaManager {
+        val existing = sta
+        if (existing != null) return existing
+        val created = EBadgeStaManager(applicationContext)
+        sta = created
+        return created
+    }
+
     private fun parseConfig(call: MethodCall): EncoderConfig = EncoderConfig(
         format = call.argument<String>("format") ?: "h264",
         width = call.argument<Int>("width") ?: 640,
@@ -532,11 +739,22 @@ class MainActivity : FlutterActivity() {
         return created
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (captureExporter?.onActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onDestroy() {
+        captureExporter?.close()
+        captureExporter = null
         encoder?.closeCamera()
         encoder = null
         hotspot?.stop()
         hotspot = null
+        // 必须解绑:bindProcessToNetwork 是进程级的,泄漏出去会让本进程之后所有
+        // socket 都往一张已经消失的网上发,表现为「App 突然完全没网」。
+        sta?.disconnect()
+        sta = null
         players.values.forEach { it.release() }
         players.clear()
         textureRegistry = null

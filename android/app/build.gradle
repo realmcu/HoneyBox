@@ -5,31 +5,35 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+import java.util.Properties
+
+final Properties localProperties = new Properties()
+final File localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+
+// Explicit side-load test package; uses a debug certificate in both modes.
+final boolean realtekSdkTestBuild = providers.gradleProperty("realtekSdkTestBuild")
+    .getOrElse("false").toBoolean()
+
+final String amapDebugKey = localProperties.getProperty("AMAP_DEBUG_KEY")?.trim()
+final String amapReleaseKey = localProperties.getProperty("AMAP_RELEASE_KEY")?.trim()
+final String releaseStoreFile = localProperties.getProperty("RELEASE_STORE_FILE")?.trim()
+final String releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
+final String releaseKeyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")?.trim()
+final String releaseKeyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+final boolean hasReleaseSigning = [
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+].every { it != null && !it.isEmpty() }
+
 android {
     namespace = "com.honeygui.honeybox"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
-    }
-
-    defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.honeygui.honeybox"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-    }
+    compileSdk = 36
+    ndkVersion = "28.2.13676358"
 
     externalNativeBuild {
         cmake {
@@ -42,11 +46,126 @@ android {
         androidTest.assets.srcDir file("../../media_core/tests/fixtures")
     }
 
-    buildTypes {
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11
+    }
+
+    defaultConfig {
+        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        applicationId = "com.honeygui.honeybox"
+        manifestPlaceholders["HONEYBOX_APP_LABEL"] = "HoneyBox"
+        // You can update the following values to match your application needs.
+        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        minSdk = flutter.minSdkVersion
+        targetSdk = 36
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            excludes += [
+                "lib/armeabi-v7a/**",
+                "lib/x86/**",
+                "lib/x86_64/**",
+            ]
+            // 以 deflate 压缩存放 .so，而非 AGP 默认的 STORED。高德导航 SDK 的
+            // libAMapSDK_NAVI 单个就有 57 MiB，未压缩时 APK 达 131 MiB，超过
+            // Gitee Release 附件 100 MB 的上限而无法发布（v0.8.14 起一直传不上
+            // 去）。压缩后 .so 由 94 MiB 降至约 39 MiB，APK 约 76 MiB。
+            // 代价：so 在安装时解压，设备占用略增、首次加载多几十毫秒；
+            // System.loadLibrary 的行为不变，功能不受影响。
+            useLegacyPackaging = true
+        }
+    }
+
+    signingConfigs {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            if (hasReleaseSigning) {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (realtekSdkTestBuild) {
+                applicationIdSuffix = ".realtektest"
+                manifestPlaceholders["HONEYBOX_APP_LABEL"] = "HoneyBox Realtek Test"
+            }
+            manifestPlaceholders["AMAP_KEY"] = amapDebugKey ?: ""
+        }
+        release {
+            if (realtekSdkTestBuild) {
+                applicationIdSuffix = ".realtektest"
+                manifestPlaceholders["HONEYBOX_APP_LABEL"] = "HoneyBox Realtek Test"
+                manifestPlaceholders["AMAP_KEY"] = amapDebugKey ?: ""
+                signingConfig = signingConfigs.debug
+            } else {
+                manifestPlaceholders["AMAP_KEY"] = amapReleaseKey ?: ""
+                signingConfig = signingConfigs.release
+            }
+            minifyEnabled = true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    applicationVariants.configureEach { variant ->
+        def testVariant = realtekSdkTestBuild && variant.buildType.name in ["debug", "release"]
+        def productionRelease = variant.buildType.name == "release" && !testVariant
+        def requiredAmapKey = productionRelease ? amapReleaseKey : amapDebugKey
+        def amapProperty = productionRelease ? "AMAP_RELEASE_KEY" : "AMAP_DEBUG_KEY"
+        def validateAmapConfiguration = tasks.register(
+            "validate${variant.name.capitalize()}AmapConfiguration"
+        ) {
+            doLast {
+                if (testVariant && (variant.applicationId != "com.honeygui.honeybox.realtektest" ||
+                        variant.signingConfig?.name != "debug")) {
+                    throw new GradleException("Realtek test builds require their isolated package and debug certificate.")
+                }
+                if ((requiredAmapKey == null || requiredAmapKey.isEmpty()) && testVariant) {
+                    logger.warn("Realtek SDK test APK: AMap key absent; map/navigation unavailable.")
+                } else if (productionRelease && (requiredAmapKey == null || requiredAmapKey.isEmpty())) {
+                    throw new GradleException(
+                        "Missing ${amapProperty} in android/local.properties. " +
+                        "AMap requires a key registered for com.honeygui.honeybox and this build's signing SHA1."
+                    )
+                }
+                if (productionRelease) {
+                    def missingSigningProperties = [
+                        RELEASE_STORE_FILE: releaseStoreFile,
+                        RELEASE_STORE_PASSWORD: releaseStorePassword,
+                        RELEASE_KEY_ALIAS: releaseKeyAlias,
+                        RELEASE_KEY_PASSWORD: releaseKeyPassword,
+                    ].findAll { propertyName, value -> value == null || value.isEmpty() }.keySet()
+                    if (!missingSigningProperties.isEmpty()) {
+                        throw new GradleException(
+                            "Release signing is not configured. Add ${missingSigningProperties.join(', ')} " +
+                            "to android/local.properties; release builds never use the debug signing key."
+                        )
+                    }
+                    if (!file(releaseStoreFile).isFile()) {
+                        throw new GradleException(
+                            "RELEASE_STORE_FILE does not exist: ${file(releaseStoreFile)}"
+                        )
+                    }
+                }
+            }
+        }
+        tasks.named("assemble${variant.name.capitalize()}").configure {
+            dependsOn(validateAmapConfiguration)
         }
     }
 
@@ -62,6 +181,7 @@ flutter {
 }
 
 dependencies {
+    implementation project(":mapfeature")
     testImplementation "junit:junit:4.13.2"
     androidTestImplementation "junit:junit:4.13.2"
     androidTestImplementation "androidx.test.ext:junit:1.2.1"
@@ -69,12 +189,6 @@ dependencies {
 }
 
 tasks.withType(Test).configureEach {
-    systemProperty "ebadge.repositoryRoot", System.getProperty(
-        "ebadge.repositoryRoot",
-        rootProject.projectDir.parentFile.absolutePath,
-    )
-    systemProperty "ebadge.regenerateFixtures", System.getProperty(
-        "ebadge.regenerateFixtures",
-        "false",
-    )
+    systemProperty "ebadge.repositoryRoot", System.getProperty("ebadge.repositoryRoot", rootProject.projectDir.parentFile.absolutePath)
+    systemProperty "ebadge.regenerateFixtures", System.getProperty("ebadge.regenerateFixtures", "false")
 }

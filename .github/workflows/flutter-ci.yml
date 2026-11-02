@@ -10,6 +10,11 @@ on:
   pull_request:
     branches: [master, main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing vX.Y.Z tag to rebuild and repair releases (leave empty for a normal manual build)'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,10 +28,12 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -35,6 +42,10 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # 固定版本，不随 stable 频道漂移：上游发新版曾把 Gradle/Kotlin 的
+          # 版本下限从警告提为错误，在本仓库零改动的情况下让 CI 变红。
+          # 升级时本地先升到同一版本验证，再改这里，保持本地与 CI 一致。
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
@@ -54,10 +65,12 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -66,28 +79,124 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # 固定版本，不随 stable 频道漂移：上游发新版曾把 Gradle/Kotlin 的
+          # 版本下限从警告提为错误，在本仓库零改动的情况下让 CI 变红。
+          # 升级时本地先升到同一版本验证，再改这里，保持本地与 CI 一致。
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
 
+      # AMap Key 与 release keystore 都不入库，构建前从 Secrets 还原。
+      # build.gradle 会校验这些值，缺失时直接抛 GradleException。
+      # 高德 Key 按「Key + 包名 + 签名 SHA1」三元组校验，故 debug 与
+      # release 必须使用各自签名对应的 Key，不可混用。
+      - name: Configure signing and AMap keys
+        env:
+          AMAP_DEBUG_KEY: ${{ secrets.AMAP_DEBUG_KEY }}
+          AMAP_RELEASE_KEY: ${{ secrets.AMAP_RELEASE_KEY }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          is_release=false
+          if [[ "${GITHUB_REF}" == refs/tags/v* || -n "${{ github.event.inputs.release_tag }}" ]]; then
+            is_release=true
+          fi
+
+          # local.properties 不入库；这里只写构建必需的键。
+          # flutter.sdk / sdk.dir 由 flutter 工具链自行补全，无需手写。
+          : > android/local.properties
+
+          if [[ "${is_release}" == "true" ]]; then
+            for name in AMAP_RELEASE_KEY RELEASE_KEYSTORE_BASE64 RELEASE_STORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
+              if [[ -z "${!name:-}" ]]; then
+                echo "::error::Missing required secret ${name} for release build" >&2
+                exit 1
+              fi
+            done
+
+            keystore_path="${RUNNER_TEMP}/honeybox-release.jks"
+            printf '%s' "${RELEASE_KEYSTORE_BASE64}" | base64 -d > "${keystore_path}"
+            # keytool 能读通才算解码成功，避免把损坏文件带进构建。
+            keytool -list -keystore "${keystore_path}" \
+              -storepass "${RELEASE_STORE_PASSWORD}" > /dev/null
+            echo "Release keystore decoded and verified."
+
+            {
+              echo "AMAP_RELEASE_KEY=${AMAP_RELEASE_KEY}"
+              echo "RELEASE_STORE_FILE=${keystore_path}"
+              echo "RELEASE_STORE_PASSWORD=${RELEASE_STORE_PASSWORD}"
+              echo "RELEASE_KEY_ALIAS=${RELEASE_KEY_ALIAS}"
+              echo "RELEASE_KEY_PASSWORD=${RELEASE_KEY_PASSWORD}"
+            } >> android/local.properties
+          else
+            if [[ -z "${AMAP_DEBUG_KEY:-}" ]]; then
+              echo "::error::Missing required secret AMAP_DEBUG_KEY for debug build" >&2
+              exit 1
+            fi
+            echo "AMAP_DEBUG_KEY=${AMAP_DEBUG_KEY}" >> android/local.properties
+          fi
+
+          # 只打印键名，值一律不落日志。
+          echo "Wrote android/local.properties with keys:"
+          cut -d= -f1 android/local.properties
+
       - name: Build Android APK (debug)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event.inputs.release_tag == '' }}
         run: |
           flutter build apk --debug
           cp build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/HoneyBox-debug.apk
 
       - name: Build Android APK (release)
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != '' }}
         run: |
           flutter build apk --release
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/HoneyBox.apk
 
+      # 验证产物签名指纹与高德控制台绑定值一致；不一致则地图会鉴权失败，
+      # 而这种问题在装机运行前不会暴露，故在 CI 阶段就卡住。
+      - name: Verify release APK signature
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != '' }}
+        env:
+          EXPECTED_SHA1: ${{ secrets.RELEASE_SIGNING_SHA1 }}
+        run: |
+          set -euo pipefail
+          apksigner="$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n1)"
+          certs="$("${apksigner}" verify --print-certs \
+            build/app/outputs/flutter-apk/HoneyBox.apk)"
+          echo "${certs}"
+
+          actual="$(echo "${certs}" | grep -im1 'SHA-1 digest' \
+            | sed 's/.*: *//' | tr -d ' :' | tr 'a-f' 'A-F')"
+
+          if [[ -z "${EXPECTED_SHA1:-}" ]]; then
+            echo "::warning::RELEASE_SIGNING_SHA1 not set; skipped fingerprint check (actual ${actual})"
+            exit 0
+          fi
+
+          expected="$(echo "${EXPECTED_SHA1}" | tr -d ' :' | tr 'a-f' 'A-F')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "::error::APK signing SHA-1 ${actual} does not match expected ${expected}" >&2
+            exit 1
+          fi
+          echo "Signature fingerprint matches AMap-registered SHA-1."
+
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: honeybox-android-apk
           path: build/app/outputs/flutter-apk/*.apk
           retention-days: 7
+
+      # 凭据只在本 job 的运行期内有效，无论成败都在结束前清除。
+      - name: Clean up signing material
+        if: always()
+        run: |
+          rm -f android/local.properties "${RUNNER_TEMP}/honeybox-release.jks"
 
   # ─── Job 3: Windows Build ────────────────────────────────────────
   build-windows:
@@ -98,12 +207,18 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # 固定版本，不随 stable 频道漂移：上游发新版曾把 Gradle/Kotlin 的
+          # 版本下限从警告提为错误，在本仓库零改动的情况下让 CI 变红。
+          # 升级时本地先升到同一版本验证，再改这里，保持本地与 CI 一致。
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
@@ -116,7 +231,7 @@ jobs:
         run: flutter build windows --release
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: honeybox-windows-release
           path: build/windows/x64/runner/Release/
@@ -129,12 +244,18 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # 固定版本，不随 stable 频道漂移：上游发新版曾把 Gradle/Kotlin 的
+          # 版本下限从警告提为错误，在本仓库零改动的情况下让 CI 变红。
+          # 升级时本地先升到同一版本验证，再改这里，保持本地与 CI 一致。
+          flutter-version: '3.47.0'
 
       - name: Install dependencies
         run: flutter pub get
@@ -152,38 +273,58 @@ jobs:
   release:
     name: Publish Release
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 唯一的慢步骤是「推代码 + tag 到 Gitee」：到 Gitee 的上行实测仅 12-14 KB/s，
+    # 推送含约 80 MB 高德二进制实测约 75 分钟。APK 不再经 CI 上传（改为手动传），
+    # 故取 90 分钟留出余量即可。
+    timeout-minutes: 90
     needs: [build-android, build-windows, lint]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+
+      - name: Validate release tag
+        id: release_ref
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          release_sha="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          test "$(git rev-parse HEAD)" = "${release_sha}"
+          echo "sha=${release_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Download Android APK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: honeybox-android-apk
           path: release-artifacts/
 
       - name: Download Windows build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: honeybox-windows-release
           path: release-artifacts/windows/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "HoneyBox ${{ github.ref_name }}"
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "HoneyBox ${{ env.RELEASE_TAG }}"
           body: |
-            ## HoneyBox ${{ github.ref_name }}
+            ## HoneyBox ${{ env.RELEASE_TAG }}
 
-            Built from commit ${{ github.sha }}
+            Built from commit ${{ steps.release_ref.outputs.sha }}
 
             ### Downloads
             - **Android release APK** - `honeybox-android-apk`
@@ -193,50 +334,35 @@ jobs:
           prerelease: false
           generate_release_notes: true
 
-      - name: Locate APK
-        id: apk
-        run: |
-          set -euo pipefail
-          apk="$(find release-artifacts -name 'HoneyBox.apk' -type f | head -n1)"
-          if [ -z "$apk" ]; then
-            echo "HoneyBox.apk not found under release-artifacts" >&2
-            exit 1
-          fi
-          echo "path=$apk" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(sha256sum "$apk" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-
       - name: Push tag and code to Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
           set -euo pipefail
           git push --force "https://oauth2:${GITEE_TOKEN}@gitee.com/realmcu/HoneyBox.git" \
-            "HEAD:refs/heads/master" "${GITHUB_REF_NAME}"
+            "refs/remotes/origin/master:refs/heads/master" \
+            "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
 
-      - name: Publish Gitee Release
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ github.ref_name }}
-          SHA256: ${{ steps.apk.outputs.sha256 }}
-          APK: ${{ steps.apk.outputs.path }}
-        run: |
-          set -euo pipefail
-          body="HoneyBox ${TAG}"$'\n\n'"SHA-256: ${SHA256}"
-          rid="$(curl -fsS -X POST \
-            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases" \
-            --data-urlencode "access_token=${GITEE_TOKEN}" \
-            --data-urlencode "tag_name=${TAG}" \
-            --data-urlencode "name=HoneyBox ${TAG}" \
-            --data-urlencode "body=${body}" \
-            -d "target_commitish=master" \
-            | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')"
-          if ! curl -fsS -X POST \
-            "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}/attach_files" \
-            -F "access_token=${GITEE_TOKEN}" \
-            -F "file=@${APK}"; then
-            echo "attach_files failed; rolling back release ${rid}" >&2
-            curl -fsS -X DELETE \
-              "https://gitee.com/api/v5/repos/realmcu/HoneyBox/releases/${rid}?access_token=${GITEE_TOKEN}" \
-              || echo "rollback delete also failed; delete release ${rid} manually" >&2
-            exit 1
-          fi
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [analyze]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.0'
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-13-dev
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter build linux --release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HoneyBox-linux-x64
+          path: build/linux/x64/release/bundle/
+          retention-days: 7
+          if-no-files-found: error

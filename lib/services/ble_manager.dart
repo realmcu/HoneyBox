@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart'
+    show debugPrint, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'android_ble_permissions.dart';
 
 import 'ble_chunk_calibrator.dart';
 import 'ble_gatt_profile.dart';
@@ -247,12 +248,19 @@ class BleManager {
   /// batches that arrive mid-teardown are dropped instead of mutating providers
   /// whose ScanPage widget is already being disposed (markNeedsBuild crash).
   bool _scanActive = false;
+  int _scanGeneration = 0;
+  Completer<BluetoothAdapterState?>? _adapterWait;
+  StreamSubscription<BluetoothAdapterState>? _adapterWaitSub;
 
   // --------------------------------------------------------------------------
   // Construction / disposal
   // --------------------------------------------------------------------------
 
-  BleManager() {
+  final bool _requireJwProfile;
+
+  /// Strict tools can prohibit legacy notification subscriptions entirely.
+  BleManager({bool requireJwProfile = false})
+      : _requireJwProfile = requireJwProfile {
     // flutter_blue_plus logs every scan result and BLE operation at its default
     // (verbose) level, flooding logcat during continuous scanning — most
     // noticeably when the scanner resumes right after a disconnect. Silence the
@@ -285,12 +293,34 @@ class BleManager {
   /// directly from the Win32 process without capability declarations.
   Future<bool> _ensureBlePermissions() async {
     if (!Platform.isAndroid) return true;
-    final scan = await Permission.bluetoothScan.request();
-    final connect = await Permission.bluetoothConnect.request();
-    if (scan.isGranted && connect.isGranted) return true;
+    return requestAndroidBlePermissions();
+  }
 
-    final location = await Permission.locationWhenInUse.request();
-    return location.isGranted || location.isLimited;
+  Future<BluetoothAdapterState?> _waitForAppleAdapter() async {
+    final wait = Completer<BluetoothAdapterState?>();
+    _adapterWait = wait;
+    _adapterWaitSub = FlutterBluePlus.adapterState.listen((state) {
+      if (state != BluetoothAdapterState.unknown &&
+          state != BluetoothAdapterState.turningOn &&
+          !wait.isCompleted) {
+        wait.complete(state);
+      }
+    }, onError: (Object error, StackTrace stack) {
+      if (!wait.isCompleted) wait.completeError(error, stack);
+    });
+    try {
+      return await wait.future;
+    } finally {
+      if (identical(_adapterWait, wait)) _cancelAdapterWait();
+    }
+  }
+
+  void _cancelAdapterWait() {
+    _adapterWaitSub?.cancel();
+    _adapterWaitSub = null;
+    final wait = _adapterWait;
+    _adapterWait = null;
+    if (wait != null && !wait.isCompleted) wait.complete(null);
   }
 
   /// Start scanning for BLE devices. Each discovered device is reported via
@@ -301,15 +331,43 @@ class BleManager {
   }) async {
     if (_disposed) return;
     stopScan();
+    final generation = _scanGeneration;
 
     final allowed = await _ensureBlePermissions();
+    if (_disposed || generation != _scanGeneration) return;
     if (!allowed) {
-      _setState(BleState.disconnected);
+      // Report failed startup even if the manager was already disconnected.
+      if (_state == BleState.disconnected && !_disposed) {
+        _stateController.add(BleState.disconnected);
+      } else {
+        _setState(BleState.disconnected);
+      }
       return;
     }
 
     _setState(BleState.scanning);
     _scanActive = true;
+
+    if (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      try {
+        final wait = _waitForAppleAdapter();
+        final adapterState = defaultTargetPlatform == TargetPlatform.macOS
+            ? await wait.timeout(const Duration(seconds: 10))
+            : await wait;
+        if (_disposed || generation != _scanGeneration) return;
+        if (adapterState != BluetoothAdapterState.on) {
+          stopScan();
+          return;
+        }
+      } catch (error) {
+        if (!_disposed && generation == _scanGeneration) {
+          debugPrint('BLE adapter initialization failed: $error');
+          stopScan();
+        }
+        return;
+      }
+    }
 
     _scanSub = FlutterBluePlus.onScanResults.listen(
       (results) {
@@ -322,6 +380,7 @@ class BleManager {
         }
       },
       onError: (Object error) {
+        debugPrint('BLE scan stream failed: $error');
         _setState(BleState.disconnected);
       },
     );
@@ -330,6 +389,7 @@ class BleManager {
     _scanErrorSub = FlutterBluePlus.scanResults.listen(
       (_) {},
       onError: (Object error) {
+        debugPrint('BLE scan stream failed: $error');
         _setState(BleState.disconnected);
       },
     );
@@ -342,13 +402,17 @@ class BleManager {
       if (Platform.isAndroid) {
         await FlutterBluePlus.startScan(
           withServices: withServices,
+          oneByOne: true,
           androidScanMode: AndroidScanMode.lowLatency,
           androidUsesFineLocation: true,
         );
       } else {
-        await FlutterBluePlus.startScan(withServices: withServices);
+        await FlutterBluePlus.startScan(
+            withServices: withServices, oneByOne: true);
       }
     } catch (e) {
+      if (_disposed || generation != _scanGeneration) return;
+      debugPrint('BLE scan failed: $e');
       stopScan();
       _setState(BleState.disconnected);
     }
@@ -356,6 +420,8 @@ class BleManager {
 
   /// Stop an ongoing scan.
   void stopScan() {
+    _scanGeneration++;
+    _cancelAdapterWait();
     _scanActive = false;
     _scanSub?.cancel();
     _scanSub = null;
@@ -468,7 +534,7 @@ class BleManager {
       final services = device.servicesList;
       final jwConnected = await _attachJw(
         services: services,
-        allowJw: allowJw,
+        allowJw: allowJw || _requireJwProfile,
         device: device,
         connectionGeneration: connectionGeneration,
         connectionStateSub: connectionStateSub,
@@ -477,6 +543,9 @@ class BleManager {
         onPublished: () => published = true,
       );
       if (jwConnected != null) return jwConnected;
+      if (_requireJwProfile) {
+        throw StateError('完整 JW 服务不可用，拒绝回退至旧协议');
+      }
       for (final s in services) {
         debugPrint('BleManager: service ${s.uuid}');
         for (final c in s.characteristics) {
@@ -1194,6 +1263,8 @@ class BleManager {
   }
 
   void _cleanup() {
+    _scanGeneration++;
+    _cancelAdapterWait();
     _scanActive = false;
     final connectionGeneration = _connectionOwner.generation;
     _connectionOwner.clearIfCurrent(
