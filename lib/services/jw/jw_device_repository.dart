@@ -1170,6 +1170,11 @@ class JwDeviceRepository {
       applicationAckTransportDelivered: false,
       countValidation: 'notStarted');
 
+  /// Only [resetHistoryCursor] is pinned to the verified T005/H001 target.
+  /// Config, control, reminders, alarms, and other reads are not.
+  bool get globalHistoryCursorResetAllowed =>
+      state.info?.firmware == 'T005' && state.info?.hardware == 'H001';
+
   /// Rewinds retained device history cursors together. Transport ACK does not
   /// prove firmware application; synchronize again to observe replay. Local
   /// history journals remain intact and continue deduplicating record IDs.
@@ -1179,7 +1184,7 @@ class JwDeviceRepository {
         _requireReadContract(contract);
         // This global cursor mutation has only been verified on this target.
         // Keep its restriction separate from routine reads, settings and sync.
-        if (state.info?.firmware != 'T005' || state.info?.hardware != 'H001') {
+        if (!globalHistoryCursorResetAllowed) {
           throw JwConfigurationException(
               stage: 'unsupported',
               cause:
