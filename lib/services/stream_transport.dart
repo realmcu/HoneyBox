@@ -23,8 +23,17 @@ abstract class StreamTransport {
   /// Whether this transport is ready to carry a stream right now.
   bool get isAvailable;
 
+  /// Emits readiness transitions for this transport only.
+  Stream<bool> get availabilityChanges;
+
   /// Bytes of frame data carried per KS_FRAME write.
   int get chunkSize;
+
+  /// Report that a write was rejected, giving the transport a chance to reduce
+  /// [chunkSize]. Returns true when it shrank, so the caller should retry the
+  /// same payload in smaller slices. Transports with a known write budget
+  /// return false.
+  bool shrinkChunkSize() => false;
 
   /// Send one complete raw L2 message (never fragmented by the caller).
   Future<void> send(Uint8List l2);
@@ -46,7 +55,13 @@ class BleStreamTransport implements StreamTransport {
   bool get isAvailable => manager.streamAvailable;
 
   @override
+  Stream<bool> get availabilityChanges => manager.onStreamAvailabilityChanged;
+
+  @override
   int get chunkSize => manager.streamChunkSize;
+
+  @override
+  bool shrinkChunkSize() => manager.shrinkStreamChunk();
 
   @override
   Future<void> send(Uint8List l2) => manager.writeStream(l2);
@@ -66,7 +81,13 @@ class WifiStreamTransport implements StreamTransport {
   bool get isAvailable => false;
 
   @override
+  Stream<bool> get availabilityChanges => const Stream<bool>.empty();
+
+  @override
   int get chunkSize => 1400; // typical UDP/MTU payload; placeholder
+
+  @override
+  bool shrinkChunkSize() => false;
 
   @override
   Future<void> send(Uint8List l2) =>

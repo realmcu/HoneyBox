@@ -35,6 +35,17 @@ android {
     compileSdk = 36
     ndkVersion = "28.2.13676358"
 
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    sourceSets {
+        androidTest.assets.srcDir file("../../media_core/tests/fixtures")
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -175,4 +186,13 @@ flutter {
 
 dependencies {
     implementation project(":mapfeature")
+    testImplementation "junit:junit:4.13.2"
+    androidTestImplementation "junit:junit:4.13.2"
+    androidTestImplementation "androidx.test.ext:junit:1.2.1"
+    androidTestImplementation "androidx.test:runner:1.6.2"
+}
+
+tasks.withType(Test).configureEach {
+    systemProperty "ebadge.repositoryRoot", System.getProperty("ebadge.repositoryRoot", rootProject.projectDir.parentFile.absolutePath)
+    systemProperty "ebadge.regenerateFixtures", System.getProperty("ebadge.regenerateFixtures", "false")
 }
