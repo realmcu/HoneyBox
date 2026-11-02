@@ -13,6 +13,9 @@ import 'ble_mtu.dart';
 import 'ble_write_pacer.dart';
 import 'ble_write_queue.dart';
 import 'ble_write_stats.dart';
+import 'jw/jw_gatt_profile.dart';
+import 'jw/jw_raw_channel.dart';
+import 'jw/jw_transport.dart';
 import 'l1_engine.dart';
 import 'l2_file_transfer.dart';
 
@@ -21,12 +24,10 @@ import 'l2_file_transfer.dart';
 // ---------------------------------------------------------------------------
 
 /// High-level BLE connection state.
-enum BleState {
-  disconnected,
-  scanning,
-  connecting,
-  connected,
-  disconnecting,
+enum BleState { disconnected, scanning, connecting, connected, disconnecting }
+
+class _JwNotifyBinding {
+  StreamSubscription<List<int>>? subscription;
 }
 
 class _BleConnectionResources {
@@ -43,6 +44,17 @@ class _BleConnectionResources {
     this.streamNotificationSub,
     this.l1,
     this.session,
+    this.jwTransport,
+    this.jwNotifyController,
+    this.jwDisconnectController,
+    this.jwNotify,
+    this.naviCtrlTx,
+    this.naviCtrlRx,
+    this.naviDataTx,
+    this.naviDataRx,
+    this.naviCtrlSub,
+    this.naviDataSub,
+    this.naviL1,
   });
 
   final BluetoothDevice device;
@@ -57,6 +69,17 @@ class _BleConnectionResources {
   final StreamSubscription<List<int>>? streamNotificationSub;
   final L1Engine? l1;
   final FileTransferSession? session;
+  final JwRawChannel? jwTransport;
+  final StreamController<Uint8List>? jwNotifyController;
+  final StreamController<void>? jwDisconnectController;
+  final _JwNotifyBinding? jwNotify;
+  final BleGattEndpoint<BluetoothCharacteristic>? naviCtrlTx;
+  final BluetoothCharacteristic? naviCtrlRx;
+  final BleGattEndpoint<BluetoothCharacteristic>? naviDataTx;
+  final BluetoothCharacteristic? naviDataRx;
+  final StreamSubscription<List<int>>? naviCtrlSub;
+  final StreamSubscription<List<int>>? naviDataSub;
+  final L1Engine? naviL1;
 
   bool get commandReady =>
       commandTx != null && commandRx != null && l1 != null && session != null;
@@ -127,10 +150,42 @@ class BleManager {
   bool shrinkStreamChunk() {
     final calibrator = _chunkCalibrator;
     if (calibrator == null || !calibrator.recordRejection()) return false;
-    debugPrint('BleManager: stream write rejected, '
-        'chunk shrunk to ${calibrator.chunkSize}');
+    debugPrint(
+      'BleManager: stream write rejected, '
+      'chunk shrunk to ${calibrator.chunkSize}',
+    );
     return true;
   }
+
+  /// Whether the device exposes the Navigation Projection Service (FFD1-FFD4).
+  bool get naviProjAvailable {
+    final connection = _connectionOwner.value;
+    return connection != null &&
+        connection.naviCtrlTx != null &&
+        connection.naviCtrlRx != null &&
+        connection.naviDataTx != null &&
+        connection.naviDataRx != null;
+  }
+
+  /// Raw L2 messages received on the navi data notify (FFD4).
+  Stream<Uint8List> get naviDataNotifications =>
+      _naviDataNotifyController.stream;
+
+  /// Bytes of JPEG frame data per NAVI_FRAME write = `(MTU − 3) − 13`.
+  int get naviDataChunkSize {
+    final cs = (mtu - 3) - 13;
+    return cs < 1 ? 1 : cs;
+  }
+
+  /// The navi control channel L1 engine (FFD1/FFD2). Non-null when
+  /// [naviProjAvailable] is true.
+  L1Engine? get naviL1 => _connectionOwner.value?.naviL1;
+
+  /// L2 frames from the navi control channel (FFD2 → L1 de-framing).
+  Stream<Uint8List> get naviCtrlNotifications => _naviCtrlL2Controller.stream;
+
+  /// Active JW raw port, when [connect] was asked to own a JW watch.
+  JwTransport? get jwTransport => _connectionOwner.value?.jwTransport;
 
   // --------------------------------------------------------------------------
   // BLE objects
@@ -171,6 +226,12 @@ class BleManager {
   /// Broadcasts inbound L2 command-channel frames (FFC2 → L1 → L2 payload).
   final _commandNotifyController = StreamController<Uint8List>.broadcast();
 
+  /// Broadcasts raw L2 messages received on the navi data channel (FFD4).
+  final _naviDataNotifyController = StreamController<Uint8List>.broadcast();
+
+  /// Broadcasts L2 frames from the navi control channel (FFD2 → L1 → L2 payload).
+  final _naviCtrlL2Controller = StreamController<Uint8List>.broadcast();
+
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<List<ScanResult>>? _scanErrorSub;
 
@@ -208,6 +269,8 @@ class BleManager {
     _streamNotifyController.close();
     _streamAvailabilityController.close();
     _commandNotifyController.close();
+    _naviDataNotifyController.close();
+    _naviCtrlL2Controller.close();
   }
 
   // --------------------------------------------------------------------------
@@ -232,7 +295,10 @@ class BleManager {
 
   /// Start scanning for BLE devices. Each discovered device is reported via
   /// [onDeviceFound].
-  Future<void> startScan(void Function(ScanResult) onDeviceFound) async {
+  Future<void> startScan(
+    void Function(ScanResult) onDeviceFound, {
+    String? serviceUuid,
+  }) async {
     if (_disposed) return;
     stopScan();
 
@@ -271,13 +337,16 @@ class BleManager {
     try {
       // Android-only scan tuning (androidScanMode / androidUsesFineLocation)
       // is not applicable on Windows desktop, so branch the call by platform.
+      final withServices =
+          serviceUuid == null ? const <Guid>[] : [Guid(serviceUuid)];
       if (Platform.isAndroid) {
         await FlutterBluePlus.startScan(
+          withServices: withServices,
           androidScanMode: AndroidScanMode.lowLatency,
           androidUsesFineLocation: true,
         );
       } else {
-        await FlutterBluePlus.startScan();
+        await FlutterBluePlus.startScan(withServices: withServices);
       }
     } catch (e) {
       stopScan();
@@ -303,11 +372,16 @@ class BleManager {
   // --------------------------------------------------------------------------
 
   /// Connect to a BLE device and show the UI. Returns true on success.
-  Future<bool> connect(String deviceId, String deviceName) async {
+  Future<bool> connect(
+    String deviceId,
+    String deviceName, {
+    bool allowJw = false,
+  }) async {
     if (_disposed) return false;
     stopScan();
-    final connectionGeneration =
-        _connectionOwner.replace(_retireConnectionResources);
+    final connectionGeneration = _connectionOwner.replace(
+      _retireConnectionResources,
+    );
     _setState(BleState.connecting);
     _deviceId = deviceId;
     _deviceName = deviceName;
@@ -362,7 +436,7 @@ class BleManager {
       // HoneyBox is an internal debugging tool and uses the nonprofit tier.
       await device.connect(
         license: License.nonprofit,
-        timeout: const Duration(seconds: 10),
+        timeout: Duration(seconds: allowJw ? 20 : 10),
       );
       if (!await keepCurrent()) {
         return false;
@@ -370,16 +444,18 @@ class BleManager {
       debugPrint('BleManager: connected, discovering services');
 
       // Listen for disconnection (AFTER connect succeeds, skip initial state).
-      connectionStateSub = device.connectionState.skip(1).listen(
-        (BluetoothConnectionState cs) {
-          if (!_connectionOwner.isCurrent(connectionGeneration)) return;
-          if (cs == BluetoothConnectionState.disconnected) {
-            debugPrint('BleManager: link dropped after '
-                '$_streamNotifyCount FFC5 notifications');
-            _onDisconnected(connectionGeneration);
-          }
-        },
-      );
+      connectionStateSub = device.connectionState.skip(1).listen((
+        BluetoothConnectionState cs,
+      ) {
+        if (!_connectionOwner.isCurrent(connectionGeneration)) return;
+        if (cs == BluetoothConnectionState.disconnected) {
+          debugPrint(
+            'BleManager: link dropped after '
+            '$_streamNotifyCount FFC5 notifications',
+          );
+          _onDisconnected(connectionGeneration);
+        }
+      });
 
       // Discover services and try to find BLE characteristics
       await device.discoverServices();
@@ -390,6 +466,17 @@ class BleManager {
       final characteristics =
           <BleGattCharacteristic<BluetoothCharacteristic>>[];
       final services = device.servicesList;
+      final jwConnected = await _attachJw(
+        services: services,
+        allowJw: allowJw,
+        device: device,
+        connectionGeneration: connectionGeneration,
+        connectionStateSub: connectionStateSub,
+        writeQueue: writeQueue,
+        keepCurrent: keepCurrent,
+        onPublished: () => published = true,
+      );
+      if (jwConnected != null) return jwConnected;
       for (final s in services) {
         debugPrint('BleManager: service ${s.uuid}');
         for (final c in s.characteristics) {
@@ -400,14 +487,16 @@ class BleManager {
             'notify=${c.properties.notify} '
             'indicate=${c.properties.indicate}',
           );
-          characteristics.add(BleGattCharacteristic<BluetoothCharacteristic>(
-            c,
-            c.uuid.toString(),
-            write: c.properties.write,
-            writeWithoutResponse: c.properties.writeWithoutResponse,
-            notify: c.properties.notify,
-            indicate: c.properties.indicate,
-          ));
+          characteristics.add(
+            BleGattCharacteristic<BluetoothCharacteristic>(
+              c,
+              c.uuid.toString(),
+              write: c.properties.write,
+              writeWithoutResponse: c.properties.writeWithoutResponse,
+              notify: c.properties.notify,
+              indicate: c.properties.indicate,
+            ),
+          );
         }
       }
 
@@ -454,9 +543,11 @@ class BleManager {
                 bitsPerSecond: pacingBitrate,
               ),
             );
-      debugPrint('BleManager: mtu=$mtu streamChunk=$streamChunkSize'
-          '${probing ? ' (probing; platform reported no MTU)' : ''}'
-          '${_streamPacer == null ? '' : ' pacing=${_streamPacer!.minSpacing.inMicroseconds / 1000}ms@${pacingBitrate}bps'}');
+      debugPrint(
+        'BleManager: mtu=$mtu streamChunk=$streamChunkSize'
+        '${probing ? ' (probing; platform reported no MTU)' : ''}'
+        '${_streamPacer == null ? '' : ' pacing=${_streamPacer!.minSpacing.inMicroseconds / 1000}ms@${pacingBitrate}bps'}',
+      );
 
       // Windows leaves the link on a 30-60ms interval by default, which caps
       // projection well below the encoder's budget. Ask for the fast profile;
@@ -482,12 +573,8 @@ class BleManager {
         }
 
         final engine = L1Engine(
-          writeFn: (Uint8List chunk) => _enqueueWrite(
-            connectionGeneration,
-            writeQueue,
-            commandTx,
-            chunk,
-          ),
+          writeFn: (Uint8List chunk) =>
+              _enqueueWrite(connectionGeneration, writeQueue, commandTx, chunk),
         )..setMtu(mtu);
         l1 = engine;
         // Route any inbound command-channel L2 frame not consumed by a file
@@ -538,8 +625,10 @@ class BleManager {
               _streamNotifyCount++;
               if (_streamNotifyCount <= 4 || _streamNotifyCount % 10 == 0) {
                 final key = data.length > 2 ? data[2] : -1;
-                debugPrint('BleManager: FFC5 #$_streamNotifyCount '
-                    'len=${data.length} key=0x${key.toRadixString(16)}');
+                debugPrint(
+                  'BleManager: FFC5 #$_streamNotifyCount '
+                  'len=${data.length} key=0x${key.toRadixString(16)}',
+                );
               }
               _streamNotifyController.add(Uint8List.fromList(data));
             }
@@ -557,6 +646,96 @@ class BleManager {
         }
       }
 
+      BluetoothCharacteristic? naviCtrlTxChar;
+      BluetoothCharacteristic? naviCtrlRxChar;
+      BluetoothCharacteristic? naviDataTxChar;
+      BluetoothCharacteristic? naviDataRxChar;
+      for (final characteristic in characteristics) {
+        final uuid = characteristic.uuid.toUpperCase();
+        if (uuid.contains('FFD1') &&
+            (characteristic.write || characteristic.writeWithoutResponse)) {
+          naviCtrlTxChar = characteristic.value;
+        }
+        if (uuid.contains('FFD2') &&
+            (characteristic.notify || characteristic.indicate)) {
+          naviCtrlRxChar = characteristic.value;
+        }
+        if (uuid.contains('FFD3') && characteristic.writeWithoutResponse) {
+          naviDataTxChar = characteristic.value;
+        }
+        if (uuid.contains('FFD4') &&
+            (characteristic.notify || characteristic.indicate)) {
+          naviDataRxChar = characteristic.value;
+        }
+      }
+
+      BleGattEndpoint<BluetoothCharacteristic>? naviCtrlTx;
+      BleGattEndpoint<BluetoothCharacteristic>? naviDataTx;
+      StreamSubscription<List<int>>? naviCtrlSub;
+      StreamSubscription<List<int>>? naviDataSub;
+      L1Engine? naviL1;
+      if (naviCtrlTxChar != null &&
+          naviCtrlRxChar != null &&
+          naviDataTxChar != null &&
+          naviDataRxChar != null) {
+        try {
+          final ctrlTx = BleGattEndpoint<BluetoothCharacteristic>(
+            naviCtrlTxChar,
+            withoutResponse: true,
+          );
+          final dataTx = BleGattEndpoint<BluetoothCharacteristic>(
+            naviDataTxChar,
+            withoutResponse: true,
+          );
+          await naviCtrlRxChar.setNotifyValue(true);
+          if (!await keepCurrent()) return false;
+          naviCtrlSub = naviCtrlRxChar.onValueReceived.listen((data) {
+            if (_connectionOwner.isCurrent(connectionGeneration)) {
+              naviL1?.onNotified(Uint8List.fromList(data));
+            }
+          });
+          final engine = L1Engine(
+            writeFn: (Uint8List chunk) => _enqueueWrite(
+              connectionGeneration,
+              writeQueue,
+              ctrlTx,
+              chunk,
+              fatal: false,
+            ),
+          )..setMtu(mtu);
+          naviL1 = engine;
+          engine.onL2Data = (payload) {
+            if (!_disposed &&
+                _connectionOwner.isCurrent(connectionGeneration)) {
+              _naviCtrlL2Controller.add(payload);
+            }
+          };
+          await naviDataRxChar.setNotifyValue(true);
+          if (!await keepCurrent()) return false;
+          naviDataSub = naviDataRxChar.onValueReceived.listen((data) {
+            if (!_disposed &&
+                _connectionOwner.isCurrent(connectionGeneration)) {
+              _naviDataNotifyController.add(Uint8List.fromList(data));
+            }
+          });
+          naviCtrlTx = ctrlTx;
+          naviDataTx = dataTx;
+          debugPrint('BleManager: Navi Projection ready (FFD1-FFD4)');
+        } catch (e) {
+          if (!await keepCurrent()) return false;
+          debugPrint('BleManager: Navi Projection setup failed: $e');
+          await naviCtrlSub?.cancel();
+          await naviDataSub?.cancel();
+          naviCtrlSub = null;
+          naviDataSub = null;
+          naviCtrlTx = null;
+          naviDataTx = null;
+          naviCtrlRxChar = null;
+          naviDataRxChar = null;
+          naviL1 = null;
+        }
+      }
+
       if (!await keepCurrent()) return false;
       final resources = _BleConnectionResources(
         device: device,
@@ -571,6 +750,13 @@ class BleManager {
         streamNotificationSub: streamNotificationSub,
         l1: l1,
         session: transferSession,
+        naviCtrlTx: naviCtrlTx,
+        naviCtrlRx: naviCtrlRxChar,
+        naviDataTx: naviDataTx,
+        naviDataRx: naviDataRxChar,
+        naviCtrlSub: naviCtrlSub,
+        naviDataSub: naviDataSub,
+        naviL1: naviL1,
       );
       if (!_connectionOwner.publish(connectionGeneration, resources)) {
         await keepCurrent();
@@ -588,7 +774,11 @@ class BleManager {
         _setStreamAvailable(resources.streamReady);
         _setState(BleState.connected);
         final streamState = resources.streamReady ? 'on' : 'off';
-        debugPrint('BleManager: ready, mtu=$mtu, stream=$streamState');
+        final naviState = naviProjAvailable ? 'on' : 'off';
+        debugPrint(
+          'BleManager: ready, mtu=$mtu, stream=$streamState, '
+          'naviProj=$naviState',
+        );
         connected = true;
       });
       return connected;
@@ -598,12 +788,15 @@ class BleManager {
       try {
         await device.disconnect();
       } catch (disconnectError) {
-        debugPrint('BleManager: failed connection disconnect error: '
-            '$disconnectError');
+        debugPrint(
+          'BleManager: failed connection disconnect error: '
+          '$disconnectError',
+        );
       }
       final cleared = _connectionOwner.clearIfCurrent(
         connectionGeneration,
-        _retireConnectionResources,
+        (resources) =>
+            _releaseConnectionResources(resources, disconnectLink: false),
       );
       if (cleared) {
         _clearConnectingDevice(connectionGeneration, device);
@@ -637,30 +830,38 @@ class BleManager {
   Future<void> _write(
     BleWriteQueue writeQueue,
     BleGattEndpoint<BluetoothCharacteristic> endpoint,
-    Uint8List bytes,
-  ) {
+    Uint8List bytes, {
+    bool fatal = true,
+  }) {
     return writeQueue.enqueue(
       () => endpoint.value.write(
         bytes,
         withoutResponse: endpoint.withoutResponse,
       ),
+      fatal: fatal,
     );
   }
 
-  /// Enqueue a raw L1 chunk for delivery over the FFC1 characteristic.
+  /// Enqueue a raw L1 chunk for delivery over a command characteristic.
   void _enqueueWrite(
     int connectionGeneration,
     BleWriteQueue writeQueue,
     BleGattEndpoint<BluetoothCharacteristic> endpoint,
-    Uint8List chunk,
-  ) {
+    Uint8List chunk, {
+    bool fatal = true,
+  }) {
     if (_disposed || !_connectionOwner.isCurrent(connectionGeneration)) {
       return;
     }
     // L1 exposes a synchronous writer. The queue owns fatal-error teardown, so
     // suppress this mirrored Future error after enqueueing it.
     unawaited(
-      _write(writeQueue, endpoint, chunk).catchError((Object _) {}),
+      _write(
+        writeQueue,
+        endpoint,
+        chunk,
+        fatal: fatal,
+      ).catchError((Object _) {}),
     );
   }
 
@@ -718,9 +919,188 @@ class BleManager {
     return connection.l1!.sendL2(l2);
   }
 
+  /// Send one L2 command frame over the navi control channel (FFD1/FFD2, with
+  /// L1 framing). Returns the assigned L1 sequence number, or null if the navi
+  /// control channel isn't ready.
+  int? sendNaviControl(Uint8List l2) {
+    final connection = _connectionOwner.value;
+    if (_disposed || connection == null || connection.naviL1 == null) {
+      return null;
+    }
+    return connection.naviL1!.sendL2(l2);
+  }
+
+  /// Send one raw L2 data message over the FFD3 characteristic (no L1).
+  /// Shares the serial write queue with all other GATT writes.
+  Future<void> writeNaviData(Uint8List l2) {
+    final connection = _connectionOwner.value;
+    final endpoint = connection?.naviDataTx;
+    if (_disposed || connection == null || endpoint == null) {
+      return Future.error(StateError('导航投屏数据通道未就绪'));
+    }
+    return _write(connection.writeQueue, endpoint, l2, fatal: false);
+  }
+
   // --------------------------------------------------------------------------
   // Internal
   // --------------------------------------------------------------------------
+
+  /// Returns true when a JW watch was adopted, false when that attempt failed,
+  /// and null when [services] is not a JW target (caller continues with media).
+  Future<bool?> _attachJw({
+    required List<BluetoothService> services,
+    required bool allowJw,
+    required BluetoothDevice device,
+    required int connectionGeneration,
+    required StreamSubscription<BluetoothConnectionState>? connectionStateSub,
+    required BleWriteQueue writeQueue,
+    required Future<bool> Function() keepCurrent,
+    required void Function() onPublished,
+  }) async {
+    if (!allowJw || connectionStateSub == null) return null;
+
+    BluetoothCharacteristic? tx;
+    BluetoothCharacteristic? rx;
+    for (final service in services) {
+      final chars = {
+        for (final c in service.characteristics)
+          JwGattProfile.normalize(c.uuid.toString()): c,
+      };
+      final candidateTx = chars[JwGattProfile.tx];
+      final candidateRx = chars[JwGattProfile.rx];
+      if (!JwGattProfile.matches(
+        service.uuid.toString(),
+        chars.keys.toSet(),
+        txWrite: candidateTx?.properties.write ?? false,
+        rxNotify: candidateRx?.properties.notify ?? false,
+        allowJw: allowJw,
+      )) {
+        continue;
+      }
+      tx = candidateTx;
+      rx = candidateRx;
+      break;
+    }
+    if (tx == null || rx == null) return null;
+
+    var jwMtu = kMinAttMtu;
+    try {
+      jwMtu = await device.requestMtu(247);
+    } catch (_) {
+      jwMtu = kMinAttMtu;
+    }
+    if (!await keepCurrent()) return false;
+
+    final notifications = StreamController<Uint8List>.broadcast(sync: true);
+    final disconnected = StreamController<void>.broadcast(sync: true);
+    final binding = _JwNotifyBinding();
+    BluetoothCharacteristic? alert;
+    for (final service in services) {
+      if (JwGattProfile.normalize(service.uuid.toString()) !=
+          JwGattProfile.normalize('1802')) {
+        continue;
+      }
+      for (final c in service.characteristics) {
+        if (JwGattProfile.normalize(c.uuid.toString()) ==
+                JwGattProfile.normalize('2a06') &&
+            (c.properties.write || c.properties.writeWithoutResponse)) {
+          alert = c;
+        }
+      }
+    }
+    final alertEndpoint = alert;
+    final txChar = tx;
+    final rxChar = rx;
+    late final JwRawChannel port;
+    port = JwRawChannel(
+      mtu: jwMtu,
+      notifications: notifications.stream,
+      disconnected: disconnected.stream,
+      subscribeFn: () async {
+        binding.subscription = rxChar.onValueReceived.listen((bytes) {
+          final current = _connectionOwner.value;
+          if (!_disposed &&
+              current?.jwTransport == port &&
+              !notifications.isClosed) {
+            notifications.add(Uint8List.fromList(bytes));
+          }
+        });
+        try {
+          if (!await rxChar.setNotifyValue(true)) {
+            throw StateError('FF03 subscription refused');
+          }
+        } catch (_) {
+          await binding.subscription?.cancel();
+          binding.subscription = null;
+          rethrow;
+        }
+      },
+      writeFn: (bytes, {required bool withResponse}) async {
+        await txChar.write(bytes, withoutResponse: !withResponse);
+      },
+      readFn: (uuid) async {
+        for (final s in services) {
+          for (final c in s.characteristics) {
+            if (JwGattProfile.normalize(c.uuid.toString()) ==
+                JwGattProfile.normalize(uuid)) {
+              return Uint8List.fromList(await c.read());
+            }
+          }
+        }
+        return null;
+      },
+      disconnectFn: () async {
+        final current = _connectionOwner.value;
+        if (current?.jwTransport != port ||
+            !identical(current?.device, device)) {
+          return;
+        }
+        await disconnect();
+      },
+      immediateAlertWithResponse: alertEndpoint?.properties.write ?? false,
+      immediateAlertWriteFn: alertEndpoint == null
+          ? null
+          : (bytes) async {
+              await alertEndpoint.write(
+                bytes,
+                withoutResponse: !alertEndpoint.properties.write,
+              );
+            },
+    );
+
+    final resources = _BleConnectionResources(
+      device: device,
+      mtu: jwMtu,
+      writeQueue: writeQueue,
+      connectionStateSub: connectionStateSub,
+      jwTransport: port,
+      jwNotifyController: notifications,
+      jwDisconnectController: disconnected,
+      jwNotify: binding,
+    );
+    if (!_connectionOwner.publish(connectionGeneration, resources)) {
+      await notifications.close();
+      await disconnected.close();
+      await keepCurrent();
+      return false;
+    }
+    onPublished();
+    await port.subscribe();
+    if (!await keepCurrent()) return false;
+
+    var connected = false;
+    _connectionOwner.runIfCurrent(connectionGeneration, () {
+      if (_connectingGeneration == connectionGeneration &&
+          identical(_connectingDevice, device)) {
+        _connectingGeneration = null;
+        _connectingDevice = null;
+      }
+      _setState(BleState.connected);
+      debugPrint('BleManager: JW FF03 ready; FF02 response writes, MTU=$jwMtu');
+      connected = true;
+    });
+    return connected;
+  }
 
   void _setState(BleState newState) {
     if (_state == newState) return;
@@ -750,6 +1130,13 @@ class BleManager {
   }
 
   void _retireConnectionResources(_BleConnectionResources? resources) {
+    _releaseConnectionResources(resources, disconnectLink: true);
+  }
+
+  void _releaseConnectionResources(
+    _BleConnectionResources? resources, {
+    bool disconnectLink = false,
+  }) {
     if (resources == null) return;
     // The owner invokes retirement before clearing its active value, so stream
     // consumers observe false before the active pair disappears.
@@ -766,22 +1153,35 @@ class BleManager {
       _tunedRemoteId = null;
       unawaited(_linkTuning.release(tuned));
     }
+    final jwDown = resources.jwDisconnectController;
+    if (jwDown != null && !jwDown.isClosed) {
+      jwDown.add(null);
+    }
+    resources.jwTransport?.invalidate();
+    unawaited(resources.jwNotifyController?.close() ?? Future<void>.value());
+    unawaited(
+      resources.jwDisconnectController?.close() ?? Future<void>.value(),
+    );
+    unawaited(resources.jwNotify?.subscription?.cancel());
     resources.session?.abort();
     resources.writeQueue.abort(StateError('BLE connection ended'));
     resources.writeQueue.dispose();
     unawaited(resources.commandNotificationSub?.cancel());
     unawaited(resources.streamNotificationSub?.cancel());
+    unawaited(resources.naviCtrlSub?.cancel());
+    unawaited(resources.naviDataSub?.cancel());
     unawaited(resources.connectionStateSub.cancel());
     resources.l1?.reset();
-    unawaited(
-      resources.device.disconnect().catchError((Object _) {}),
-    );
+    resources.naviL1?.reset();
+    if (disconnectLink) {
+      unawaited(resources.device.disconnect().catchError((Object _) {}));
+    }
   }
 
   void _onDisconnected(int connectionGeneration) {
     final cleared = _connectionOwner.clearIfCurrent(
       connectionGeneration,
-      _retireConnectionResources,
+      (resources) => _releaseConnectionResources(resources),
     );
     if (!cleared) return;
     final connectingDevice = _connectingDevice;

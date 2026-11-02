@@ -30,9 +30,8 @@ class BleWriteStats {
     final meanMs = _elapsedMicroseconds / _writes / 1000.0;
     final maxMs = _maxMicroseconds / 1000.0;
     final seconds = _elapsedMicroseconds / 1000000.0;
-    final throughput = seconds > 0
-        ? '${(_bytes * 8 / seconds / 1000).round()} kbps'
-        : 'n/a';
+    final throughput =
+        seconds > 0 ? '${(_bytes * 8 / seconds / 1000).round()} kbps' : 'n/a';
     final report = 'writes=$_writes bytes=$_bytes '
         'mean=${meanMs.toStringAsFixed(1)}ms '
         'max=${maxMs.toStringAsFixed(1)}ms → $throughput';

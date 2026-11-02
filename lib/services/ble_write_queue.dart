@@ -3,10 +3,11 @@ import 'dart:async';
 typedef BleWriteOperation = Future<void> Function();
 
 class _BleWriteEntry {
-  _BleWriteEntry(this.generation, this.operation);
+  _BleWriteEntry(this.generation, this.operation, {required this.fatal});
 
   final int generation;
   final BleWriteOperation operation;
+  final bool fatal;
   final Completer<void> done = Completer<void>();
 }
 
@@ -21,12 +22,12 @@ class BleWriteQueue {
   bool _running = false;
   bool _disposed = false;
 
-  Future<void> enqueue(BleWriteOperation operation) {
+  Future<void> enqueue(BleWriteOperation operation, {bool fatal = true}) {
     if (_disposed) {
       return Future<void>.error(StateError('queue disposed'));
     }
 
-    final entry = _BleWriteEntry(_generation, operation);
+    final entry = _BleWriteEntry(_generation, operation, fatal: fatal);
     _pending.add(entry);
     _flush();
     return entry.done.future;
@@ -90,6 +91,18 @@ class BleWriteQueue {
   }
 
   void _fail(_BleWriteEntry entry, Object error, StackTrace stackTrace) {
+    // Navigation writes share the queue so they cannot race a stream write,
+    // but a rejected navi packet must not tear the link down.
+    if (!entry.fatal) {
+      if (!entry.done.isCompleted) {
+        entry.done.completeError(error, stackTrace);
+      }
+      _active = null;
+      _running = false;
+      _flush();
+      return;
+    }
+
     final failed = <_BleWriteEntry>[entry, ..._pending];
     _generation++;
     _active = null;

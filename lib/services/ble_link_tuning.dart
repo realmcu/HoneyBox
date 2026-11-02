@@ -17,7 +17,9 @@ class BleLinkTuning {
   })  : _channel = channel,
         _supported = supported ?? (!kIsWebPlatform && Platform.isWindows);
 
-  static const bool kIsWebPlatform = bool.fromEnvironment('dart.library.js_util');
+  static const bool kIsWebPlatform = bool.fromEnvironment(
+    'dart.library.js_util',
+  );
 
   final MethodChannel _channel;
   final bool _supported;
@@ -30,10 +32,9 @@ class BleLinkTuning {
   Future<bool> requestThroughput(String remoteId) async {
     if (!_supported || remoteId.isEmpty) return false;
     try {
-      await _channel.invokeMethod<void>(
-        'requestThroughput',
-        <String, dynamic>{'remoteId': remoteId},
-      );
+      await _channel.invokeMethod<void>('requestThroughput', <String, dynamic>{
+        'remoteId': remoteId,
+      });
       return true;
     } on PlatformException catch (e) {
       debugPrint('BleLinkTuning: throughput request refused: ${e.code}');
@@ -47,10 +48,9 @@ class BleLinkTuning {
   Future<void> release(String remoteId) async {
     if (!_supported || remoteId.isEmpty) return;
     try {
-      await _channel.invokeMethod<void>(
-        'releaseThroughput',
-        <String, dynamic>{'remoteId': remoteId},
-      );
+      await _channel.invokeMethod<void>('releaseThroughput', <String, dynamic>{
+        'remoteId': remoteId,
+      });
     } on PlatformException catch (_) {
       // Releasing is best effort; the request dies with the process anyway.
     } on MissingPluginException {
