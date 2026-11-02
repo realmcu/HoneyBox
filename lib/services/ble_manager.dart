@@ -216,7 +216,11 @@ class BleManager {
   // Construction / disposal
   // --------------------------------------------------------------------------
 
-  BleManager() {
+  final bool _requireJwProfile;
+
+  /// Strict tools can prohibit legacy notification subscriptions entirely.
+  BleManager({bool requireJwProfile = false})
+      : _requireJwProfile = requireJwProfile {
     // flutter_blue_plus logs every scan result and BLE operation at its default
     // (verbose) level, flooding logcat during continuous scanning — most
     // noticeably when the scanner resumes right after a disconnect. Silence the
@@ -431,7 +435,7 @@ class BleManager {
         if (!JwGattProfile.matches(service.uuid.toString(), chars.keys.toSet(),
             txWrite: tx?.properties.write ?? false,
             rxNotify: rx?.properties.notify ?? false,
-            allowJw: allowJw)) {
+            allowJw: allowJw || _requireJwProfile)) {
           continue;
         }
         final device = _device!;
@@ -515,6 +519,12 @@ class BleManager {
             'BleManager: JW FF03 ready; FF02 response writes, MTU=$_mtu');
         _setState(BleState.connected);
         return true;
+      }
+      if (_requireJwProfile) {
+        debugPrint(
+            'BleManager: complete JW profile required; refusing legacy fallback');
+        await disconnect();
+        return false;
       }
       for (final s in services) {
         for (final c in s.characteristics) {
