@@ -6,6 +6,7 @@ import '../dashboard/dashboard_app_root.dart';
 import '../ebadge/ebadge_app_root.dart';
 import '../shared/update_flow.dart';
 import '../watch/watch_app_root.dart';
+import '../ws_watch/ws_watch_app_root.dart';
 import 'app_catalog.dart';
 import 'widgets/app_card.dart';
 
@@ -101,6 +102,8 @@ class AppLauncherPage extends ConsumerWidget {
         return const WatchAppRoot();
       case AppId.dashboard:
         return const DashboardAppRoot();
+      case AppId.wsWatch:
+        return const WSWatchAppRoot();
     }
   }
 }

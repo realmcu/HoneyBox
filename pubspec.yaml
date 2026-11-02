@@ -4,7 +4,12 @@ publish_to: 'none'
 version: 0.8.23+17
 
 environment:
-  sdk: '>=3.3.0 <4.0.0'
+  sdk: '>=3.6.0 <4.0.0'
+
+workspace:
+  - packages/ws_watch_sdk
+  - packages/ws_watch_demo
+  - packages/ws_watch_demo/example
 
 dependencies:
   flutter:
@@ -21,6 +26,8 @@ dependencies:
   open_filex: ^4.5.0
   crypto: ^3.0.5
   palette_generator: ^0.3.3+7
+  ws_watch_demo:
+    path: packages/ws_watch_demo
 
 dev_dependencies:
   flutter_test:
