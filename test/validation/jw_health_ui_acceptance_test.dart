@@ -299,7 +299,9 @@ void main() {
         await tester.pump(const Duration(milliseconds: 20));
         await Future<void>.delayed(const Duration(milliseconds: 20));
         if (find.byType(JwHealthPage).evaluate().isNotEmpty &&
-            find.byType(LinearProgressIndicator).evaluate().isEmpty) break;
+            find.byType(LinearProgressIndicator).evaluate().isEmpty) {
+          break;
+        }
       }
     });
     expect(find.byType(JwHealthPage), findsOneWidget);
