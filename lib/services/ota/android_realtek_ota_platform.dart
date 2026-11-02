@@ -48,7 +48,9 @@ class AndroidRealtekOtaPlatform implements OtaPlatform {
 
   @override
   Future<void> prepare(String deviceId, {String? sessionId}) async {
-    if (_reading || _preparing || _needsClose || _closing) throw StateError('OTA 会话尚未关闭');
+    if (_reading || _preparing || _needsClose || _closing) {
+      throw StateError('OTA 会话尚未关闭');
+    }
     if (sessionId == null || sessionId.isEmpty) {
       throw ArgumentError('sessionId required');
     }
@@ -71,6 +73,7 @@ class AndroidRealtekOtaPlatform implements OtaPlatform {
     _started = true;
     await _commands.invokeMethod<void>('start', {'path': filePath});
   }
+
   @override
   Future<void> close() async {
     if (!_needsClose) return;

@@ -53,8 +53,9 @@ class OtaDeviceProfile {
 
       String requiredString(String key) {
         final value = json[key];
-        if (value is! String || value.trim().isEmpty)
+        if (value is! String || value.trim().isEmpty) {
           throw FormatException('$key 必须是非空字符串');
+        }
         return value;
       }
 
@@ -76,22 +77,29 @@ class OtaDeviceProfile {
       if (json.containsKey('allowDowngrade') && allowDowngrade is! bool) {
         throw const FormatException('allowDowngrade 必须是布尔值');
       }
-      if (source != null && (source is! String || !BatterySource.values.any((v) => v.name == source))) {
+      if (source != null &&
+          (source is! String ||
+              !BatterySource.values.any((v) => v.name == source))) {
         throw const FormatException('batterySource 无效');
       }
-      if (customer != null && (customer is! String || customer.isEmpty))
+      if (customer != null && (customer is! String || customer.isEmpty)) {
         throw const FormatException('customerName 必须是非空字符串');
-      if (charging != null && charging is! bool)
+      }
+      if (charging != null && charging is! bool) {
         throw const FormatException('batteryRequiresChargingBelowMin 必须是布尔值');
+      }
       final min = number('imageIdMin'), max = number('imageIdMax');
       final battery = number('batteryMinPercent');
-      if ((min == null) != (max == null) || (min != null && min > max!))
+      if ((min == null) != (max == null) || (min != null && min > max!)) {
         throw const FormatException('imageId 范围无效');
-      if (battery != null && battery > 100)
+      }
+      if (battery != null && battery > 100) {
         throw const FormatException('batteryMinPercent 超出范围');
+      }
       final imageId = number('imageId'), imageIds = numbers('imageIds');
-      if (imageId == null && imageIds == null && min == null)
+      if (imageId == null && imageIds == null && min == null) {
         throw const FormatException('需要配置 imageId、imageIds 或范围');
+      }
       return OtaDeviceProfile(
           id: requiredString('id'),
           displayName: requiredString('displayName'),
@@ -107,7 +115,9 @@ class OtaDeviceProfile {
           tempBankSize: number('tempBankSize'),
           flashAddress: number('flashAddress'),
           batteryMinPercent: battery,
-          batterySource: source == null ? BatterySource.none : BatterySource.values.firstWhere((v) => v.name == source),
+          batterySource: source == null
+              ? BatterySource.none
+              : BatterySource.values.firstWhere((v) => v.name == source),
           batteryRequiresChargingBelowMin: charging as bool? ?? true,
           allowDowngrade: allowDowngrade as bool? ?? true,
           evidence: requiredString('evidence'));
@@ -136,6 +146,7 @@ class OtaProfileRegistry {
     }
     throw StateError('未找到默认 OTA 档案: $id');
   }
+
   static const defaultProfiles = <OtaDeviceProfile>[
     OtaDeviceProfile(
         id: 's200',
@@ -162,8 +173,9 @@ class OtaProfileRegistry {
         if (e is! Map<String, dynamic>) throw const FormatException('档案必须是对象');
         return OtaDeviceProfile.fromJson(e);
       }).toList();
-      if (profiles.map((p) => p.id).toSet().length != profiles.length)
+      if (profiles.map((p) => p.id).toSet().length != profiles.length) {
         throw const FormatException('档案 id 重复');
+      }
       return OtaProfileRegistry(List.unmodifiable(profiles));
     } on FormatException {
       rethrow;
@@ -180,8 +192,9 @@ class OtaProfileRegistry {
                 p.customerName == null ||
                 p.customerName == header.customerName))
         .toList();
-    if (candidates.isEmpty)
+    if (candidates.isEmpty) {
       return const OtaProfileMatch(OtaProfileMatchStatus.none);
+    }
     if (candidates.length != 1 ||
         header.icType == null ||
         header.imageId == null ||

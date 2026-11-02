@@ -85,7 +85,8 @@ class AndroidRealtekFirmwareParser implements FirmwareParser {
             header.payloadLength == null ||
             header.imageSize != header.payloadLength! + 1024);
     final compatible = format == OtaCheckStatus.block ||
-            chip == OtaCheckStatus.block || mismatch
+            chip == OtaCheckStatus.block ||
+            mismatch
         ? OtaCheckStatus.block
         : format == OtaCheckStatus.unknown
             ? OtaCheckStatus.unknown
@@ -100,7 +101,8 @@ class AndroidRealtekFirmwareParser implements FirmwareParser {
         genericLimit;
     final limitSource = profile?.appBankSize != null
         ? '档案'
-        : capabilities.deviceReportedCapacity != null || capabilities.capacity != null
+        : capabilities.deviceReportedCapacity != null ||
+                capabilities.capacity != null
             ? '设备上报'
             : '芯片通用默认';
     // 出处：固件仓库只读分析 2026-10-31，调用方提供，未在本仓库复核。
@@ -152,8 +154,9 @@ class AndroidRealtekFirmwareParser implements FirmwareParser {
     final source = profile?.batterySource;
     final noBatteryCheck =
         profile != null && (threshold == null || source == BatterySource.none);
-    final hasChargingSource =
-        profile == null || source == BatterySource.bwps || source == BatterySource.basAndBwps;
+    final hasChargingSource = profile == null ||
+        source == BatterySource.bwps ||
+        source == BatterySource.basAndBwps;
     final isCharging = hasChargingSource && charging == true;
     final validBattery =
         batteryValue != null && batteryValue >= 0 && batteryValue <= 100;
@@ -205,9 +208,12 @@ class AndroidRealtekFirmwareParser implements FirmwareParser {
               capacity,
               '容量：${capacity.name}；${tooLargeForMulti ? 'FFF1 multi 临时容量不足' : tooLargeForProfileTemp ? '档案临时容量不足' : limit == null || limit <= 0 ? '容量限制未知' : '$limitSource：$limit 字节${limitSource == '芯片通用默认' && deviceIc == null ? '，设备芯片未确认' : ''}'}'),
           OtaCheck('version', version, versionExplanation),
-          OtaCheck('battery', battery, profile == null
-              ? '$batteryExplanation；通用电量阈值 30%'
-              : batteryExplanation),
+          OtaCheck(
+              'battery',
+              battery,
+              profile == null
+                  ? '$batteryExplanation；通用电量阈值 30%'
+                  : batteryExplanation),
         ]);
   }
 }

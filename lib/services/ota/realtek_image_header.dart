@@ -97,8 +97,9 @@ class RealtekImageHeader {
       0x16: 4
     };
     for (final e in lengths.entries) {
-      if (entries[e.key]?.length != e.value)
+      if (entries[e.key]?.length != e.value) {
         return fail(RealtekHeaderStatus.block, 'TLV 字段缺失或长度错误: ${e.key}');
+      }
     }
     int number(int id) {
       var n = 0;
@@ -118,8 +119,9 @@ class RealtekImageHeader {
     final id = number(0x12),
         flash = number(0x13),
         part = asciiField(entries[3]!);
-    if (len != imageSize || imageSize != bytes.length - 512)
+    if (len != imageSize || imageSize != bytes.length - 512) {
       return fail(RealtekHeaderStatus.block, 'DataLength、ImageSize 与文件长度不一致');
+    }
     if (imageSize < 1024) return fail(RealtekHeaderStatus.block, '镜像头截断');
     const o = 512;
     final ic = bytes[o],
@@ -130,11 +132,13 @@ class RealtekImageHeader {
     final payload = data.getUint32(o + 8, Endian.little);
     final imageVersion = data.getUint32(o + 0x60, Endian.little);
     final imageUuid = bytes.sublist(o + 12, o + 28);
-    if (payload + 1024 != imageSize)
+    if (payload + 1024 != imageSize) {
       return fail(RealtekHeaderStatus.block, 'payload_len 与 ImageSize 不一致');
+    }
     if (imageId != id) return fail(RealtekHeaderStatus.block, 'ImageID 不一致');
-    if (version != number(0x16) || version != imageVersion)
+    if (version != number(0x16) || version != imageVersion) {
       return fail(RealtekHeaderStatus.block, '镜像版本不一致');
+    }
     const uuids = {
       9: [
         0x1d,
@@ -183,10 +187,12 @@ class RealtekImageHeader {
               ? 'PartNumber 与 ic_type 不一致'
               : '未识别的 ic_type: $ic');
     }
-    if (parts[ic] != part)
+    if (parts[ic] != part) {
       return fail(RealtekHeaderStatus.block, 'PartNumber 与 ic_type 不一致');
-    if (!ListEquality.equal(imageUuid, uuids[ic]!))
+    }
+    if (!ListEquality.equal(imageUuid, uuids[ic]!)) {
       return fail(RealtekHeaderStatus.block, 'UUID 与 ic_type 不一致');
+    }
     // 出处：固件仓库只读分析 2026-10-31，调用方提供，未在本仓库复核：
     // 无 RSA；crc16 非零使用 CRC16，否则 SHA-256；真实 S200 构建均为
     // crc16=0、SHA-256。DFU START 仅检查 ic_type=9 和 image_id 范围，

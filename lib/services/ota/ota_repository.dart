@@ -90,8 +90,12 @@ class OtaSessionRecord {
         sessionId: json['sessionId'] as String,
         startedAt: DateTime.parse(json['startedAt'] as String),
         updatedAt: DateTime.parse(json['updatedAt'] as String),
-        phase: json['phase'] == null ? null : OtaPhase.values.byName(json['phase'] as String),
-        outcome: json['outcome'] == null ? null : OtaOutcome.values.byName(json['outcome'] as String),
+        phase: json['phase'] == null
+            ? null
+            : OtaPhase.values.byName(json['phase'] as String),
+        outcome: json['outcome'] == null
+            ? null
+            : OtaOutcome.values.byName(json['outcome'] as String),
         targetVersion: json['targetVersion'] as int?,
         expectedIcType: json['expectedIcType'] as int?,
         deviceIdMasked: json['deviceIdMasked'] as String,
@@ -162,8 +166,11 @@ class OtaRepository {
     if (!await directory.exists()) return [];
     final result = <OtaSessionRecord>[];
     await for (final entity in directory.list()) {
-      if (entity is! File || !entity.path.endsWith('.json') ||
-          entity.path == _activeFile.path) continue;
+      if (entity is! File ||
+          !entity.path.endsWith('.json') ||
+          entity.path == _activeFile.path) {
+        continue;
+      }
       try {
         result.add(OtaSessionRecord.fromJson(
             jsonDecode(await entity.readAsString()) as Map<String, dynamic>));

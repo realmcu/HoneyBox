@@ -39,8 +39,9 @@ final otaPlatformProvider = Provider<OtaPlatform>((ref) =>
 
 final otaBlePermissionProvider =
     Provider<Future<bool?> Function()>((ref) => () async {
-          if (kIsWeb || defaultTargetPlatform != TargetPlatform.android)
+          if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
             return true;
+          }
           try {
             final scan = await Permission.bluetoothScan.status;
             final connect = await Permission.bluetoothConnect.status;
@@ -86,7 +87,8 @@ class RealtekOtaPage extends ConsumerStatefulWidget {
   ConsumerState<RealtekOtaPage> createState() => _RealtekOtaPageState();
 }
 
-class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBindingObserver {
+class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
+    with WidgetsBindingObserver {
   late final OtaPlatform _platform;
   StreamSubscription<dynamic>? _subscription;
   String? _path;
@@ -127,12 +129,17 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
       final active = await repository.loadActive();
       if (active != null && _ownership.owner != OtaOwner.ota) {
         final recovered = OtaSessionRecord(
-            sessionId: active.sessionId, startedAt: active.startedAt,
-            updatedAt: DateTime.now(), phase: OtaPhase.finished,
+            sessionId: active.sessionId,
+            startedAt: active.startedAt,
+            updatedAt: DateTime.now(),
+            phase: OtaPhase.finished,
             outcome: OtaOutcome.recoveryRequired,
-            deviceIdMasked: active.deviceIdMasked, firmwareName: active.firmwareName,
-            firmwareSha256: active.firmwareSha256, phaseHistory: active.phaseHistory,
-            targetVersion: active.targetVersion, expectedIcType: active.expectedIcType);
+            deviceIdMasked: active.deviceIdMasked,
+            firmwareName: active.firmwareName,
+            firmwareSha256: active.firmwareSha256,
+            phaseHistory: active.phaseHistory,
+            targetVersion: active.targetVersion,
+            expectedIcType: active.expectedIcType);
         await repository.save(recovered);
         await repository.clearActive();
       }
@@ -141,8 +148,9 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
       final last = records.isEmpty ? null : records.first;
       setState(() {
         _lastRecord = last;
-        if (last != null && (last.outcome == OtaOutcome.recoveryRequired ||
-            last.outcome == OtaOutcome.pendingVerification)) {
+        if (last != null &&
+            (last.outcome == OtaOutcome.recoveryRequired ||
+                last.outcome == OtaOutcome.pendingVerification)) {
           _recoveryRecord = last;
           _recoveryLocked = true;
           _pendingVerification = true;
@@ -153,10 +161,12 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
       });
     } catch (_) {
       // A failed recovery read must not permit a potentially unsafe start.
-      if (mounted) setState(() {
-        _recoveryLocked = true;
-        _status = '无法读取升级恢复记录，请检查存储后重新打开页面';
-      });
+      if (mounted) {
+        setState(() {
+          _recoveryLocked = true;
+          _status = '无法读取升级恢复记录，请检查存储后重新打开页面';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() => _loadingRecovery = false);
@@ -165,24 +175,41 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
     }
   }
 
-  void _saveTerminal(OtaPhase previousPhase, {String? message, int? rawType, int? rawCode,
+  void _saveTerminal(OtaPhase previousPhase,
+      {String? message,
+      int? rawType,
+      int? rawCode,
       OtaFailureCategory? category}) {
     final session = _session;
     if (session?.outcome == null) return;
     if (session!.outcome == OtaOutcome.failed) {
       final profiles = ref.read(otaProfileRegistryProvider).profiles;
-      final threshold = profiles.length == 1 ? profiles.single.batteryMinPercent : null;
-      final next = OtaFailure.classify(phase: previousPhase, rawType: rawType,
-          rawCode: rawCode, message: message, confirmedCategory: category,
-          probe: DeviceProbeResult(batteryPercent: _capabilities?.batteryPercent,
-              charging: _capabilities?.charging), batteryMinPercent: threshold);
+      final threshold =
+          profiles.length == 1 ? profiles.single.batteryMinPercent : null;
+      final next = OtaFailure.classify(
+          phase: previousPhase,
+          rawType: rawType,
+          rawCode: rawCode,
+          message: message,
+          confirmedCategory: category,
+          probe: DeviceProbeResult(
+              batteryPercent: _capabilities?.batteryPercent,
+              charging: _capabilities?.charging),
+          batteryMinPercent: threshold);
       _failure = _failure?.merge(next) ?? next;
     }
     final now = DateTime.now();
-    final record = OtaSessionRecord(sessionId: session.id, startedAt: _startedAt ?? now,
-        updatedAt: now, phase: session.phase, outcome: session.outcome!, failure: _failure,
-        deviceIdMasked: widget.device.deviceId, firmwareName: _name ?? '',
-        firmwareSha256: _firmwareSha256, targetVersion: _targetVersion,
+    final record = OtaSessionRecord(
+        sessionId: session.id,
+        startedAt: _startedAt ?? now,
+        updatedAt: now,
+        phase: session.phase,
+        outcome: session.outcome!,
+        failure: _failure,
+        deviceIdMasked: widget.device.deviceId,
+        firmwareName: _name ?? '',
+        firmwareSha256: _firmwareSha256,
+        targetVersion: _targetVersion,
         expectedIcType: _expectedIcType,
         phaseHistory: [..._phaseHistory, OtaPhaseEntry(session.phase, now)]);
     final repository = ref.read(otaRepositoryProvider.future);
@@ -202,7 +229,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
     if (id == null) return;
     try {
       await _saveQueue;
-      final text = await (await ref.read(otaRepositoryProvider.future)).exportSanitized(id);
+      final text = await (await ref.read(otaRepositoryProvider.future))
+          .exportSanitized(id);
       if (text != null) await Clipboard.setData(ClipboardData(text: text));
     } catch (_) {}
   }
@@ -222,10 +250,13 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
     final threshold = profile.batteryMinPercent;
     if (threshold == null ||
         (profile.batterySource != BatterySource.bwps &&
-            profile.batterySource != BatterySource.basAndBwps)) return '';
-    final value = caps?.batteryPercent;
-    if (value == null || value < 0 || value > 100 || value >= threshold)
+            profile.batterySource != BatterySource.basAndBwps)) {
       return '';
+    }
+    final value = caps?.batteryPercent;
+    if (value == null || value < 0 || value > 100 || value >= threshold) {
+      return '';
+    }
     return '；设备可能因电量低于 $threshold% 且未充电而拒绝进入升级模式,请充电后重试';
   }
 
@@ -245,14 +276,15 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
         final disconnected =
             event['disconnected'] == true || event['message'] == '设备已断开';
         if (disconnected) {
-          final _disconnectHint = session.phase == OtaPhase.preparing ||
+          final disconnectHint = session.phase == OtaPhase.preparing ||
                   session.phase == OtaPhase.connecting
               ? _batteryFailureHint()
               : '';
           final disconnectPhase = session.phase;
           if (!session.disconnect(event['sessionId'] as String)) return;
           if (session.outcome != null) {
-            _saveTerminal(disconnectPhase, message: '设备已断开', category: OtaFailureCategory.disconnected);
+            _saveTerminal(disconnectPhase,
+                message: '设备已断开', category: OtaFailureCategory.disconnected);
           }
           setState(() {
             _ready = false;
@@ -260,7 +292,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
               _status = '设备正在重启，等待重新连接';
             } else {
               _status =
-                  '设备已断开${session.failureDescription == '设备已断开' && (session.phase == OtaPhase.finished) ? _disconnectHint : ''}';
+                  '设备已断开${session.failureDescription == '设备已断开' && (session.phase == OtaPhase.finished) ? disconnectHint : ''}';
               _running = false;
             }
           });
@@ -310,11 +342,17 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
         if (progress != null && progress is! num) return;
         final overall = event['overallProgress'];
         final hasProgress = progress is num || overall is num;
-        final tracked = hasProgress ? _progressTracker.update(
-            imageIndex: event['imageIndex'] is int ? event['imageIndex'] as int : null,
-            imageCount: event['imageCount'] is int ? event['imageCount'] as int : null,
-            currentPercent: progress is num ? progress : null,
-            overallProgress: overall is num ? overall : null) : null;
+        final tracked = hasProgress
+            ? _progressTracker.update(
+                imageIndex: event['imageIndex'] is int
+                    ? event['imageIndex'] as int
+                    : null,
+                imageCount: event['imageCount'] is int
+                    ? event['imageCount'] as int
+                    : null,
+                currentPercent: progress is num ? progress : null,
+                overallProgress: overall is num ? overall : null)
+            : null;
         if (!session.apply(OtaEvent(
           sessionId: event['sessionId'] as String,
           phase: phase,
@@ -325,13 +363,22 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
         ))) {
           return;
         }
-        if (phase != previousPhase) _phaseHistory.add(OtaPhaseEntry(phase, DateTime.now()));
-        if (done) _saveTerminal(previousPhase, message: message is String ? message : null,
-            rawType: event['errorType'] is int ? event['errorType'] as int : null,
-            rawCode: event['errorCode'] is int ? event['errorCode'] as int : null);
+        if (phase != previousPhase) {
+          _phaseHistory.add(OtaPhaseEntry(phase, DateTime.now()));
+        }
+        if (done) {
+          _saveTerminal(previousPhase,
+              message: message is String ? message : null,
+              rawType:
+                  event['errorType'] is int ? event['errorType'] as int : null,
+              rawCode:
+                  event['errorCode'] is int ? event['errorCode'] as int : null);
+        }
         setState(() {
           if (message is String && session.failureDescription != '阶段超时') {
-            _status = (message.contains('升级成功') ? message.replaceAll('升级成功', 'SDK 报告完成') : message) +
+            _status = (message.contains('升级成功')
+                    ? message.replaceAll('升级成功', 'SDK 报告完成')
+                    : message) +
                 (done &&
                         outcome == OtaOutcome.failed &&
                         (previousPhase == OtaPhase.preparing ||
@@ -361,7 +408,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
               phase: OtaPhase.finished,
               outcome: OtaOutcome.failed));
         }
-        _saveTerminal(session?.phase ?? OtaPhase.idle, message: error.toString(), category: OtaFailureCategory.connection);
+        _saveTerminal(session?.phase ?? OtaPhase.idle,
+            message: error.toString(), category: OtaFailureCategory.connection);
         setState(() {
           _ready = false;
           _running = false;
@@ -376,7 +424,12 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
   }
 
   Future<void> _prepare() async {
-    if (_loadingRecovery || _recoveryLocked || _pendingVerification || _verifying) return;
+    if (_loadingRecovery ||
+        _recoveryLocked ||
+        _pendingVerification ||
+        _verifying) {
+      return;
+    }
     if (_preparing ||
         _running ||
         (_session != null && _session!.outcome == null)) {
@@ -450,7 +503,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
           '${DateTime.now().microsecondsSinceEpoch}-${_sessionSequence++}',
           onTimeout: (timedOut) {
         if (!mounted || _session != timedOut) return;
-        _saveTerminal(timedOut.timedOutPhase ?? OtaPhase.idle, message: '阶段超时', category: OtaFailureCategory.timeout);
+        _saveTerminal(timedOut.timedOutPhase ?? OtaPhase.idle,
+            message: '阶段超时', category: OtaFailureCategory.timeout);
         setState(() {
           _status =
               '阶段超时${timedOut.timedOutPhase == OtaPhase.preparing || timedOut.timedOutPhase == OtaPhase.connecting ? _batteryFailureHint() : ''}';
@@ -474,8 +528,9 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
       }
       _saveTerminal(OtaPhase.preparing, message: error.toString());
       _releaseOwnership();
-      if (mounted)
+      if (mounted) {
         setState(() => _status = '连接失败：$error${_batteryFailureHint()}');
+      }
     } finally {
       if (mounted) setState(() => _preparing = false);
     }
@@ -508,7 +563,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
       final result = await FilePicker.platform.pickFiles(type: FileType.any);
       if (!mounted || result == null) return;
       final file = result.files.single;
-      final restart = file.path != null && (_pendingVerification || _postcheck != null);
+      final restart =
+          file.path != null && (_pendingVerification || _postcheck != null);
       setState(() {
         if (restart) {
           _pendingVerification = false;
@@ -529,8 +585,15 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
   }
 
   Future<void> _start() async {
-    if (_path == null || _running || _preparing || !_ready ||
-        _loadingRecovery || _recoveryLocked || _pendingVerification) return;
+    if (_path == null ||
+        _running ||
+        _preparing ||
+        !_ready ||
+        _loadingRecovery ||
+        _recoveryLocked ||
+        _pendingVerification) {
+      return;
+    }
     setState(() {
       _running = true;
       _progress = null;
@@ -631,12 +694,21 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
         }
         final now = DateTime.now();
         await (await ref.read(otaRepositoryProvider.future)).saveActive(
-            OtaSessionRecord(sessionId: session!.id, startedAt: _startedAt ?? now,
-                updatedAt: now, phase: null, outcome: null,
-                deviceIdMasked: widget.device.deviceId, firmwareName: _name ?? '',
-                firmwareSha256: _firmwareSha256, phaseHistory: [..._phaseHistory],
-                targetVersion: _targetVersion, expectedIcType: _expectedIcType));
-        if (!mounted || session != _session || session.outcome != null ||
+            OtaSessionRecord(
+                sessionId: session!.id,
+                startedAt: _startedAt ?? now,
+                updatedAt: now,
+                phase: null,
+                outcome: null,
+                deviceIdMasked: widget.device.deviceId,
+                firmwareName: _name ?? '',
+                firmwareSha256: _firmwareSha256,
+                phaseHistory: [..._phaseHistory],
+                targetVersion: _targetVersion,
+                expectedIcType: _expectedIcType));
+        if (!mounted ||
+            session != _session ||
+            session.outcome != null ||
             _ownership.owner != OtaOwner.ota) {
           throw StateError('OTA 会话已结束');
         }
@@ -649,7 +721,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
               phase: OtaPhase.finished,
               outcome: OtaOutcome.failed));
         }
-        _saveTerminal(session?.phase ?? OtaPhase.idle, message: '固件检查后发生变化或无法读取');
+        _saveTerminal(session?.phase ?? OtaPhase.idle,
+            message: '固件检查后发生变化或无法读取');
         _releaseOwnership();
         _ready = false;
         setState(() {
@@ -669,7 +742,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
             phase: OtaPhase.finished,
             outcome: OtaOutcome.failed));
       }
-      _saveTerminal(connectionFailure ? OtaPhase.connecting : OtaPhase.checking, message: error.toString());
+      _saveTerminal(connectionFailure ? OtaPhase.connecting : OtaPhase.checking,
+          message: error.toString());
       if (mounted) {
         setState(() {
           _running = false;
@@ -687,59 +761,83 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
     var acquired = false;
     try {
       PostcheckResult result;
-      final currentMask = OtaSessionRecord(sessionId: '', startedAt: DateTime.now(),
-          updatedAt: DateTime.now(), phase: null, outcome: null,
-          deviceIdMasked: widget.device.deviceId, firmwareName: '',
-          firmwareSha256: '', phaseHistory: const []).deviceIdMasked;
+      final currentMask = OtaSessionRecord(
+          sessionId: '',
+          startedAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          phase: null,
+          outcome: null,
+          deviceIdMasked: widget.device.deviceId,
+          firmwareName: '',
+          firmwareSha256: '',
+          phaseHistory: const []).deviceIdMasked;
       if (_recoveryRecord != null &&
           _recoveryRecord!.deviceIdMasked != currentMask) {
-        result = const PostcheckResult(status: PostcheckStatus.unavailable,
-            reason: '当前设备与中断的升级记录不一致。', guidance: '请重新选择原设备后核验。');
+        result = const PostcheckResult(
+            status: PostcheckStatus.unavailable,
+            reason: '当前设备与中断的升级记录不一致。',
+            guidance: '请重新选择原设备后核验。');
       } else if (_targetVersion == null || _expectedIcType == null) {
-        result = const PostcheckResult(status: PostcheckStatus.unavailable,
+        result = const PostcheckResult(
+            status: PostcheckStatus.unavailable,
             reason: '目标版本未知，无法自动核验。',
             guidance: '请重新连接设备，在设备信息中手动核对固件版本和设备身份。');
       } else if (ref.read(connectedDeviceProvider) != null) {
-        result = const PostcheckResult(status: PostcheckStatus.unavailable,
-            reason: '普通连接正在占用蓝牙。', guidance: '请先断开普通连接后核验。');
+        result = const PostcheckResult(
+            status: PostcheckStatus.unavailable,
+            reason: '普通连接正在占用蓝牙。',
+            guidance: '请先断开普通连接后核验。');
       } else {
         final ownership = _ownership.acquire(OtaOwner.ota);
         acquired = ownership.success;
         if (!acquired) {
-          result = PostcheckResult(status: PostcheckStatus.unavailable,
-              reason: ownership.reason ?? '蓝牙正在使用。', guidance: '请释放蓝牙后重试核验。');
+          result = PostcheckResult(
+              status: PostcheckStatus.unavailable,
+              reason: ownership.reason ?? '蓝牙正在使用。',
+              guidance: '请释放蓝牙后重试核验。');
         } else {
           try {
             await _platform.close();
             result = await ref.read(otaPostcheckerProvider).verifyTarget(
-                expectedIdentity: OtaExpectedIdentity(deviceId: widget.device.deviceId,
-                    icType: _expectedIcType), expectedVersion: _targetVersion!);
+                expectedIdentity: OtaExpectedIdentity(
+                    deviceId: widget.device.deviceId, icType: _expectedIcType),
+                expectedVersion: _targetVersion!);
           } catch (_) {
-            result = PostcheckResult(status: PostcheckStatus.unavailable,
+            result = PostcheckResult(
+                status: PostcheckStatus.unavailable,
                 reason: '无法连接设备进行核验。',
-                guidance: '请重新连接设备，在设备信息中确认版本为 ${formatOtaVersion(_targetVersion!)}，并确认设备身份。');
+                guidance:
+                    '请重新连接设备，在设备信息中确认版本为 ${formatOtaVersion(_targetVersion!)}，并确认设备身份。');
           }
         }
       }
       if (result.status == PostcheckStatus.mismatch &&
-          result.observedIcType != null && result.observedIcType != _expectedIcType) {
-        result = PostcheckResult(status: PostcheckStatus.unavailable,
-            reason: result.reason, guidance: result.guidance);
+          result.observedIcType != null &&
+          result.observedIcType != _expectedIcType) {
+        result = PostcheckResult(
+            status: PostcheckStatus.unavailable,
+            reason: result.reason,
+            guidance: result.guidance);
       }
       final session = _session;
       if (session != null || _recoveryRecord != null) {
         final now = DateTime.now();
         final prior = _recoveryRecord;
-        final record = OtaSessionRecord(sessionId: prior?.sessionId ?? session!.id,
-            startedAt: prior?.startedAt ?? _startedAt ?? now, updatedAt: now, phase: OtaPhase.finished,
+        final record = OtaSessionRecord(
+            sessionId: prior?.sessionId ?? session!.id,
+            startedAt: prior?.startedAt ?? _startedAt ?? now,
+            updatedAt: now,
+            phase: OtaPhase.finished,
             outcome: switch (result.status) {
               PostcheckStatus.verified => OtaOutcome.verified,
               PostcheckStatus.mismatch => OtaOutcome.failed,
               PostcheckStatus.unavailable => OtaOutcome.pendingVerification,
-            }, deviceIdMasked: prior?.deviceIdMasked ?? widget.device.deviceId,
+            },
+            deviceIdMasked: prior?.deviceIdMasked ?? widget.device.deviceId,
             firmwareName: prior?.firmwareName ?? _name ?? '',
             firmwareSha256: prior?.firmwareSha256 ?? _firmwareSha256,
-            targetVersion: _targetVersion, expectedIcType: _expectedIcType,
+            targetVersion: _targetVersion,
+            expectedIcType: _expectedIcType,
             phaseHistory: prior?.phaseHistory ?? [..._phaseHistory]);
         final repository = ref.read(otaRepositoryProvider.future);
         _saveQueue = _saveQueue.then((_) async {
@@ -747,16 +845,21 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
         });
         await _saveQueue;
       }
-      if (mounted) setState(() {
-        _postcheck = result;
-        if (result.status != PostcheckStatus.unavailable) _recoveryLocked = false;
-        _pendingVerification = result.status == PostcheckStatus.unavailable;
-        _status = switch (result.status) {
-          PostcheckStatus.verified => '已核验：设备身份与版本 ${formatOtaVersion(result.observedVersion!)} 一致',
-          PostcheckStatus.mismatch => '核验失败：${result.reason}',
-          PostcheckStatus.unavailable => '结果待核验：${result.reason}',
-        };
-      });
+      if (mounted) {
+        setState(() {
+          _postcheck = result;
+          if (result.status != PostcheckStatus.unavailable) {
+            _recoveryLocked = false;
+          }
+          _pendingVerification = result.status == PostcheckStatus.unavailable;
+          _status = switch (result.status) {
+            PostcheckStatus.verified =>
+              '已核验：设备身份与版本 ${formatOtaVersion(result.observedVersion!)} 一致',
+            PostcheckStatus.mismatch => '核验失败：${result.reason}',
+            PostcheckStatus.unavailable => '结果待核验：${result.reason}',
+          };
+        });
+      }
     } catch (_) {
       if (mounted) setState(() => _status = '结果待核验：核验失败，请重新连接设备并在设备信息中手动确认版本。');
     } finally {
@@ -769,14 +872,22 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
     final prior = _recoveryRecord;
     if (prior != null) {
       try {
-        await (await ref.read(otaRepositoryProvider.future)).save(OtaSessionRecord(
-            sessionId: prior.sessionId, startedAt: prior.startedAt,
-            updatedAt: DateTime.now(), phase: OtaPhase.finished,
-            outcome: OtaOutcome.failed, deviceIdMasked: prior.deviceIdMasked,
-            firmwareName: prior.firmwareName, firmwareSha256: prior.firmwareSha256,
-            phaseHistory: prior.phaseHistory, targetVersion: prior.targetVersion,
-            expectedIcType: prior.expectedIcType));
-      } catch (_) { return; }
+        await (await ref.read(otaRepositoryProvider.future)).save(
+            OtaSessionRecord(
+                sessionId: prior.sessionId,
+                startedAt: prior.startedAt,
+                updatedAt: DateTime.now(),
+                phase: OtaPhase.finished,
+                outcome: OtaOutcome.failed,
+                deviceIdMasked: prior.deviceIdMasked,
+                firmwareName: prior.firmwareName,
+                firmwareSha256: prior.firmwareSha256,
+                phaseHistory: prior.phaseHistory,
+                targetVersion: prior.targetVersion,
+                expectedIcType: prior.expectedIcType));
+      } catch (_) {
+        return;
+      }
     }
     if (!mounted) return;
     setState(() {
@@ -801,16 +912,26 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
               child: ListView(
                 children: [
                   Text('设备：${widget.device.name}'),
-                  if (_lastRecord != null) Text('上次升级记录：${_lastRecord!.outcome?.name} ${_lastRecord!.updatedAt}'),
+                  if (_lastRecord != null)
+                    Text(
+                        '上次升级记录：${_lastRecord!.outcome?.name} ${_lastRecord!.updatedAt}'),
                   const SizedBox(height: 12),
                   Text(_name ?? '尚未选择固件'),
                   OutlinedButton(
-                      onPressed: _running || _verifying || _loadingRecovery || _recoveryLocked || _pendingVerification ? null : _choose,
+                      onPressed: _running ||
+                              _verifying ||
+                              _loadingRecovery ||
+                              _recoveryLocked ||
+                              _pendingVerification
+                          ? null
+                          : _choose,
                       child: const Text('选择固件')),
                   FilledButton(
                       onPressed: !_running &&
                               !_preparing &&
-                              !_loadingRecovery && !_recoveryLocked && !_pendingVerification &&
+                              !_loadingRecovery &&
+                              !_recoveryLocked &&
+                              !_pendingVerification &&
                               _ready &&
                               _path != null &&
                               _platform.supported
@@ -841,22 +962,43 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage> with WidgetsBin
                   if (_postcheck != null && _postcheck!.guidance.isNotEmpty)
                     Text(_postcheck!.guidance),
                   if (_pendingVerification)
-                    OutlinedButton(onPressed: _running || _preparing || _verifying ? null : _verify,
+                    OutlinedButton(
+                        onPressed: _running || _preparing || _verifying
+                            ? null
+                            : _verify,
                         child: Text(_recoveryLocked ? '重新检查设备' : '核验升级结果')),
                   if (_recoveryLocked && _recoveryRecord != null && !_verifying)
-                    OutlinedButton(onPressed: _dismissRecovery,
-                        child: Text(_targetVersion == null || _expectedIcType == null
-                            ? '我已手动检查设备' : '放弃并重新选择固件')),
-                  if (_errorDetails != null) SelectableText(_errorDetails!),
-                  if (_failure != null) OtaFailureCard(failure: _failure!, retryCount: _retryCount,
-                    onRetry: () { setState(() => _retryCount++); unawaited(_prepare()); },
-                    onCopy: _copyDiagnostics),
-                  if (!_running && !_pendingVerification && !_verifying && _postcheck == null && _platform.supported)
                     OutlinedButton(
-                      onPressed: _preparing || (_failure != null &&
-                              (!_failure!.canRetry || _retryCount >= otaMaxRetries))
-                          ? null : () {
-                              if (_failure != null) setState(() => _retryCount++);
+                        onPressed: _dismissRecovery,
+                        child: Text(
+                            _targetVersion == null || _expectedIcType == null
+                                ? '我已手动检查设备'
+                                : '放弃并重新选择固件')),
+                  if (_errorDetails != null) SelectableText(_errorDetails!),
+                  if (_failure != null)
+                    OtaFailureCard(
+                        failure: _failure!,
+                        retryCount: _retryCount,
+                        onRetry: () {
+                          setState(() => _retryCount++);
+                          unawaited(_prepare());
+                        },
+                        onCopy: _copyDiagnostics),
+                  if (!_running &&
+                      !_pendingVerification &&
+                      !_verifying &&
+                      _postcheck == null &&
+                      _platform.supported)
+                    OutlinedButton(
+                      onPressed: _preparing ||
+                              (_failure != null &&
+                                  (!_failure!.canRetry ||
+                                      _retryCount >= otaMaxRetries))
+                          ? null
+                          : () {
+                              if (_failure != null) {
+                                setState(() => _retryCount++);
+                              }
                               unawaited(_prepare());
                             },
                       child: const Text('重新连接'),

@@ -40,8 +40,10 @@ class OtaEvent {
 }
 
 class OtaSession {
-  OtaSession(this.id, {DateTime Function()? now,
-      Map<OtaPhase, Duration>? phaseTimeouts, this.onTimeout,
+  OtaSession(this.id,
+      {DateTime Function()? now,
+      Map<OtaPhase, Duration>? phaseTimeouts,
+      this.onTimeout,
       Timer Function(Duration, void Function())? timerFactory})
       : _now = now ?? DateTime.now,
         _timeouts = {...defaultPhaseTimeouts, ...?phaseTimeouts},
@@ -66,7 +68,10 @@ class OtaSession {
   String? failureDescription;
   OtaPhase? timedOutPhase;
 
-  void dispose() { _timer?.cancel(); _timer = null; }
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
+  }
 
   bool checkTimeout() {
     final limit = _timeouts[phase];
@@ -103,9 +108,10 @@ class OtaSession {
       return true;
     }
     failureDescription = '设备已断开';
-    return apply(OtaEvent(sessionId: id, phase: OtaPhase.finished,
-        outcome: OtaOutcome.failed));
+    return apply(OtaEvent(
+        sessionId: id, phase: OtaPhase.finished, outcome: OtaOutcome.failed));
   }
+
   late DateTime lastActivity;
   bool hasTimedOut(Duration limit) =>
       outcome == null && _now().difference(lastActivity) >= limit;

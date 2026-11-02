@@ -11,6 +11,7 @@ import '../../services/jw/jw_scan_policy.dart';
 import '../../services/app_settings.dart';
 import '../../services/system_settings.dart';
 import '../shared/app_drawer.dart';
+import 'scan_device_order.dart';
 import 'widgets/device_tile.dart';
 
 /// Fallback device-name filter used when a caller doesn't specify one.
@@ -25,6 +26,10 @@ class ScanPage extends ConsumerStatefulWidget {
   /// AppBar title (e.g. "eBadge" / "Watch"). Used verbatim.
   final String appTitle;
   final bool acceptJwCandidates;
+  final bool defaultOnlyNamed;
+  final bool defaultOnlyConnectable;
+  final bool defaultSortBySignal;
+  final ValueChanged<ScanDevice>? onDeviceSelected;
   final VoidCallback? onBrowseSavedHistory;
 
   /// Optional advertised service UUID used by the BLE stack to restrict scan
@@ -36,6 +41,10 @@ class ScanPage extends ConsumerStatefulWidget {
     this.defaultDeviceFilter = _kFallbackFilter,
     this.appTitle = 'eBadge',
     this.acceptJwCandidates = false,
+    this.defaultOnlyNamed = false,
+    this.defaultOnlyConnectable = false,
+    this.defaultSortBySignal = false,
+    this.onDeviceSelected,
     this.onBrowseSavedHistory,
     this.requiredServiceUuid,
   });
@@ -49,7 +58,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
   late final TextEditingController _filterCtrl =
       TextEditingController(text: widget.defaultDeviceFilter);
   late String _filter = widget.defaultDeviceFilter;
-  bool _onlyConnectable = false;
+  late bool _onlyConnectable = widget.defaultOnlyConnectable;
+  late bool _onlyNamed = widget.defaultOnlyNamed;
+  late bool _sortBySignal = widget.defaultSortBySignal;
   bool _filterEdited = false;
   String? _connectingId;
   bool _locationOff = false;
@@ -167,6 +178,11 @@ class _ScanPageState extends ConsumerState<ScanPage>
   }
 
   void _onConnect(ScanDevice device) {
+    if (widget.onDeviceSelected != null) {
+      _bleNotifier.stopScan();
+      widget.onDeviceSelected!(device);
+      return;
+    }
     setState(() => _connectingId = device.deviceId);
     ref
         .read(bleNotifierProvider.notifier)
@@ -187,15 +203,17 @@ class _ScanPageState extends ConsumerState<ScanPage>
 
   List<ScanDevice> _applyFilter(List<ScanDevice> all) {
     final q = _filter.trim().toLowerCase();
-    return all.where((d) {
-      if (_onlyConnectable && !d.connectable) return false;
+    final filtered = all.where((d) {
       return JwScanPolicy.matches(
           query: q,
           isDefaultWatchFilter: widget.acceptJwCandidates &&
               !_filterEdited &&
               widget.defaultDeviceFilter == 'Watch',
-          device: d);
+          device: d,
+          onlyNamed: _onlyNamed,
+          onlyConnectable: _onlyConnectable);
     }).toList();
+    return _sortBySignal ? sortedScanDevicesBySignal(filtered) : filtered;
   }
 
   @override
@@ -270,11 +288,14 @@ class _ScanPageState extends ConsumerState<ScanPage>
                       itemBuilder: (context, index) {
                         final device = devices[index];
                         return DeviceTile(
+                          key: ValueKey(device.deviceId),
                           deviceId: device.deviceId,
                           name: device.name,
                           rssi: device.rssi,
                           connectable: device.connectable,
                           debug: device.debug,
+                          actionLabel:
+                              widget.onDeviceSelected == null ? '连接' : '选择',
                           isConnecting: _connectingId == device.deviceId,
                           onConnect: _connectingId == null
                               ? () => _onConnect(device)
@@ -395,6 +416,20 @@ class _ScanPageState extends ConsumerState<ScanPage>
               selected: _onlyConnectable,
               onSelected: (sel) => setState(() => _onlyConnectable = sel),
             ),
+            if (widget.defaultOnlyNamed)
+              _filterChip(
+                cs,
+                label: '仅有名称',
+                selected: _onlyNamed,
+                onSelected: (sel) => setState(() => _onlyNamed = sel),
+              ),
+            if (widget.defaultSortBySignal)
+              _filterChip(
+                cs,
+                label: '信号强度排序',
+                selected: _sortBySignal,
+                onSelected: (sel) => setState(() => _sortBySignal = sel),
+              ),
           ],
         ),
       ),
