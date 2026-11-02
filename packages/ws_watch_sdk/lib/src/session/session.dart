@@ -34,6 +34,7 @@ class WSSession {
   Timer? _replyTimer;
   Future<void>? _disposing;
   int _requestId = 0;
+  Object? _historyOwner;
   Stream<WSDeviceReport> get reports => _reports.stream;
   bool get isClosed => _failure != null || link.isClosed;
 
@@ -101,14 +102,48 @@ class WSSession {
         }
       });
 
+  Object acquireHistory() {
+    if (isClosed) throw const WSSessionInvalidatedException('session closed');
+    if (_historyOwner != null) throw const WSSyncInProgressException();
+    return _historyOwner = Object();
+  }
+
+  void releaseHistory(Object owner) {
+    if (identical(_historyOwner, owner)) _historyOwner = null;
+  }
+
+  Future<void> sendHistory(WSCommand<void> command, Object owner,
+          {void Function()? onSending}) =>
+      _enqueue(() async {
+        if (!identical(_historyOwner, owner) || isClosed) {
+          throw const WSSessionInvalidatedException('history ownership ended');
+        }
+        onSending?.call();
+        await _sendNow(command, null);
+      });
+  void _checkRawHistory(WSProtocolAddress address) {
+    if (_historyOwner != null &&
+        address.cmd == 5 &&
+        address.version == 1 &&
+        (address.key <= 0x5f || address.key == 0x80)) {
+      throw const WSSyncInProgressException();
+    }
+  }
+
   Future<Uint8List?> sendRaw(
       {required WSProtocolAddress address,
       required Uint8List data,
       WSReplyAddress? replyAddress,
       Duration? replyTimeout}) {
+    try {
+      _checkRawHistory(address);
+    } catch (error, stack) {
+      return Future.error(error, stack);
+    }
     // Snapshot mutable caller data before the request waits in the queue.
     final copy = Uint8List.fromList(data);
     return _enqueue<Uint8List?>(() async {
+      _checkRawHistory(address);
       registry.checkSend(address, raw: true);
       replyAddress?.validate();
       if (replyAddress != null &&

@@ -4,6 +4,7 @@ import 'package:ws_watch_sdk/ws_watch_sdk.dart';
 import 'm2_simulation_lab_page.dart';
 import 'm3_connection_page.dart';
 import 'm4_settings_page.dart';
+import 'm5_history_page.dart';
 
 /// 嵌入宿主 App 使用的入口页面，例如 HoneyBox。
 ///
@@ -108,9 +109,29 @@ class _WSWatchDemoHomeState extends State<WSWatchDemoHome> {
                         logLevel: widget.config.logLevel,
                         autoReconnect: widget.config.autoReconnect)))),
           )),
+          Card(
+              child: ListTile(
+                  leading: const Icon(Icons.history),
+                  title: const Text('M5 历史数据'),
+                  subtitle: const Text('活动桶 · 心率 · 同步进度 · SQLite 查询与删除'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                          builder: (_) => M5HistoryPage(
+                              config: WSConfig(
+                                  simulationEnabled: true,
+                                  databasePath: widget.config.databasePath,
+                                  phoneSystem: widget.config.phoneSystem,
+                                  link: widget.config.link,
+                                  session: widget.config.session,
+                                  sync: widget.config.sync,
+                                  connectTimeouts:
+                                      widget.config.connectTimeouts,
+                                  logger: widget.config.logger,
+                                  logLevel: widget.config.logLevel)))))),
           const SizedBox(height: 8),
           Text(
-            'M2 实验室、M3 连接及 M4 设置可独立验收；完整调试工具在 M6。',
+            'M2 实验室、M3 连接、M4 设置及 M5 历史数据可独立验收；完整调试工具在 M6。',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),

@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../connection/user_id.dart';
+import 'history_store.dart';
 import '../db/database.dart';
 import '../model/device_info.dart';
 import '../capability/capabilities.dart';
@@ -16,9 +17,10 @@ abstract interface class WSDeviceStore {
 }
 
 /// Connections are shared by normalized absolute path, with explicit ownership.
-class WSDriftDeviceStore implements WSDeviceStore {
+class WSDriftDeviceStore with WSDriftHistoryStore implements WSDeviceStore {
   WSDriftDeviceStore(this.database, {Future<void> Function()? release})
       : _release = release;
+  @override
   final WSDatabase database;
   final Future<void> Function()? _release;
   Future<void>? _closing;

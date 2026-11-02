@@ -154,3 +154,41 @@ flutter test integration_test/simulator_connection_test.dart -d macos
 ```
 
 该用例使用默认环境、原生 SQLite 和持久化路径，覆盖连接到 ready、设置读写和重连。
+
+
+### M5：历史数据与本地存储
+
+```dart
+await watch.connect(kWsWatchSimDeviceId); // config.simulationEnabled=true
+final sync = watch.data.sync(type: WSHistoryType.steps); // 或 heartRate
+final subscription = sync.progress.listen((p) {
+  print('${p.stage.name}: ${p.committed}/${p.announced}，新增 ${p.inserted}，重复 ${p.duplicates}');
+});
+final result = await sync.result;
+await subscription.cancel();
+// 取消时 await sync.cancel()；会断开本场连接并等待已开始的事务。
+await watch.disconnect();
+final query = WSRecordQuery(
+  deviceId: kWsWatchSimDeviceId,
+  userId: null, // 可指定用户；留空为该设备所有用户
+  from: WSWallClock(year: 2026, month: 10, day: 12),
+  to: WSWallClock(year: 2026, month: 10, day: 13), // 不包含
+  limit: 100,
+  descending: true,
+);
+final records = await watch.data.steps.query(query);
+final logs = await watch.data.syncLogs(deviceId: kWsWatchSimDeviceId);
+// 显式调用才删除；同一过滤条件（含排序、limit）也适用于 delete。
+// final deleted = await watch.data.steps.delete(query);
+```
+
+- M5 仅开放 `steps` / `heartRate` 单类型历史同步；同一 Session 只能一场，同步控制 Raw 请求受互斥保护，设置请求仍可执行。
+- `completed` 要求声明数、实收数、结束总数一致，事务提交且 `0x42` ACK 成功；确认写出后 ACK 丢失为 `confirmationUnknown`，不自动重试确认。取消、空闲超时（默认 30 秒）、缓冲溢出（默认 1 MiB，原始 L2 操作数据加 5B 头）、协议/数据库错误返回 `incomplete`，保留已提交记录，不确认。
+- 同步结果通过 `result` 表达；未就绪、重复同步、配置参数错误在调用入口报错。`progress` 为广播流，返回 session 后异步启动，立即订阅可收到首事件。
+- 默认 SQLite 持久化；首次连接或本地查询时打开。无需连接即可 query/delete/syncLogs；`deviceId` 必填，时间范围 `[from,to)`，limit=0 匹配零条。
+- 活动桶不是日累计：步数、距离（米）、热量（0.1 kcal）、均心与 flags 分别保留；无效测量为空。时间为设备墙上时钟，使用 `WSWallClock`，不转换时区。未知模式与原始记录尾部扩展保留。
+- 唯一键为设备 + 用户 + 时间；重复记录的最新有效测量覆盖旧值，无效值不覆盖已有有效值。raw/flags/mode 为最新收到值，可能与合并后的测量字段不同。
+- schema v1 → v2 自动新增记录/日志表和索引，保留旧设备身份；快照与迁移测试在 `test/drift_schemas/`、`test/m5_storage_test.dart`。
+- 确认前保存临时审计日志，确认后更新；若最终日志更新失败，返回 incomplete/storageFailed 并保留已实际取得的 confirmation=acked，设备可能已完成标记。
+
+M5 安装验收：HoneyBox → WS Watch → **M5 历史数据** → 连接 Simulator → 开始单类型同步。默认每种两条数据，日期为 **2026-10-12**。首次新增 2，第二次新增 0 / 重复 2；可切换心率、断开查询、退出重进或重启 App 查询、按用户与时间过滤并删除。已安装过数据时首次也可能显示重复。M3 ready 后也能进入共享连接的 M5 页面；返回只释放本页订阅和未完成同步，连接由 M3 管理。

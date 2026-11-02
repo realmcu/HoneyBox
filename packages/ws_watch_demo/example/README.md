@@ -24,3 +24,8 @@ flutter test
 # 在 Mac 上运行的集成测试；真机用例需要手表在附近
 flutter test integration_test -d macos
 ```
+
+
+M5 验收入口：主页「M5 历史数据」，支持活动桶/心率单类型同步、进度与确认状态、取消、断开后的 SQLite 查询、过滤删除和同步日志。模拟记录时间为 2026-10-12；先同步两次检查新增/重复，再断开、退出重进或重启检查持久化。仍使用内存设备传输，真实 BLE 在 M7。
+
+原生持久化集成测试：`flutter test integration_test/simulator_connection_test.dart -d macos`，覆盖默认数据库连接、同步、重复去重、断开查询和关闭实例后重新查询。

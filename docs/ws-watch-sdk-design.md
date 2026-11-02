@@ -746,6 +746,7 @@ class WSData {
 
   WSRecordQueryApi<WSStepRecord> get steps;
   WSRecordQueryApi<WSHeartRateRecord> get heartRate;
+  Future<List<WSSyncLog>> syncLogs({required String deviceId, String? userId, int limit = 20});
 }
 
 class WSSyncSession {
@@ -857,7 +858,7 @@ sequenceDiagram
 - `tzOffsetMinutes`：同步时手机的时区偏移，仅为同步环境元数据；不代表历史记录发生时的偏移，无法据此可靠还原跨时区或夏令时的绝对时间。
 - 对外统一使用 `WSWallClock`（年、月、日、时、分、秒），避免 `DateTime` 隐式时区带来的问题。
 
-### 11.4 表结构（schemaVersion 1）
+### 11.4 表结构（schemaVersion 2）
 
 `devices`：
 
@@ -940,6 +941,9 @@ sequenceDiagram
 
 - 每次表结构变更都提升 `schemaVersion`，并在 `MigrationStrategy` 里写明迁移步骤。
 - 每个版本保留 drift 的 schema 快照，用测试校验从任意旧版本都能迁移到最新版本。
+- M3/M4 使用 v1，仅有 `devices`。M5 升级到 v2，新增 `step_records`、`heart_rate_records`、`sync_logs` 及对应索引，不重建 `devices`；保留默认用户 ID、设备信息和能力原文。快照位于 SDK 的 `test/drift_schemas/`。
+- 重复记录逐字段保留最新有效测量值；`raw`、mode、flags、同步时间等元数据保留最近收到的记录。因此有效测量值可能来自先前记录，`raw` 不保证可独立重建合并后的全部字段。
+- 确认前先持久化临时日志（incomplete / awaiting confirmation），再发送 `0x42`，最后更新日志。若 ACK 已成功但最终日志更新失败，result 为 incomplete / storageFailed，同时保留 confirmation=acked，表示设备已确认、日志收尾失败；临时日志保留用于排查。
 
 ---
 
@@ -1138,7 +1142,7 @@ HoneyBox 现有的 JW 代码保留不动，新 SDK 不复制、不依赖其中�
 | M2 可靠传输与会话基础 | Transport、L1 Link、L2/地址模型、Session 最小队列、内部模拟器、调试门面 | 已实现；规范向量、Link/Session 与模拟故障测试通过，内部 WSPreparedSimulation 可执行 typed/Raw 收发；正式扫描/认证入口仍为 M3 |
 | M3 连接闭环 | 登录/绑定/初始化、状态机、能力三态、模拟扫描显式启用 | 已实现；Demo 可连接 Simulator 到 ready，设备信息/能力及默认身份入库；绑定等待、断开取消、旧 generation 隔离与自动重连有回归测试 |
 | M4 设置闭环 | 时间、语言、整体显示格式和便利方法 | 已实现；规范向量、Simulator 读写/通知、失败不写与断开隔离通过；便利方法独占 Session 队列，Demo 可安装验收 |
-| M5 同步闭环 | 先活动单类型入库，再心率；drift 与存储句柄管理 | Demo 发起单类型同步并查询，重复同步不增重复记录；失败不确认，确认未知可识别 |
+| M5 同步闭环 | 活动桶 / 心率单类型同步；drift v2 迁移、查询删除、同步日志 | 已实现；Demo 支持同步进度、取消、断开查询和范围删除；重复同步去重、失败不确认、确认未知均有测试。安装后按验收步骤自测 |
 | M6 Demo 联调工具 | 帧日志、Raw、协议表、设备上报、独立 example | 脱离 HoneyBox 运行；仅用 Simulator 完成完整操作脚本；无对 SDK 内部 Link/Transport 的依赖 |
 | M7 真机与发布准备 | flutter_blue_plus、固件 UART、平台权限/依赖验收 | 相同业务用例真机通过；验证固件重传去重/断链清理和实际 Payload 上限 |
 

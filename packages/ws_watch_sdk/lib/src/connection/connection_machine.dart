@@ -12,6 +12,7 @@ import '../protocol/core_registry.dart';
 import '../session/session.dart';
 import '../simulation/sim_watch_session.dart';
 import '../storage/device_store.dart';
+import '../storage/history_store.dart';
 import 'connection_state.dart';
 import 'environment.dart';
 import 'user_id.dart';
@@ -49,6 +50,19 @@ class WSConnectionMachine {
       throw WSNotReadyException(state);
     }
     return session;
+  }
+
+  Future<WSHistoryStore> historyStore() async {
+    if (_disposed) throw const WSDisposedException();
+    final store = await _loadStore();
+    if (store is! WSHistoryStore) {
+      throw const WSStorageException('history storage is unavailable');
+    }
+    return store as WSHistoryStore;
+  }
+
+  Future<void> disconnectSession(WSSession session) async {
+    if (identical(_current?.session, session)) await disconnect();
   }
 
   Future<void> connect(String id, {String? userId}) {

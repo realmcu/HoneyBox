@@ -11,6 +11,13 @@ import 'sim_watch_session.dart';
 /// Physical state outlives a transport connection, just as on a real watch.
 class SimWatchState {
   String? boundUserId;
+  // Internal fault controls; repeated snapshots exercise durable deduplication.
+  bool emptyHistory = false, suppressHistoryEnd = false;
+  int historyResultCode = 0, historyCountAdjustment = 0;
+  Duration historyDelay = const Duration(milliseconds: 120);
+  int historyConfirmations = 0;
+  List<int>? historyBatchOverride;
+
   int? bindResult =
       0; // null: no confirmation, 1: timeout, 2: reject (test-only controls).
   Duration confirmationDelay = const Duration(milliseconds: 300);
@@ -40,6 +47,10 @@ class SimWatchDevice {
         for (final message
             in WSMessage.decode(payload.bytes, WSWireDirection.phoneToDevice)) {
           final a = message.address;
+          if (a.version == 1 && a.cmd == 5) {
+            unawaited(_history(message).catchError((Object _) {}));
+            continue;
+          }
           if (a.version == 0 && a.cmd == 3) {
             unawaited(_authentication(message).catchError((Object _) {}));
             continue;
@@ -90,6 +101,97 @@ class SimWatchDevice {
     _timers.add(timer);
     await done.future;
   }
+
+  bool _historyBusy = false;
+  Future<void> _history(WSMessage message) async {
+    final key = message.address.key;
+    if (message.data.isNotEmpty) return;
+    if (key == 0x42) {
+      state.historyConfirmations++;
+      return;
+    }
+    if (key != 1 && key != 3) return;
+    if (_historyBusy) {
+      await _sendHistory(0x41, [2, 0, 0, 0, 0]);
+      return;
+    }
+    _historyBusy = true;
+    try {
+      await _delay(state.historyDelay);
+      if (_disposed || link.isClosed) return;
+      if (state.historyResultCode != 0) {
+        await _sendHistory(0x41, [state.historyResultCode, 0, 0, 0, 0]);
+        return;
+      }
+      final count = state.emptyHistory ? 0 : 2;
+      await _sendHistory(0x40, count == 0 ? [] : [key, 0, count]);
+      if (count > 0) {
+        await _delay(state.historyDelay);
+        if (_disposed || link.isClosed) return;
+        // Independent examples from HoneyProtocol 0x05-data.rst.
+        final batch = key == 1
+            ? [
+                18,
+                0,
+                2,
+                0x6a,
+                0xcc,
+                0x9a,
+                0x88,
+                4,
+                0xb0,
+                3,
+                0x52,
+                1,
+                0xc8,
+                98,
+                15,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0x6a,
+                0xcc,
+                0x9e,
+                0x0c,
+                1,
+                0x2c,
+                0,
+                0xd2,
+                0,
+                0x70,
+                0,
+                15,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            : [5, 0, 2, 0x6a, 0xcc, 0x9a, 0x88, 72, 0x6a, 0xcc, 0x9a, 0xc4, 75];
+        await _sendHistory(key + 0x20, state.historyBatchOverride ?? batch);
+      }
+      if (state.suppressHistoryEnd || _disposed || link.isClosed) return;
+      final end = ByteData(5)
+        ..setUint8(0, 0)
+        ..setUint32(1, count + state.historyCountAdjustment);
+      await _sendHistory(0x41, end.buffer.asUint8List());
+    } finally {
+      _historyBusy = false;
+    }
+  }
+
+  Future<void> _sendHistory(int key, List<int> data) => link.send(WSMessage(
+          WSProtocolAddress(
+              cmd: 5,
+              version: 1,
+              key: key,
+              direction: WSWireDirection.deviceToPhone),
+          data)
+      .encode());
 
   Future<void> _authentication(WSMessage message) async {
     final key = message.address.key;

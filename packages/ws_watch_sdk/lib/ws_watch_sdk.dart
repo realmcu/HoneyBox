@@ -29,3 +29,13 @@ export 'src/model/setting_values.dart'
     show WSHourSystem, WSDateFormat, WSDistanceUnit, WSWeightUnit;
 export 'src/model/display_format.dart';
 export 'src/model/wall_clock.dart';
+
+export 'src/features/data.dart' show WSData;
+export 'src/model/history.dart'
+    show
+        WSRecordQuery,
+        WSRecordQueryApi,
+        WSHistoryRecord,
+        WSStepRecord,
+        WSHeartRateRecord;
+export 'src/model/sync.dart';

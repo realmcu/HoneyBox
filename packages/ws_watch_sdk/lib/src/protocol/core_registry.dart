@@ -3,6 +3,7 @@ import '../model/device_info.dart';
 import '../model/wall_clock.dart';
 import 'cmd_02_settings.dart';
 import 'cmd_03_bind.dart';
+import 'cmd_05_history.dart';
 import 'protocol.dart';
 import 'registry.dart';
 
@@ -56,6 +57,7 @@ abstract final class WSInitializationProtocol {
       ...language.entries,
       ...WSSettingsProtocol.m4Entries,
       ...WSBindProtocol.entries,
+      ...WSHistoryProtocol.entries,
       setSystemEntry,
       setTimeEntry,
       infoRequest,
@@ -66,6 +68,7 @@ abstract final class WSInitializationProtocol {
       capabilityNotify
     ], reports: [
       ...WSSettingsProtocol.m4Reports,
+      ...WSHistoryProtocol.reports,
       WSReport<int>(
           entry: WSSettingsProtocol.languageNotify,
           decodeData: WSSettingsProtocol.decodeLanguage),
