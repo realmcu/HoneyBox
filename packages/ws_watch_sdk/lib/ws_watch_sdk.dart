@@ -8,3 +8,10 @@ export 'src/errors.dart';
 export 'src/logger.dart';
 export 'src/version.dart';
 export 'src/watch.dart';
+
+export 'src/debug/debug_api.dart' show WSDebugApi, WSRawRequest, WSProtocolView;
+export 'src/debug/models.dart';
+export 'src/protocol/address.dart';
+export 'src/protocol/status.dart';
+
+export 'src/model/frame.dart';

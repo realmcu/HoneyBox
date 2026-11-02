@@ -5,13 +5,13 @@ enum WSConnectionState {
   /// 建立 BLE 连接。
   connecting,
 
-  /// 发现服务、订阅 FF03。
+  /// 发现服务、订阅 UART Notify。
   discovering,
 
   /// 登录 / 绑定。
   authenticating,
 
-  /// 等待用户在手表上确认绑定（3.07）。
+  /// 等待用户在手表上确认绑定（0x03 Key 0x02）。
   awaitingConfirm,
 
   /// 设置手机系统、对时、读功能列表、读设备信息。

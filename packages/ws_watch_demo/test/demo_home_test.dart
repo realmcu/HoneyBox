@@ -4,12 +4,13 @@ import 'package:ws_watch_demo/ws_watch_demo.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
 
 void main() {
-  testWidgets('home shows SDK version and disconnected state', (tester) async {
+  testWidgets('home shows SDK version and lab entry', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: WSWatchDemoHome()));
 
     expect(find.widgetWithText(AppBar, 'WS Watch'), findsOneWidget);
     expect(find.text(wsWatchSdkVersion), findsOneWidget);
     expect(find.text(WSConnectionState.disconnected.name), findsOneWidget);
+    expect(find.text('M2 模拟实验室'), findsOneWidget);
   });
 
   testWidgets('standalone app renders the home page', (tester) async {

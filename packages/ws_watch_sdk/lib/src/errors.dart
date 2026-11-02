@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'connection/connection_state.dart';
 
 sealed class WSException implements Exception {
@@ -22,7 +24,7 @@ class WSDroppedProtocolException extends WSException {
   const WSDroppedProtocolException(super.message);
 }
 
-enum WSTimeoutKind { ack, reply, connect, discover, confirm, syncIdle }
+enum WSTimeoutKind { write, ack, reply, connect, discover, confirm, syncIdle }
 
 class WSTimeoutException extends WSException {
   const WSTimeoutException(this.kind, super.message);
@@ -67,4 +69,19 @@ class WSSyncInProgressException extends WSException {
 class WSQueueFullException extends WSException {
   const WSQueueFullException(int capacity)
       : super('send queue is full (capacity: $capacity)');
+}
+
+class WSProtocolDecodeException extends WSException {
+  WSProtocolDecodeException(this.cmd, this.key, List<int> raw, super.message)
+      : raw = Uint8List.fromList(raw).asUnmodifiableView();
+  final int cmd, key;
+  final Uint8List raw;
+}
+
+class WSSessionInvalidatedException extends WSException {
+  const WSSessionInvalidatedException(super.message);
+}
+
+class WSDisposedException extends WSException {
+  const WSDisposedException() : super('object has been disposed');
 }

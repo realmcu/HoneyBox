@@ -6,9 +6,10 @@ class WSLinkConfig {
     this.ackTimeout = const Duration(seconds: 5),
     this.maxRetries = 3,
     this.chunkWriteTimeout = const Duration(seconds: 3),
-    this.replyTimeout = const Duration(seconds: 5),
     this.rxAssembleTimeout = const Duration(seconds: 5),
-    this.queueCapacity = 64,
+    this.maxPayloadLength = 65535,
+    this.deduplicationCapacity = 64,
+    this.deduplicationWindow = const Duration(seconds: 30),
   });
 
   /// 帧全部写出后等待 ACK 的时间。
@@ -20,14 +21,47 @@ class WSLinkConfig {
   /// 单个分片写入的超时。
   final Duration chunkWriteTimeout;
 
-  /// 查询类请求收到 ACK 后等待回包的时间，可按协议条目覆盖。
-  final Duration replyTimeout;
-
   /// 一帧跨多个通知时，两个通知之间的最长间隔。
   final Duration rxAssembleTimeout;
 
-  /// 发送队列上限，超过后新请求直接失败。
+  final int maxPayloadLength;
+  final int deduplicationCapacity;
+  final Duration deduplicationWindow;
+
+  void validate() {
+    if (ackTimeout <= Duration.zero ||
+        chunkWriteTimeout <= Duration.zero ||
+        rxAssembleTimeout <= Duration.zero ||
+        deduplicationWindow <= Duration.zero ||
+        maxRetries < 0 ||
+        maxPayloadLength < 0 ||
+        maxPayloadLength > 65535 ||
+        deduplicationCapacity <= 0) {
+      throw ArgumentError('invalid link configuration');
+    }
+  }
+}
+
+/// Session owns business request queueing and L2 reply deadlines.
+class WSSessionConfig {
+  const WSSessionConfig(
+      {this.replyTimeout = const Duration(seconds: 5),
+      this.queueCapacity = 64});
+  final Duration replyTimeout;
   final int queueCapacity;
+  void validate() {
+    if (replyTimeout <= Duration.zero || queueCapacity < 0) {
+      throw ArgumentError('invalid session configuration');
+    }
+  }
+}
+
+class WSSyncConfig {
+  const WSSyncConfig(
+      {this.syncIdleTimeout = const Duration(seconds: 30),
+      this.maxPendingBytes = 1024 * 1024});
+  final Duration syncIdleTimeout;
+  final int maxPendingBytes;
 }
 
 /// 连接流程各阶段的超时，默认值见设计文档 7.3 节。
@@ -41,13 +75,16 @@ class WSConnectTimeouts {
   final Duration connecting;
   final Duration discovering;
 
-  /// 等待用户在手表上确认绑定（3.07）。
+  /// 等待手表绑定确认（0x03 Key 0x02），见设计文档 §7。
   final Duration awaitingConfirm;
 }
 
 class WSConfig {
   const WSConfig({
     this.link = const WSLinkConfig(),
+    this.session = const WSSessionConfig(),
+    this.sync = const WSSyncConfig(),
+    this.simulationEnabled = false,
     this.connectTimeouts = const WSConnectTimeouts(),
     this.autoReconnect = false,
     this.databasePath,
@@ -56,6 +93,9 @@ class WSConfig {
   });
 
   final WSLinkConfig link;
+  final WSSessionConfig session;
+  final WSSyncConfig sync;
+  final bool simulationEnabled;
   final WSConnectTimeouts connectTimeouts;
 
   /// 非主动断开时按 2、4、8 秒……最长 60 秒退避重连。

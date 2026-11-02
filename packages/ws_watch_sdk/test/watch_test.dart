@@ -8,9 +8,9 @@ void main() {
       expect(link.ackTimeout, const Duration(seconds: 5));
       expect(link.maxRetries, 3);
       expect(link.chunkWriteTimeout, const Duration(seconds: 3));
-      expect(link.replyTimeout, const Duration(seconds: 5));
+      expect(const WSConfig().session.replyTimeout, const Duration(seconds: 5));
       expect(link.rxAssembleTimeout, const Duration(seconds: 5));
-      expect(link.queueCapacity, 64);
+      expect(const WSConfig().session.queueCapacity, 64);
     });
 
     test('connect timeouts follow the design doc', () {
@@ -48,10 +48,32 @@ void main() {
     });
   });
 
-  test('GATT UUIDs match the private protocol service', () {
-    expect(WSGattProfile.service, '000001ff-3c17-d293-8e48-14fe2e4da212');
-    expect(WSGattProfile.write, '0000ff02-0000-1000-8000-00805f9b34fb');
-    expect(WSGattProfile.notify, '0000ff03-0000-1000-8000-00805f9b34fb');
+  test('simulation lab opens language exchange on watch.debug', () async {
+    final watch = WSWatch(
+      config: const WSConfig(simulationEnabled: true),
+    );
+    await watch.openSimulationLab();
+    expect(watch.isSimulationLabOpen, isTrue);
+    await watch.labSetLanguage(9);
+    expect(await watch.labGetLanguage(), 9);
+    await watch.closeSimulationLab();
+    expect(watch.isSimulationLabOpen, isFalse);
+    await watch.dispose();
+  });
+
+  test('lab APIs fail when lab is closed', () async {
+    final watch = WSWatch(config: const WSConfig(simulationEnabled: true));
+    await expectLater(
+      watch.labGetLanguage(),
+      throwsA(isA<WSSessionInvalidatedException>()),
+    );
+    await watch.dispose();
+  });
+
+  test('GATT UUIDs match HoneyProtocol BLE UART Profile', () {
+    expect(WSGattProfile.service, '6e400001-b5a3-f393-e0a9-e50e24dcca9e');
+    expect(WSGattProfile.write, '6e400002-b5a3-f393-e0a9-e50e24dcca9e');
+    expect(WSGattProfile.notify, '6e400003-b5a3-f393-e0a9-e50e24dcca9e');
   });
 }
 

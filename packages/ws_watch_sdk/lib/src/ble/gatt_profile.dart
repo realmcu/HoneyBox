@@ -1,10 +1,10 @@
-/// 私有协议的 GATT 服务和特征值，与 Java v2 `BleManager` 一致。
+/// 私有协议 GATT：HoneyProtocol BLE UART Profile（见 ws-watch-sdk-design.md §4.1）。
 abstract final class WSGattProfile {
-  static const String service = '000001ff-3c17-d293-8e48-14fe2e4da212';
+  static const String service = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 
   /// App → 设备，带响应写。
-  static const String write = '0000ff02-0000-1000-8000-00805f9b34fb';
+  static const String write = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 
-  /// 设备 → App。
-  static const String notify = '0000ff03-0000-1000-8000-00805f9b34fb';
+  /// 设备 → App（Notify）。
+  static const String notify = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 }
