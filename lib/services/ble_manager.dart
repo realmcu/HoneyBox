@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart'
+    show debugPrint, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'android_ble_permissions.dart';
 
@@ -207,6 +208,9 @@ class BleManager {
   /// batches that arrive mid-teardown are dropped instead of mutating providers
   /// whose ScanPage widget is already being disposed (markNeedsBuild crash).
   bool _scanActive = false;
+  int _scanGeneration = 0;
+  Completer<BluetoothAdapterState?>? _adapterWait;
+  StreamSubscription<BluetoothAdapterState>? _adapterWaitSub;
 
   // --------------------------------------------------------------------------
   // Construction / disposal
@@ -246,6 +250,33 @@ class BleManager {
     return requestAndroidBlePermissions();
   }
 
+  Future<BluetoothAdapterState?> _waitForIosAdapter() async {
+    final wait = Completer<BluetoothAdapterState?>();
+    _adapterWait = wait;
+    _adapterWaitSub = FlutterBluePlus.adapterState.listen((state) {
+      if (state != BluetoothAdapterState.unknown &&
+          state != BluetoothAdapterState.turningOn &&
+          !wait.isCompleted) {
+        wait.complete(state);
+      }
+    }, onError: (Object error, StackTrace stack) {
+      if (!wait.isCompleted) wait.completeError(error, stack);
+    });
+    try {
+      return await wait.future;
+    } finally {
+      if (identical(_adapterWait, wait)) _cancelAdapterWait();
+    }
+  }
+
+  void _cancelAdapterWait() {
+    _adapterWaitSub?.cancel();
+    _adapterWaitSub = null;
+    final wait = _adapterWait;
+    _adapterWait = null;
+    if (wait != null && !wait.isCompleted) wait.complete(null);
+  }
+
   /// Start scanning for BLE devices. Each discovered device is reported via
   /// [onDeviceFound].
   Future<void> startScan(
@@ -254,15 +285,39 @@ class BleManager {
   }) async {
     if (_disposed) return;
     stopScan();
+    final generation = _scanGeneration;
 
     final allowed = await _ensureBlePermissions();
+    if (_disposed || generation != _scanGeneration) return;
     if (!allowed) {
-      _setState(BleState.disconnected);
+      // Report failed startup even if the manager was already disconnected.
+      if (_state == BleState.disconnected && !_disposed) {
+        _stateController.add(BleState.disconnected);
+      } else {
+        _setState(BleState.disconnected);
+      }
       return;
     }
 
     _setState(BleState.scanning);
     _scanActive = true;
+
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        final adapterState = await _waitForIosAdapter();
+        if (_disposed || generation != _scanGeneration) return;
+        if (adapterState != BluetoothAdapterState.on) {
+          stopScan();
+          return;
+        }
+      } catch (error) {
+        if (!_disposed && generation == _scanGeneration) {
+          debugPrint('BLE adapter initialization failed: $error');
+          stopScan();
+        }
+        return;
+      }
+    }
 
     _scanSub = FlutterBluePlus.onScanResults.listen(
       (results) {
@@ -293,15 +348,18 @@ class BleManager {
       if (Platform.isAndroid) {
         await FlutterBluePlus.startScan(
           withServices: serviceUuid == null ? const [] : [Guid(serviceUuid)],
+          oneByOne: true,
           androidScanMode: AndroidScanMode.lowLatency,
           androidUsesFineLocation: true,
         );
       } else {
         await FlutterBluePlus.startScan(
           withServices: serviceUuid == null ? const [] : [Guid(serviceUuid)],
+          oneByOne: true,
         );
       }
     } catch (e) {
+      if (_disposed || generation != _scanGeneration) return;
       stopScan();
       _setState(BleState.disconnected);
     }
@@ -309,6 +367,8 @@ class BleManager {
 
   /// Stop an ongoing scan.
   void stopScan() {
+    _scanGeneration++;
+    _cancelAdapterWait();
     _scanActive = false;
     _scanSub?.cancel();
     _scanSub = null;
@@ -843,6 +903,8 @@ class BleManager {
   }
 
   void _cleanup() {
+    _scanGeneration++;
+    _cancelAdapterWait();
     if (_jwDisconnectController != null && !_jwDisconnectController!.isClosed) {
       _jwDisconnectController!.add(null);
     }
