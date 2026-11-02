@@ -295,14 +295,16 @@ void main() {
     expect(find.textContaining(jwHealthFixtureMarker), findsOneWidget);
     await tester.runAsync(() async {
       await tester.tap(find.byKey(const Key('jw-health-entry')));
-      for (var i = 0; i < 100; i++) {
+      for (var i = 0; i < 250; i++) {
         await tester.pump(const Duration(milliseconds: 20));
         await Future<void>.delayed(const Duration(milliseconds: 20));
-        if (find.byType(LinearProgressIndicator).evaluate().isEmpty) break;
+        if (find.byType(JwHealthPage).evaluate().isNotEmpty &&
+            find.byType(LinearProgressIndicator).evaluate().isEmpty) break;
       }
     });
-    await tester.pumpAndSettle();
     expect(find.byType(JwHealthPage), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
         find.byKey(const Key('jw-health-sport-section')), 500);
     await tester.tap(find.text('运动记录 · 登山'));
