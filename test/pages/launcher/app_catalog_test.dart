@@ -4,12 +4,14 @@ import 'package:honeybox/pages/launcher/app_catalog.dart';
 
 void main() {
   group('kAppCatalog', () {
-    test('contains ebadge, watch, dashboard and capture in this order', () {
+    test('contains ebadge, watch, dashboard, capture and ota in this order',
+        () {
       expect(kAppCatalog.map((e) => e.id).toList(), [
         AppId.ebadge,
         AppId.watch,
         AppId.dashboard,
         AppId.capture,
+        AppId.ota,
       ]);
     });
 
@@ -22,10 +24,10 @@ void main() {
       }
     });
 
-    test('uses the product names eBadge, Watch, Dashboard and 数据采集', () {
+    test('uses the product names eBadge, Watch, Dashboard, 数据采集 and OTA', () {
       expect(
         kAppCatalog.map((e) => e.title).toList(),
-        ['eBadge', 'Watch', 'Dashboard', '数据采集'],
+        ['eBadge', 'Watch', 'Dashboard', '数据采集', 'OTA'],
       );
     });
 
@@ -39,6 +41,7 @@ void main() {
       expect(byId[AppId.watch], 'Watch');
       expect(byId[AppId.dashboard], 'Dashboard');
       expect(byId[AppId.capture], '*');
+      expect(byId[AppId.ota], '*');
     });
   });
 
@@ -48,6 +51,7 @@ void main() {
       expect(routeNameFor(AppId.watch), '/watch-root');
       expect(routeNameFor(AppId.dashboard), '/dashboard-root');
       expect(routeNameFor(AppId.capture), '/capture-root');
+      expect(routeNameFor(AppId.ota), '/ota-root');
     });
   });
 }

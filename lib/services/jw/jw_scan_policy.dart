@@ -18,7 +18,14 @@ abstract final class JwScanPolicy {
   static bool matches(
       {required String query,
       required bool isDefaultWatchFilter,
-      required ScanDevice device}) {
+      required ScanDevice device,
+      bool onlyNamed = false,
+      bool onlyConnectable = false}) {
+    final name = device.name.trim().toLowerCase();
+    if (onlyConnectable && !device.connectable) return false;
+    if (onlyNamed && (name.isEmpty || name == 'n/a' || name == '未知设备')) {
+      return false;
+    }
     final q = query.trim().toLowerCase();
     final hexQuery = q.replaceAll(RegExp(r'[:\-\s]'), '');
     final isFullHexSequence = RegExp(r'^[0-9a-f]{12}$').hasMatch(hexQuery);
