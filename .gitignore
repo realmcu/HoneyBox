@@ -54,8 +54,8 @@ build/
 !macos/Runner.xcworkspace/**
 xcuserdata/
 
-# Linux
-linux/
+# Linux generated build inputs
+/linux/flutter/ephemeral/
 
 # Web
 web/

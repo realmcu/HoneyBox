@@ -101,32 +101,8 @@ class JwTestConsoleController extends ChangeNotifier {
     if (!_live) return '连接不可用，请连接设备。';
     if (active != null || state.operationInProgress) return '已有操作正在执行，请等待。';
     if (op.write && state.phase != JwDevicePhase.loggedIn) return '需先完成协议登录。';
-    final t100Read = state.info?.firmware == 'T100' &&
-        state.info?.hardware == 'H001' &&
-        ([
-              'alarm-read',
-              'spo2-permission',
-              'sport-read',
-              'sport-query',
-              'sport-cache',
-              'health',
-              'wrist-read',
-              'disturb-read',
-              'heat-read',
-              'highHr-read'
-            ].contains(id) ||
-            (id.startsWith('config-') && id.endsWith('-read')));
-    if (!t100Read &&
-        ![
-          'battery',
-          'language-read',
-          'language-set',
-          'time',
-          'heart-stream-start',
-          'heart-stream-stop'
-        ].contains(id) &&
-        (state.info?.firmware != 'T005' || state.info?.hardware != 'H001')) {
-      return '仅支持明确的 V101 S200 T005/H001 合同。';
+    if (id == 'history-reset' && !repository.globalHistoryCursorResetAllowed) {
+      return '全局历史游标重置仅支持已验证的 T005/H001 目标。';
     }
     if (id == 'find-stop' && !_owned.contains('find')) {
       return '没有本会话启动的 IAS 提醒。';

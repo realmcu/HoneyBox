@@ -279,16 +279,12 @@ class JwDeviceRepository {
     }
   }
 
-  void _requireReadContract(JwConfigurationContract contract,
-      {bool allowT100 = false}) {
+  void _requireReadContract(JwConfigurationContract contract) {
     if (contract != JwConfigurationContract.v101S200 ||
-        (state.info?.firmware != 'T005' &&
-            !(allowT100 && state.info?.firmware == 'T100')) ||
-        state.info?.hardware != 'H001' ||
         state.capabilities == null) {
       throw JwConfigurationException(
           stage: 'unsupported',
-          cause: 'requires explicit V101 S200 T005/H001 contract');
+          cause: 'requires explicit JW protocol contract and capabilities');
     }
   }
 
@@ -324,14 +320,14 @@ class JwDeviceRepository {
       await session.request(_remainingRequest(2, 3, responseKey: 4)), 2, 4));
   Future<JwAlarmTable> readAlarm({required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireReadContract(contract, allowT100: true);
+        _requireReadContract(contract);
         _requireReadCapability(state.capabilities!.legacyAlarm, 'alarm');
         return _readAlarm();
       });
   Future<JwSpO2PermissionReport> checkSpO2MeasureEnable(
           {required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireReadContract(contract, allowT100: true);
+        _requireReadContract(contract);
         _requireReadCapability(state.capabilities!.bloodOxygen, 'SpO2');
         return JwSpO2PermissionReport(_remainingReply(
             await session.request(
@@ -343,7 +339,7 @@ class JwDeviceRepository {
   Future<JwSupportedSportTypes> readSupportDeviceSport(
           {required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireReadContract(contract, allowT100: true);
+        _requireReadContract(contract);
         _requireReadCapability(state.capabilities!.exercise, 'sport support');
         _supportedUkSportTypes = null;
         final value = JwSupportedSportTypes(_remainingReply(
@@ -367,9 +363,8 @@ class JwDeviceRepository {
           5,
           0x5d,
           size: 3));
-  void _requireSport(JwConfigurationContract contract,
-      {bool allowT100 = false}) {
-    _requireReadContract(contract, allowT100: allowT100);
+  void _requireSport(JwConfigurationContract contract) {
+    _requireReadContract(contract);
     _requireReadCapability(
         state.capabilities!.exercise && state.capabilities!.sportControl,
         'sport control');
@@ -381,7 +376,7 @@ class JwDeviceRepository {
   Future<JwSportStatus> queryDeviceSportStatus(
           {required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireSport(contract, allowT100: true);
+        _requireSport(contract);
         return _sportRequest(0);
       });
 
@@ -836,7 +831,7 @@ class JwDeviceRepository {
   Future<JwHealthStatus> readHealthStatus(
           {required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireReadContract(contract, allowT100: true);
+        _requireReadContract(contract);
         _requireReadCapability(
             state.capabilities?.healthStatus == true, 'health status');
         return _readHealthStatus();
@@ -844,7 +839,7 @@ class JwDeviceRepository {
   Future<JwTurnOverWristStatus> readTurnOverWrist(
           {required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireReadContract(contract, allowT100: true);
+        _requireReadContract(contract);
         _requireReadCapability(
             state.capabilities?.turnOverWrist == true, 'wrist');
         return JwProtocol.turnOverWrist(
@@ -853,14 +848,14 @@ class JwDeviceRepository {
   Future<JwDisturbStatus> readDisturb(
           {required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireReadContract(contract, allowT100: true);
+        _requireReadContract(contract);
         _requireReadCapability(state.capabilities?.disturb == true, 'DND');
         return JwProtocol.disturb(await session.request(JwCommands.disturb()));
       });
   Future<JwHeatStressReminderStatus> queryHeatStressReminder(
           {required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireReadContract(contract, allowT100: true);
+        _requireReadContract(contract);
         _requireReadCapability(
             state.capabilities?.heatStressReminder == true, 'heat window');
         return JwProtocol.heatStressReminder(
@@ -869,7 +864,7 @@ class JwDeviceRepository {
   Future<JwHeartRateReminderDiagnostic> readHeartRateReminderDiagnostic(
           {required JwConfigurationContract contract}) =>
       _readOnlyOperation(() async {
-        _requireReadContract(contract, allowT100: true);
+        _requireReadContract(contract);
         _requireReadCapability(
             state.capabilities?.highHeartRateReminder == true,
             'high HR diagnostic');
@@ -892,18 +887,13 @@ class JwDeviceRepository {
       }, write: true);
 
   void _requireConfiguration(
-      JwConfigurationContract contract, JwConfigurationDomain? domain,
-      {bool allowT100 = false}) {
-    final info = state.info, c = state.capabilities;
-    if (contract != JwConfigurationContract.v101S200 ||
-        (info?.firmware != 'T005' &&
-            !(allowT100 && info?.firmware == 'T100')) ||
-        info?.hardware != 'H001' ||
-        c == null) {
+      JwConfigurationContract contract, JwConfigurationDomain? domain) {
+    final c = state.capabilities;
+    if (contract != JwConfigurationContract.v101S200 || c == null) {
       throw JwConfigurationException(
           domain: domain,
           stage: 'unsupported',
-          cause: 'requires explicit V101 S200 T005/H001 contract');
+          cause: 'requires explicit JW protocol contract and capabilities');
     }
     final supported = domain == null
         ? c.healthStatus
@@ -998,7 +988,7 @@ class JwDeviceRepository {
   Future<JwConfigurationValue> readConfiguration(JwConfigurationDomain domain,
           {required JwConfigurationContract contract}) =>
       _configurationOperation(domain, () async {
-        _requireConfiguration(contract, domain, allowT100: true);
+        _requireConfiguration(contract, domain);
         return _readConfiguration(domain);
       });
   Future<JwConfigurationSnapshot> readConfigurationSnapshot(
@@ -1180,6 +1170,11 @@ class JwDeviceRepository {
       applicationAckTransportDelivered: false,
       countValidation: 'notStarted');
 
+  /// Only [resetHistoryCursor] is pinned to the verified T005/H001 target.
+  /// Config, control, reminders, alarms, and other reads are not.
+  bool get globalHistoryCursorResetAllowed =>
+      state.info?.firmware == 'T005' && state.info?.hardware == 'H001';
+
   /// Rewinds retained device history cursors together. Transport ACK does not
   /// prove firmware application; synchronize again to observe replay. Local
   /// history journals remain intact and continue deduplicating record IDs.
@@ -1187,6 +1182,14 @@ class JwDeviceRepository {
           {required JwConfigurationContract contract}) =>
       _remainingOperation(() async {
         _requireReadContract(contract);
+        // This global cursor mutation has only been verified on this target.
+        // Keep its restriction separate from routine reads, settings and sync.
+        if (!globalHistoryCursorResetAllowed) {
+          throw JwConfigurationException(
+              stage: 'unsupported',
+              cause:
+                  'global history cursor reset requires verified T005/H001 target');
+        }
         final c = state.capabilities!;
         _requireReadCapability(
             c.steps ||
