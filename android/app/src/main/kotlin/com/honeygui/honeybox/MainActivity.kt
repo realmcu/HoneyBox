@@ -60,6 +60,7 @@ class MainActivity : FlutterActivity() {
         NotificationListener.registerChannels(flutterEngine, applicationContext)
 
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        RealtekOtaBridge(this, messenger)
         val exporter = CaptureFileExporter(this)
         captureExporter = exporter
         MethodChannel(messenger, "honeybox/capture-export").setMethodCallHandler(exporter::handle)
