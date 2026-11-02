@@ -226,7 +226,7 @@ final jwConsoleOperations = <JwConsoleOperation>[
     ('setWeather', 6),
   ])
     JwConsoleOperation('unsupported-${item.$1}', item.$1, item.$2,
-        blocked: '当前 V101 S200 T005/H001 合同不支持，无法执行。'),
+        blocked: '当前协议合同未实现此项，无法执行。'),
 ];
 JwConsoleOperation jwConsoleOperation(String id) =>
     jwConsoleOperations.firstWhere((o) => o.id == id);
