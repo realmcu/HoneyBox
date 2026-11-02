@@ -59,11 +59,14 @@ void main() {
     expect(repo.state.configuration, isEmpty);
   });
   test(
-      'writes require exact contract login and per-operation capability including healthStatus bit17',
+      'routine reads do not require T005 firmware; history cursor reset still does',
       () async {
     await create(firmware: 'UNKNOWN');
+    final value = await read(JwConfigurationDomain.hourSystem);
+    expect(value.domain, JwConfigurationDomain.hourSystem);
+    expect(script.sets, isEmpty);
     await expectLater(
-        read(JwConfigurationDomain.hourSystem),
+        repo.resetHistoryCursor(contract: contract),
         throwsA(isA<JwConfigurationException>()
             .having((e) => e.stage, 'stage', 'unsupported')));
     expect(script.sets, isEmpty);
