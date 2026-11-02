@@ -36,7 +36,6 @@ android/mapfeature/src/main/cpp/libjpeg-turbo/fuzz/
 android/mapfeature/src/main/cpp/libjpeg-turbo/test/
 
 # iOS
-ios/
 *.hmap
 *.ipa
 *.dSYM.zip
@@ -47,12 +46,16 @@ DerivedData/
 build/
 
 # macOS
-macos/
+/macos/Flutter/ephemeral/
 *.xcworkspace
+!ios/Runner.xcworkspace/
+!ios/Runner.xcworkspace/**
+!macos/Runner.xcworkspace/
+!macos/Runner.xcworkspace/**
 xcuserdata/
 
-# Linux
-linux/
+# Linux generated build inputs
+/linux/flutter/ephemeral/
 
 # Web
 web/
