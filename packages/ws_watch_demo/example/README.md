@@ -11,7 +11,9 @@ flutter run -d macos
 
 Android Studio：新建 Flutter 运行配置，Dart entrypoint 选 `packages/ws_watch_demo/example/lib/main.dart`，设备选 macOS。
 
-首次运行时系统会请求蓝牙权限，需要允许。
+Simulator 连接及 M4 设置验收无需蓝牙权限。扫描真实蓝牙广播时，需允许系统蓝牙权限。
+
+M4：从首页进入“M4 设置”，连接 Simulator 后验收时间、语言与显示格式；也可从 M3 已连接页面进入复用会话。
 
 ## 测试
 

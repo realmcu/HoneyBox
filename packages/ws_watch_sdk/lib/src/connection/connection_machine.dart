@@ -40,6 +40,17 @@ class WSConnectionMachine {
   (String, String?)? _desired;
   int _retries = 0, _targetEpoch = 0;
 
+  WSSession requireReadySession() {
+    if (_disposed) throw const WSDisposedException();
+    final session = _current?.session;
+    if (state != WSConnectionState.ready ||
+        session == null ||
+        session.isClosed) {
+      throw WSNotReadyException(state);
+    }
+    return session;
+  }
+
   Future<void> connect(String id, {String? userId}) {
     if (_disposed) return Future.error(const WSDisposedException());
     if (id.isEmpty) {
@@ -118,6 +129,7 @@ class WSConnectionMachine {
               attempt.ready &&
               !attempt.cancelled);
       attempt.debugAttached = true;
+      attempt.pendingOperation = 'preparing transport';
       await _phase(attempt, managed.connection.prepare(),
           config.connectTimeouts.discovering, WSTimeoutKind.discover);
       _check(attempt);
@@ -233,8 +245,10 @@ class WSConnectionMachine {
 
   Future<void> _open(_Attempt attempt, String? suppliedId) async {
     try {
+      attempt.pendingOperation = 'opening device store';
       final store = await _loadStore();
       _check(attempt);
+      attempt.pendingOperation = 'loading persisted user identity';
       final id = suppliedId ?? await store.defaultUserId(attempt.id);
       _check(attempt);
       userId = id;
@@ -243,6 +257,7 @@ class WSConnectionMachine {
     } catch (error) {
       throw WSStorageException('cannot load user identity: $error');
     }
+    attempt.pendingOperation = 'opening transport';
     final transport = await environment.openTransport(attempt.id, config);
     if (!_valid(attempt)) {
       await transport.close();
@@ -280,8 +295,8 @@ class WSConnectionMachine {
     final expired = Completer<T>();
     final timer = Timer(
         duration,
-        () => expired
-            .completeError(WSTimeoutException(kind, '$kind stage timed out')));
+        () => expired.completeError(WSTimeoutException(
+            kind, '$kind stage timed out while ${attempt.pendingOperation}')));
     try {
       return await _cancelable(attempt, Future.any([work, expired.future]));
     } finally {
@@ -408,6 +423,7 @@ class _Attempt {
   final String id;
   bool ready = false, cancelled = false, debugAttached = false;
   final cancellation = Completer<Object>();
+  String pendingOperation = 'opening device store';
   WSManagedTransport? transport;
   WSSession? session;
   Future<void>? cleanup;

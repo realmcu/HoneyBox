@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'config.dart';
+import 'features/settings.dart';
+import 'model/feature.dart';
 import 'connection/connection_state.dart';
 import 'connection/connection_machine.dart';
 import 'connection/environment.dart';
@@ -16,7 +18,7 @@ import 'simulation/simulation_runtime.dart';
 
 /// SDK 入口。每台设备一个实例。
 ///
-/// 提供 M3 扫描、认证与初始化；[openSimulationLab] 保留为独立的 M2 实验入口。
+/// 提供 M3 扫描、认证与初始化及 M4 [settings]；[openSimulationLab] 保留为独立的 M2 实验入口。
 class WSWatch {
   WSWatch({this.config = const WSConfig()})
       : logger = config.logger ?? WSDebugPrintLogger(minLevel: config.logLevel);
@@ -25,6 +27,17 @@ class WSWatch {
   final WSConnectionEnvironment _environment = WSConnectionEnvironment.current;
   late final WSConnectionMachine _machine =
       WSConnectionMachine(config, _debug, _environment);
+  late final WSSettingsController _settings = WSSettingsController(
+      requireSession: () {
+        if (_disposed) throw const WSDisposedException();
+        return _machine.requireReadySession();
+      },
+      support: (feature) =>
+          capabilities?.supportOf(feature) ?? WSFeatureSupport.unknown,
+      now: _environment.now,
+      states: stateChanges);
+  WSSettings get settings => _settings;
+
   static WSScanner scanner({WSConfig config = const WSConfig()}) =>
       WSScanner(config: config);
   WSDeviceInfo? get deviceInfo => _machine.deviceInfo;
@@ -135,8 +148,9 @@ class WSWatch {
 
   Future<void> _dispose() async {
     _disposed = true;
-    await closeSimulationLab();
     await _machine.dispose();
+    await _settings.dispose();
+    await closeSimulationLab();
     await _debug.dispose();
   }
 }

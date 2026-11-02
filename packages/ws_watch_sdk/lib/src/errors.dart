@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'connection/connection_state.dart';
+import 'model/feature.dart';
 
 sealed class WSException implements Exception {
   const WSException(this.message);
@@ -93,4 +94,10 @@ class WSDisposedException extends WSException {
 
 class WSStorageException extends WSException {
   const WSStorageException(super.message);
+}
+
+class WSUnsupportedException extends WSException {
+  const WSUnsupportedException(this.feature)
+      : super('device explicitly reports this feature unsupported');
+  final WSFeature feature;
 }

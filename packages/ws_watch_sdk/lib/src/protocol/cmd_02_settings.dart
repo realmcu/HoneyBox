@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import '../model/display_format.dart';
+import '../model/wall_clock.dart';
 import 'address.dart';
 import 'protocol.dart';
 import 'registry.dart';
@@ -41,6 +43,34 @@ abstract final class WSSettingsProtocol {
       reply: languageReply,
       encodeData: (_) => Uint8List(0),
       decodeData: decodeLanguage);
+  static final setDisplayEntry = entry(4, 0, 'setDisplayFormat');
+  static final getDisplayEntry = entry(4, 1, 'getDisplayFormat');
+  static final displayReply = entry(4, 2, 'displayFormatReply');
+  static final displayNotify = entry(4, 3, 'displayFormatNotify');
+  static final timeEntry = entry(1, 0, 'setTime');
+  static final timeNotify = entry(1, 3, 'timeNotify');
+  static final setTime =
+      WSCommand<WSWallClock>(request: timeEntry, encodeData: (v) => v.encode());
+  static final setDisplayFormat = WSCommand<WSDisplayFormat>(
+      request: setDisplayEntry, encodeData: (v) => v.raw);
+  static final getDisplayFormat = WSQuery<void, WSDisplayFormat>(
+      request: getDisplayEntry,
+      reply: displayReply,
+      encodeData: (_) => Uint8List(0),
+      decodeData: WSDisplayFormat.fromBytes);
+  static final m4Entries = [
+    setDisplayEntry,
+    getDisplayEntry,
+    displayReply,
+    displayNotify,
+    timeNotify
+  ];
+  static final m4Reports = <WSReport<Object>>[
+    WSReport<WSDisplayFormat>(
+        entry: displayNotify, decodeData: WSDisplayFormat.fromBytes),
+    WSReport<WSWallClock>(entry: timeNotify, decodeData: WSWallClock.fromBytes),
+  ];
+
   static WSProtocolRegistry registry() => WSProtocolRegistry([
         setLanguageEntry,
         getLanguageEntry,

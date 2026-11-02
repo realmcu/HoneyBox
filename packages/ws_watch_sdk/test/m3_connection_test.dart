@@ -267,9 +267,61 @@ void main() {
     await scanner.dispose();
   });
 
+  test(
+      'stalled native identity load reports storage step and never opens transport',
+      () async {
+    await watch.dispose();
+    final identity = Completer<String>();
+    final blocked = _BlockedIdentityStore(store, identity.future);
+    watch = runZoned(
+        () => WSWatch(
+            config: const WSConfig(
+                simulationEnabled: true,
+                connectTimeouts:
+                    WSConnectTimeouts(connecting: Duration(milliseconds: 20)))),
+        zoneValues: {
+          wsEnvironmentZoneKey: WSConnectionEnvironment(
+              openStore: (_) async => blocked,
+              openTransport: (_, c) async {
+                final transport =
+                    await WSConnectionEnvironment.openSimulator(c, device);
+                transports.add(transport);
+                return transport;
+              }),
+        });
+    await expectLater(
+        watch.connect(kWsWatchSimDeviceId),
+        throwsA(isA<WSConnectException>()
+            .having((e) => e.stage, 'stage', WSConnectionState.connecting)
+            .having((e) => e.reason, 'reason', WSConnectFailure.timeout)
+            .having((e) => e.message, 'pending step',
+                contains('loading persisted user identity'))));
+    expect(transports, isEmpty);
+    identity.complete('late-identity');
+    await Future<void>.delayed(Duration.zero);
+    expect(transports, isEmpty);
+  });
+
   test('user id rejects invalid wire values', () {
     for (final value in ['', '中', 'a\u0000b', 'a' * 33]) {
       expect(() => WSUserId(value), throwsArgumentError);
     }
   });
+}
+
+class _BlockedIdentityStore implements WSDeviceStore {
+  _BlockedIdentityStore(this.delegate, this.identity);
+  final WSDeviceStore delegate;
+  final Future<String> identity;
+  @override
+  Future<String> defaultUserId(String deviceId) => identity;
+  @override
+  Future<void> rememberUserId(String deviceId, String userId) =>
+      delegate.rememberUserId(deviceId, userId);
+  @override
+  Future<void> saveReady(String deviceId, String userId, WSDeviceInfo info,
+          WSCapabilities capabilities) =>
+      delegate.saveReady(deviceId, userId, info, capabilities);
+  @override
+  Future<void> close() => delegate.close();
 }

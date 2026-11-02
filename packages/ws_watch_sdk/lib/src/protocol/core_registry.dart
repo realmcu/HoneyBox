@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import '../model/device_info.dart';
+import '../model/wall_clock.dart';
 import 'cmd_02_settings.dart';
 import 'cmd_03_bind.dart';
 import 'protocol.dart';
@@ -8,7 +9,7 @@ import 'registry.dart';
 abstract final class WSInitializationProtocol {
   static final setSystemEntry =
       WSSettingsProtocol.entry(2, 0, 'setPhoneSystem');
-  static final setTimeEntry = WSSettingsProtocol.entry(1, 0, 'setTime');
+  static final setTimeEntry = WSSettingsProtocol.timeEntry;
   static final system = WSCommand<int>(
       request: setSystemEntry,
       encodeData: (v) {
@@ -20,12 +21,7 @@ abstract final class WSInitializationProtocol {
   static final time = WSCommand<DateTime>(
       request: setTimeEntry,
       encodeData: (time) {
-        final wall = DateTime.utc(time.year, time.month, time.day, time.hour,
-            time.minute, time.second);
-        final seconds = wall.millisecondsSinceEpoch ~/ 1000;
-        RangeError.checkValueInInterval(
-            seconds, 0, 0xffffffff, 'wallClockSeconds');
-        return (ByteData(4)..setUint32(0, seconds)).buffer.asUint8List();
+        return WSWallClock.fromCalendar(time).encode();
       });
   static final infoRequest = WSSettingsProtocol.entry(0x30, 1, 'getDeviceInfo');
   static final infoReply = WSSettingsProtocol.entry(0x30, 2, 'deviceInfoReply');
@@ -58,6 +54,7 @@ abstract final class WSInitializationProtocol {
     final language = WSSettingsProtocol.registry();
     return WSProtocolRegistry([
       ...language.entries,
+      ...WSSettingsProtocol.m4Entries,
       ...WSBindProtocol.entries,
       setSystemEntry,
       setTimeEntry,
@@ -68,6 +65,7 @@ abstract final class WSInitializationProtocol {
       capabilityReply,
       capabilityNotify
     ], reports: [
+      ...WSSettingsProtocol.m4Reports,
       WSReport<int>(
           entry: WSSettingsProtocol.languageNotify,
           decodeData: WSSettingsProtocol.decodeLanguage),

@@ -49,31 +49,56 @@ class WSSession {
   }
 
   Future<void> send<T>(WSCommand<T> command, T value) =>
-      _enqueue<void>(() async {
-        registry.checkSend(command.request.address);
-        await link.send(
-            WSMessage(command.request.address, command.encodeData(value))
-                .encode(),
-            maxRetries: command.maxRetries ?? command.request.maxRetries,
-            requestId: _active!.id,
-            traceId: _active!.traceId);
-      });
+      _enqueue<void>(() => _sendNow(command, value));
+
+  Future<void> _sendNow<T>(WSCommand<T> command, T value) async {
+    if (isClosed) {
+      throw _failure ?? const WSDisconnectedException('session closed');
+    }
+    registry.checkSend(command.request.address);
+    await link.send(
+        WSMessage(command.request.address, command.encodeData(value)).encode(),
+        maxRetries: command.maxRetries ?? command.request.maxRetries,
+        requestId: _active!.id,
+        traceId: _active!.traceId);
+  }
+
   Future<R> query<T, R>(WSQuery<T, R> query, T value,
           {void Function()? onAcknowledged}) =>
-      _enqueue<R>(() async {
-        registry.checkSend(query.request.address);
-        if (query.reply.address.direction != WSWireDirection.deviceToPhone ||
-            registry.lookup(query.reply.address)?.status !=
-                WSProtocolStatus.active) {
-          throw ArgumentError('invalid reply registration');
+      _enqueue<R>(
+          () => _queryNow(query, value, onAcknowledged: onAcknowledged));
+
+  Future<R> _queryNow<T, R>(WSQuery<T, R> query, T value,
+      {void Function()? onAcknowledged}) async {
+    if (isClosed) {
+      throw _failure ?? const WSDisconnectedException('session closed');
+    }
+    registry.checkSend(query.request.address);
+    if (query.reply.address.direction != WSWireDirection.deviceToPhone ||
+        registry.lookup(query.reply.address)?.status !=
+            WSProtocolStatus.active) {
+      throw ArgumentError('invalid reply registration');
+    }
+    return await _exchange(
+        WSMessage(query.request.address, query.encodeData(value)),
+        query.reply.address,
+        (data) => query.decodeData(data),
+        query.replyTimeout ?? config.replyTimeout,
+        query.request.maxRetries,
+        onAcknowledged: onAcknowledged) as R;
+  }
+
+  /// A compound operation occupies one queue slot, including every read/write.
+  /// Raw and ordinary typed requests cannot interleave with this operation.
+  Future<T> transaction<T>(
+          Future<T> Function(WSSessionTransaction tx) action) =>
+      _enqueue<T>(() async {
+        final tx = WSSessionTransaction._(this, _active!);
+        try {
+          return await action(tx);
+        } finally {
+          tx._closed = true;
         }
-        return await _exchange(
-            WSMessage(query.request.address, query.encodeData(value)),
-            query.reply.address,
-            (data) => query.decodeData(data),
-            query.replyTimeout ?? config.replyTimeout,
-            query.request.maxRetries,
-            onAcknowledged: onAcknowledged) as R;
       });
 
   Future<Uint8List?> sendRaw(
@@ -291,4 +316,30 @@ class _Outcome {
   _Outcome.error(this.error, [this.stack]) : value = null;
   final Object? value, error;
   final StackTrace? stack;
+}
+
+/// Internal scoped executor. Do not retain it beyond the transaction callback.
+class WSSessionTransaction {
+  WSSessionTransaction._(this._session, this._request);
+  final WSSession _session;
+  final _Request _request;
+  bool _closed = false;
+  void _check() {
+    if (_closed ||
+        _session.isClosed ||
+        !identical(_session._active, _request)) {
+      throw const WSSessionInvalidatedException(
+          'transaction is no longer active');
+    }
+  }
+
+  Future<void> send<T>(WSCommand<T> command, T value) async {
+    _check();
+    await _session._sendNow(command, value);
+  }
+
+  Future<R> query<T, R>(WSQuery<T, R> query, T value) async {
+    _check();
+    return _session._queryNow(query, value);
+  }
 }

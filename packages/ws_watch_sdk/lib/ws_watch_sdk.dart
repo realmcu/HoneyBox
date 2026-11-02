@@ -22,3 +22,10 @@ export 'src/model/feature.dart';
 export 'src/model/device_info.dart';
 export 'src/connection/user_id.dart';
 export 'src/simulation/sim_watch_session.dart' show kWsWatchSimDeviceId;
+
+export 'src/features/settings.dart' show WSSettings, WSSettingsSnapshot;
+export 'src/model/language.dart';
+export 'src/model/setting_values.dart'
+    show WSHourSystem, WSDateFormat, WSDistanceUnit, WSWeightUnit;
+export 'src/model/display_format.dart';
+export 'src/model/wall_clock.dart';

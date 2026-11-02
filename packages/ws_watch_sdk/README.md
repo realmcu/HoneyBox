@@ -3,7 +3,7 @@
 WS 手表 BLE UART 协议的 Flutter SDK。协议依据 HoneyProtocol，工程约定见
 [设计文档](../../docs/ws-watch-sdk-design.md)。
 
-## 当前范围：M3
+## 当前范围：M4
 
 已实现内部字节传输接口、内存双向模拟传输、L1 帧与 CRC-16/ARC、分片组包、
 ACK/ERR ACK 与重传、接收去重、L2 TLV 与设置操作码、完整地址注册表、串行 Session、
@@ -35,7 +35,7 @@ await scanner.dispose();
 真实 BLE UART 连接和手表验收属于 M7。Simulator 模拟 300ms 后自动确认绑定，绑定状态
 保留在当前进程；退出应用后模拟设备重置，但 SQLite 默认 ID 保留。
 桌面模拟默认使用 Android 手机系统值；桌面真机系统编码须另行约定，可配置 `phoneSystem`。
-`debug` 在初始化时可观察帧，Raw 仅在 ready 后开放。设置业务 API 在 M4 提供。
+`debug` 在初始化时可观察帧，Raw 仅在 ready 后开放。M4 已通过 `watch.settings` 提供正式设置 API。
 
 ## 分层
 
@@ -98,3 +98,59 @@ Version 1 同步报文格式。L1 使用独立固定帧与 CRC 标准校验值�
 
 无需蓝牙权限即可完成上述流程。M2 模拟实验室继续独立保留。
 自动回归：`flutter test test/m3_connection_test.dart test/m3_storage_test.dart`。
+
+## M4 设置 API 与安装验收
+
+连接到 `ready` 后使用：
+
+```dart
+await watch.settings.setTime(); // 手机本地年月日时分秒；不是绝对 UTC 时间
+await watch.settings.setLanguage(WSLanguage.english);
+final language = await watch.settings.getLanguage();
+final current = await watch.settings.getDisplayFormat();
+await watch.settings.setDisplayFormat(current.copyWith(
+  hourSystem: WSHourSystem.twelveHour,
+  dateFormat: WSDateFormat.dayMonth,
+));
+await Future.wait([
+  watch.settings.setHourSystem(WSHourSystem.twentyFourHour),
+  watch.settings.setDistanceUnit(WSDistanceUnit.imperial),
+]);
+final confirmed = await watch.settings.getDisplayFormat();
+```
+
+- `WSWallClock` 严格校验日历与无符号 32 位范围；`fromCalendar(DateTime)` 明确复制年月日时分秒，不换算时区。时间只写和通知，没有读时间接口。
+- 语言覆盖规范附表 `00～66`；保留/未知值保留原始编码。时制、日期、距离、体重也用带 `code` 的值对象，`.isKnown` 区分已定义编码。
+- 显示格式固定 4B。便利 setter 在 Session 队列中独占整个“读取 → 修改 → 写入”，整体写入和 Raw 也不会插入其中。读取失败不写，不用默认值补齐。
+- 与手表端同时修改时仍以重新读取为准；协议没有条件更新版本号。
+- `settings.observed` / `settings.changes` 只反映设备读取或通知结果，不把 ACK 当成实际生效；断开清空观测值，dispose 关闭流。
+- 非 ready 调用立即失败；请求绑定当前会话，断开/释放后不跨连接继续执行。能力 `unknown` 允许尝试，明确 `unsupported` 抛 `WSUnsupportedException`。
+
+安装后可从 Demo 首页进入 **M4 设置**，连接 Simulator；也可在 M3 ready 后进入 **M4 设置** 复用同一会话。
+
+1. 读写语言，再读取验证；查看语言通知与收发帧。
+2. 输入 `2026-10-10 16:52:00`，写入后查看时间通知，4B 为 `6a ca 6d 30`；输入无效日期应报错。
+3. 设置日期格式与体重单位，写入完整格式再读取，核对 4B。
+4. 修改表单时制，点击“仅改时制”，再读取，确认其他三项保留；距离单位同理。
+5. 修改时制与距离表单，点击“并发修改时制与距离”，核对修改结果及日期、体重保留。
+6. 断开后设置按钮禁用、观测值清空；重连后可继续读写。
+
+SDK 回归：`flutter test test/m4_models_test.dart test/m4_settings_test.dart`。
+Demo 回归：在 `packages/ws_watch_demo` 下运行 `flutter test test/m4_settings_page_test.dart`。
+
+## 连接阶段超时排查
+
+`connecting` 包含打开 SQLite、加载持久化用户 ID 和准备传输；错误文字会指出当前步骤。
+本次 Android 现场出现数据库工作 isolate 处于 `PauseStart`，VM 的
+`pause_isolates_on_start=true`，主 isolate 正常运行，导致数据库握手一直等待，最终连接超时。
+这类情况需在调试器继续执行 Drift 工作 isolate，并取消当前调试会话的新 isolate 启动暂停；
+仅重新安装 Debug APK 未必改变当前进程的调试状态。应用重新启动后需检查调试启动配置。
+
+真实默认存储与 Simulator 的平台集成回归（macOS）：
+
+```sh
+cd packages/ws_watch_demo/example
+flutter test integration_test/simulator_connection_test.dart -d macos
+```
+
+该用例使用默认环境、原生 SQLite 和持久化路径，覆盖连接到 ready、设置读写和重连。

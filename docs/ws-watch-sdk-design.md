@@ -1,6 +1,6 @@
 # WS Watch SDK 与 Demo 设计文档
 
-> 状态：以 HoneyProtocol 为准，本文描述 SDK/Demo 工程与实现约定；2026-11-02 架构评审修订，新增接口为实现目标，M3 模拟扫描、登录/绑定/初始化、连接状态机与设备持久化已实现；真实 BLE UART 连接在 M7 验收
+> 状态：以 HoneyProtocol 为准，本文描述 SDK/Demo 工程与实现约定；2026-11-02 架构评审修订，新增接口为实现目标，M4 时间/语言/显示格式设置与 Demo 已实现，M3 连接与设备持久化继续保留；真实 BLE UART 连接在 M7 验收
 > 范围：WS 手表 BLE SDK 的 Flutter 实现（`ws_watch_sdk`）及其 Demo（`ws_watch_demo`），在 HoneyBox 的 `packages/` 内开发；包边界清晰，将来可整体迁出
 > 协议依据：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/)（仓库 `realmcu/HoneyProtocol`，下文简称**协议规范**）。条目引用格式：`0xNN` Command + Key（设置类另含**操作码**，见 `0x02-settings.rst`）
 > 参考实现：Java SDK v2、HoneyBox JW 模块（`lib/services/jw/`）**仅作对照**，WS SDK 不依赖 JW 代码；JW 仍走 Realtek FF 服务，WS SDK 走协议规范的 **BLE UART Profile**（固件切换前用内置模拟设备联调）
@@ -724,6 +724,8 @@ class WSSettings {
 
   WSFeatureSupport get languageSupport;
   WSFeatureSupport get displayFormatSupport;
+  WSSettingsSnapshot get observed;       // 仅设备读取/通知值，断开后清空
+  Stream<WSSettingsSnapshot> get changes; // dispose 时关闭
 }
 ```
 
@@ -731,7 +733,7 @@ class WSSettings {
 - 单字段 setter 是便利方法，内部串行执行“读取完整值 → 替换一个字段 → 写入完整值”，整个过程作为同一业务临界区，多个 setter 与整体设置不能互相覆盖。读取失败则不写，不能用默认值补齐其他字段。
 - 设备通知更新观察值，但临界区无法保证与手表端同时修改的原子性；当前协议没有用于条件更新的版本号，最终以重新读取为准。Demo 提供整体设置页，清楚展示本次完整写入值。
 - 写操作 Future 成功只表示 L1 ACK；需要确认生效时主动读取支持读取的设置。时间只写与通知，不提供不存在的读时间接口。
-- `WSLanguage` 与规范语言编码一致，未知编码保留原值。DateTime 转 WSWallClock 时必须显式选择本地年月日时分秒；不把墙上时钟当作绝对 UTC 时刻。
+- `WSLanguage` 覆盖规范 `00～66`，`67～FF` 保留；语言、时制、日期、距离、体重使用带 `code / isKnown` 的值对象，未知编码完整保留。DateTime 转 WSWallClock 时必须显式选择本地年月日时分秒；不把墙上时钟当作绝对 UTC 时刻。
 
 ### 9.3 data（第一阶段）
 
@@ -1135,7 +1137,7 @@ HoneyBox 现有的 JW 代码保留不动，新 SDK 不复制、不依赖其中�
 | M1 工程骨架 | packages + HoneyBox 入口 + CI | 已有骨架；后续实现按本次修订同步配置和内部目录 |
 | M2 可靠传输与会话基础 | Transport、L1 Link、L2/地址模型、Session 最小队列、内部模拟器、调试门面 | 已实现；规范向量、Link/Session 与模拟故障测试通过，内部 WSPreparedSimulation 可执行 typed/Raw 收发；正式扫描/认证入口仍为 M3 |
 | M3 连接闭环 | 登录/绑定/初始化、状态机、能力三态、模拟扫描显式启用 | 已实现；Demo 可连接 Simulator 到 ready，设备信息/能力及默认身份入库；绑定等待、断开取消、旧 generation 隔离与自动重连有回归测试 |
-| M4 设置闭环 | 时间、语言、整体显示格式和便利方法 | 规范向量一致；Simulator 读写及通知路由通过，无字段覆盖问题 |
+| M4 设置闭环 | 时间、语言、整体显示格式和便利方法 | 已实现；规范向量、Simulator 读写/通知、失败不写与断开隔离通过；便利方法独占 Session 队列，Demo 可安装验收 |
 | M5 同步闭环 | 先活动单类型入库，再心率；drift 与存储句柄管理 | Demo 发起单类型同步并查询，重复同步不增重复记录；失败不确认，确认未知可识别 |
 | M6 Demo 联调工具 | 帧日志、Raw、协议表、设备上报、独立 example | 脱离 HoneyBox 运行；仅用 Simulator 完成完整操作脚本；无对 SDK 内部 Link/Transport 的依赖 |
 | M7 真机与发布准备 | flutter_blue_plus、固件 UART、平台权限/依赖验收 | 相同业务用例真机通过；验证固件重传去重/断链清理和实际 Payload 上限 |

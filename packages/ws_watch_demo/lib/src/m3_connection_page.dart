@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
+import 'm4_settings_page.dart';
 
 /// Uses the public M3 API. No SDK internals or HoneyBox services are imported.
 class M3ConnectionPage extends StatefulWidget {
@@ -154,6 +155,12 @@ class _M3ConnectionPageState extends State<M3ConnectionPage> {
                     }
                   : null,
               child: const Text('断开 / 取消连接')),
+          FilledButton(
+              onPressed: ready && !_busy
+                  ? () => Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => M4SettingsPage(watch: _watch)))
+                  : null,
+              child: const Text('M4 设置')),
           OutlinedButton(
               onPressed:
                   ready && !_busy ? () => _run('解绑', _watch.unbind) : null,

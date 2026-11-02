@@ -17,6 +17,13 @@ class SimWatchState {
   int? failInitializationKey;
   int? phoneSystem;
   Uint8List? timeBytes;
+  int language = 1;
+  Uint8List displayFormat = Uint8List(4);
+  bool emitSettingsNotifications = true;
+  bool suppressDisplayReplies = false;
+  Duration displayReplyDelay = Duration.zero;
+  Uint8List? displayReplyOverride;
+  Uint8List? notifyBeforeDisplayReply;
 }
 
 /// Simulator supports M2 lab exchange and the M3 authentication handshake.
@@ -37,6 +44,10 @@ class SimWatchDevice {
             unawaited(_authentication(message).catchError((Object _) {}));
             continue;
           }
+          if (a.cmd == 2 && a.version == 0 && a.key == 4) {
+            unawaited(_displaySettings(message).catchError((Object _) {}));
+            continue;
+          }
           if (a.cmd == 2 && a.version == 0 && a.key != 3) {
             unawaited(_initialize(message).catchError((Object _) {}));
             continue;
@@ -44,7 +55,9 @@ class SimWatchDevice {
           if (a.cmd != 2 || a.version != 0 || a.key != 3) continue;
           if (a.settingOpcode == 0 && message.data.length == 1) {
             language = message.data[0];
-            unawaited(notifyLanguage(language).catchError((Object _) {}));
+            if (this.state.emitSettingsNotifications) {
+              unawaited(notifyLanguage(language).catchError((Object _) {}));
+            }
           } else if (a.settingOpcode == 1 && message.data.isEmpty) {
             if (!suppressReplies) unawaited(_reply().catchError((Object _) {}));
           }
@@ -58,7 +71,8 @@ class SimWatchDevice {
   final SimWatchSession transport;
   final WSLink link;
   late final StreamSubscription<WSReceivedPayload> _subscription;
-  int language = 1;
+  int get language => state.language;
+  set language(int value) => state.language = value;
   bool suppressReplies = false;
   Duration replyDelay = Duration.zero;
   final Set<Timer> _timers = {};
@@ -111,6 +125,9 @@ class SimWatchDevice {
       }
       if (a.key == 1 && message.data.length == 4) {
         state.timeBytes = message.data;
+        if (state.emitSettingsNotifications) {
+          await _sendSetting(1, 3, message.data);
+        }
       }
       return;
     }
@@ -152,6 +169,40 @@ class SimWatchDevice {
             data)
         .encode());
   }
+
+  Future<void> _displaySettings(WSMessage message) async {
+    final a = message.address;
+    if (a.settingOpcode == 0 && message.data.length == 4) {
+      state.displayFormat = Uint8List.fromList(message.data);
+      if (state.emitSettingsNotifications) {
+        await notifyDisplayFormat(state.displayFormat);
+      }
+    } else if (a.settingOpcode == 1 && message.data.isEmpty) {
+      if (state.suppressDisplayReplies) return;
+      if (state.notifyBeforeDisplayReply != null) {
+        await notifyDisplayFormat(state.notifyBeforeDisplayReply!);
+      }
+      if (state.displayReplyDelay > Duration.zero) {
+        await _delay(state.displayReplyDelay);
+      }
+      if (_disposed || link.isClosed) return;
+      await _sendSetting(
+          4, 2, state.displayReplyOverride ?? state.displayFormat);
+    }
+  }
+
+  Future<void> notifyDisplayFormat(List<int> value) =>
+      _sendSetting(4, 3, value);
+  Future<void> _sendSetting(int key, int opcode, List<int> data) =>
+      link.send(WSMessage(
+              WSProtocolAddress(
+                  cmd: 2,
+                  version: 0,
+                  key: key,
+                  settingOpcode: opcode,
+                  direction: WSWireDirection.deviceToPhone),
+              data)
+          .encode());
 
   Future<void> _reply() async {
     if (replyDelay > Duration.zero) {
