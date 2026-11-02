@@ -2,6 +2,7 @@
 .dart_tool/
 .packages
 build/
+/build/media-core-*/
 .flutter-plugins
 .flutter-plugins-dependencies
 **/doc/api/
@@ -17,23 +18,7 @@ local.properties
 *.aab
 *.dex
 *.ap_
-*.keystore
-*.jks
 .gradle/
-
-# NDK/CMake 外部构建的中间产物，由 externalNativeBuild 重新生成。
-.cxx/
-# mapfeature 通过 fileTree 依赖高德 SDK 的本地 jar，必须绕过上面的 *.jar 规则。
-!android/mapfeature/libs/*.jar
-
-# 内嵌的 libjpeg-turbo 只用于编译 navi_jpeg 静态库，构建已关闭
-# WITH_TESTS/WITH_JAVA/WITH_TOOLS/WITH_FUZZ，以下目录不参与编译。
-# 升级 SDK 时无需重新引入，避免仓库无谓膨胀。
-android/mapfeature/src/main/cpp/libjpeg-turbo/doc/
-android/mapfeature/src/main/cpp/libjpeg-turbo/testimages/
-android/mapfeature/src/main/cpp/libjpeg-turbo/jna/
-android/mapfeature/src/main/cpp/libjpeg-turbo/fuzz/
-android/mapfeature/src/main/cpp/libjpeg-turbo/test/
 
 # iOS
 ios/
@@ -66,7 +51,6 @@ web/
 *.swp
 *.swo
 *~
-.workbuddy/
 
 # Testing
 coverage/
@@ -77,11 +61,7 @@ coverage/
 /build_output*.txt
 /gh_*.json
 /gh_*.txt
-/analyze_*.txt
-/build_log.txt
-/build_out.txt
-# 本机一键构建脚本，内含开发者本地的 SDK 绝对路径。
-/build-release.cmd
+/.codex-build-tools.path
 
 # One-off local content migration scripts
 /tool/update_flutter_provider.py
@@ -93,6 +73,7 @@ coverage/
 /docs/superpowers/
 
 # Misc
+.worktrees/
 .DS_Store
 *.log
 *.key
@@ -100,13 +81,3 @@ coverage/
 .env
 .env.*
 refer/Android_OTA_SDK_v3.15.16.7z
-
-# 本地抓包与排查记录，不进版本库。
-logcat.md
-*_logcat.txt
-*_logcat_latest.txt
-
-# Local planning and generated validation records are not release sources.
-/docs/superpowers/
-/docs/plans/
-/output/
