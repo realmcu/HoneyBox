@@ -3,7 +3,7 @@
 WS 手表 BLE UART 协议的 Flutter SDK。协议依据 HoneyProtocol，工程约定见
 [设计文档](../../docs/ws-watch-sdk-design.md)。
 
-## 当前范围：M2
+## 当前范围：M3
 
 已实现内部字节传输接口、内存双向模拟传输、L1 帧与 CRC-16/ARC、分片组包、
 ACK/ERR ACK 与重传、接收去重、L2 TLV 与设置操作码、完整地址注册表、串行 Session、
@@ -12,9 +12,30 @@ ACK/ERR ACK 与重传、接收去重、L2 TLV 与设置操作码、完整地址�
 最小模拟设备实现语言读取、设置和主动通知，用于验证整个收发流程。语言暂以原始编码
 作为内部协议值，业务模型及稳定的 settings API 在后续里程碑提供。
 
-`WSWatch.debug` 已可获取，但普通 `WSWatch` 尚无已准备的会话，发送 Raw 会明确失败。
-正式扫描、connect、登录、绑定、ready 状态与调试会话挂接属于 M3；真机 BLE 实现属于 M7。
-不会把“传输已准备”伪装成“设备已登录并就绪”。
+M3 已提供 `WSWatch.scanner()`、`connect / disconnect / unbind`，完成登录、可选绑定确认、
+手机系统/对时/能力/设备信息初始化，全部完成并入库后进入 `ready`。
+`deviceInfo`、`capabilities` 在就绪后可读；未定义的功能位始终返回 `unknown`。
+默认用户 ID 在首次认证前写入 SQLite，同设备重连复用；显式 ID 为 1～32 字节非 NUL ASCII。
+默认数据库为应用支持目录的 `ws_watch.db`，可通过 `databasePath` 指定，同路径共享数据库引用。
+主动断开、解绑、释放会取消重连；`autoReconnect: true` 时非主动断开按 2/4/8/16/32/60 秒重连。
+
+```dart
+final config = WSConfig(simulationEnabled: true);
+final scanner = WSWatch.scanner(config: config);
+await scanner.start(includeRealDevices: false);
+final watch = WSWatch(config: config);
+await watch.connect(scanner.devices.single.deviceId);
+print(watch.deviceInfo?.firmwareVersion);
+await watch.unbind();
+await watch.dispose();
+await scanner.dispose();
+```
+
+扫描可选真实 BLE 广播，由宿主申请平台权限；M3 正式连接仅支持显式开启的 Simulator。
+真实 BLE UART 连接和手表验收属于 M7。Simulator 模拟 300ms 后自动确认绑定，绑定状态
+保留在当前进程；退出应用后模拟设备重置，但 SQLite 默认 ID 保留。
+桌面模拟默认使用 Android 手机系统值；桌面真机系统编码须另行约定，可配置 `phoneSystem`。
+`debug` 在初始化时可观察帧，Raw 仅在 ready 后开放。设置业务 API 在 M4 提供。
 
 ## 分层
 
@@ -63,3 +84,17 @@ Version 1 同步报文格式。L1 使用独立固定帧与 CRC 标准校验值�
 
 真机验收还需核实固件缓冲上限、重传去重、ACK 时序及断链清理旧任务；当前模拟测试
 不证明 Android/iOS/Windows BLE 平台兼容性。
+
+## 安装验收 M3
+
+在 HoneyBox 的 WS Watch Demo 首页进入 **M3 扫描与连接**：
+
+1. 保持真实蓝牙扫描关闭，点击“扫描设备”，出现 `WS Watch Simulator`。
+2. 用户 ID 留空，点击模拟设备，观察登录 → awaitingConfirm → initializing → ready。
+3. 检查固件 `1.2.3+100`、MAC `11:22:33:44:55:66`、序列号 `WS2026000001` 和 128 bit 能力原文。
+4. 点击“断开 / 取消连接”，再连接；当前进程再次登录应跳过绑定确认，用户 ID 不变。
+5. 点击“解绑”应断开，再连接会重新绑定。等待确认时也可点击取消，再连接验证清理。
+6. 关闭重开应用，再次连接检查默认 ID 不变（模拟器重新绑定是预期行为）。
+
+无需蓝牙权限即可完成上述流程。M2 模拟实验室继续独立保留。
+自动回归：`flutter test test/m3_connection_test.dart test/m3_storage_test.dart`。

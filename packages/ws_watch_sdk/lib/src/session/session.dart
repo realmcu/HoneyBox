@@ -58,7 +58,9 @@ class WSSession {
             requestId: _active!.id,
             traceId: _active!.traceId);
       });
-  Future<R> query<T, R>(WSQuery<T, R> query, T value) => _enqueue<R>(() async {
+  Future<R> query<T, R>(WSQuery<T, R> query, T value,
+          {void Function()? onAcknowledged}) =>
+      _enqueue<R>(() async {
         registry.checkSend(query.request.address);
         if (query.reply.address.direction != WSWireDirection.deviceToPhone ||
             registry.lookup(query.reply.address)?.status !=
@@ -70,7 +72,8 @@ class WSSession {
             query.reply.address,
             (data) => query.decodeData(data),
             query.replyTimeout ?? config.replyTimeout,
-            query.request.maxRetries) as R;
+            query.request.maxRetries,
+            onAcknowledged: onAcknowledged) as R;
       });
 
   Future<Uint8List?> sendRaw(
@@ -104,12 +107,9 @@ class WSSession {
     });
   }
 
-  Future<Object?> _exchange(
-      WSMessage message,
-      WSProtocolAddress address,
-      Object? Function(Uint8List) decode,
-      Duration timeout,
-      int? retries) async {
+  Future<Object?> _exchange(WSMessage message, WSProtocolAddress address,
+      Object? Function(Uint8List) decode, Duration timeout, int? retries,
+      {void Function()? onAcknowledged}) async {
     if (timeout <= Duration.zero) {
       throw ArgumentError('reply timeout must be positive');
     }
@@ -120,6 +120,7 @@ class WSSession {
           maxRetries: retries,
           requestId: _active!.id,
           traceId: _active!.traceId);
+      onAcknowledged?.call();
       if (!reply.done.isCompleted) {
         _replyTimer = Timer(timeout, () {
           if (!reply.done.isCompleted) {

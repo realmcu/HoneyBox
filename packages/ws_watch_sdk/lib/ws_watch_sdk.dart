@@ -15,3 +15,10 @@ export 'src/protocol/address.dart';
 export 'src/protocol/status.dart';
 
 export 'src/model/frame.dart';
+
+export 'src/scanner.dart';
+export 'src/capability/capabilities.dart';
+export 'src/model/feature.dart';
+export 'src/model/device_info.dart';
+export 'src/connection/user_id.dart';
+export 'src/simulation/sim_watch_session.dart' show kWsWatchSimDeviceId;

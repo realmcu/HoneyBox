@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import '../config.dart';
@@ -7,11 +8,23 @@ import '../protocol/address.dart';
 import '../protocol/message.dart';
 import 'sim_watch_session.dart';
 
-/// M2 device subset. Authentication and historical storage arrive in M3/M5.
+/// Physical state outlives a transport connection, just as on a real watch.
+class SimWatchState {
+  String? boundUserId;
+  int? bindResult =
+      0; // null: no confirmation, 1: timeout, 2: reject (test-only controls).
+  Duration confirmationDelay = const Duration(milliseconds: 300);
+  int? failInitializationKey;
+  int? phoneSystem;
+  Uint8List? timeBytes;
+}
+
+/// Simulator supports M2 lab exchange and the M3 authentication handshake.
 class SimWatchDevice {
   SimWatchDevice(this.transport,
-      {WSLinkConfig linkConfig = const WSLinkConfig()})
-      : link = WSLink(transport, config: linkConfig) {
+      {WSLinkConfig linkConfig = const WSLinkConfig(), SimWatchState? state})
+      : state = state ?? SimWatchState(),
+        link = WSLink(transport, config: linkConfig) {
     unawaited(link.terminated.then((_) {
       _cancelDelays();
     }));
@@ -20,6 +33,14 @@ class SimWatchDevice {
         for (final message
             in WSMessage.decode(payload.bytes, WSWireDirection.phoneToDevice)) {
           final a = message.address;
+          if (a.version == 0 && a.cmd == 3) {
+            unawaited(_authentication(message).catchError((Object _) {}));
+            continue;
+          }
+          if (a.cmd == 2 && a.version == 0 && a.key != 3) {
+            unawaited(_initialize(message).catchError((Object _) {}));
+            continue;
+          }
           if (a.cmd != 2 || a.version != 0 || a.key != 3) continue;
           if (a.settingOpcode == 0 && message.data.length == 1) {
             language = message.data[0];
@@ -33,6 +54,7 @@ class SimWatchDevice {
       }
     });
   }
+  final SimWatchState state;
   final SimWatchSession transport;
   final WSLink link;
   late final StreamSubscription<WSReceivedPayload> _subscription;
@@ -42,6 +64,95 @@ class SimWatchDevice {
   final Set<Timer> _timers = {};
   final Set<Completer<void>> _delays = {};
   bool _disposed = false;
+  Future<void> _delay(Duration duration) async {
+    final done = Completer<void>();
+    _delays.add(done);
+    late final Timer timer;
+    timer = Timer(duration, () {
+      _timers.remove(timer);
+      _delays.remove(done);
+      done.complete();
+    });
+    _timers.add(timer);
+    await done.future;
+  }
+
+  Future<void> _authentication(WSMessage message) async {
+    final key = message.address.key;
+    if (key == 5 && message.data.length == 1 && message.data[0] == 0) {
+      state.boundUserId = null;
+      return;
+    }
+    if ((key != 1 && key != 3) || message.data.length != 32) return;
+    final id = ascii.decode(message.data.takeWhile((b) => b != 0).toList());
+    var result = state.boundUserId == id ? 0 : 1;
+    if (key == 1) {
+      await _delay(state.confirmationDelay);
+      if (_disposed || link.isClosed || state.bindResult == null) return;
+      result = state.bindResult!;
+      if (result == 0) state.boundUserId = id;
+    }
+    if (_disposed || link.isClosed) return;
+    await link.send(WSMessage(
+        WSProtocolAddress(
+            cmd: 3,
+            version: 0,
+            key: key == 3 ? 4 : 2,
+            direction: WSWireDirection.deviceToPhone),
+        [result]).encode());
+  }
+
+  Future<void> _initialize(WSMessage message) async {
+    final a = message.address;
+    if (a.key == state.failInitializationKey) return;
+    if (a.settingOpcode == 0) {
+      if (a.key == 2 && message.data.length == 1) {
+        state.phoneSystem = message.data[0];
+      }
+      if (a.key == 1 && message.data.length == 4) {
+        state.timeBytes = message.data;
+      }
+      return;
+    }
+    if (a.settingOpcode != 1) return;
+    final List<int> data;
+    if (a.key == 0x31) {
+      data = List.filled(16, 0);
+    } else if (a.key == 0x30) {
+      data = [
+        0,
+        1,
+        1,
+        2,
+        3,
+        0,
+        100,
+        1,
+        1,
+        1,
+        0x11,
+        0x22,
+        0x33,
+        0x44,
+        0x55,
+        0x66,
+        12,
+        ...ascii.encode('WS2026000001')
+      ];
+    } else {
+      return;
+    }
+    await link.send(WSMessage(
+            WSProtocolAddress(
+                cmd: 2,
+                version: 0,
+                key: a.key,
+                settingOpcode: 2,
+                direction: WSWireDirection.deviceToPhone),
+            data)
+        .encode());
+  }
+
   Future<void> _reply() async {
     if (replyDelay > Duration.zero) {
       final done = Completer<void>();

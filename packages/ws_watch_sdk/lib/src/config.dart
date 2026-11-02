@@ -85,6 +85,7 @@ class WSConfig {
     this.session = const WSSessionConfig(),
     this.sync = const WSSyncConfig(),
     this.simulationEnabled = false,
+    this.phoneSystem,
     this.connectTimeouts = const WSConnectTimeouts(),
     this.autoReconnect = false,
     this.databasePath,
@@ -96,6 +97,9 @@ class WSConfig {
   final WSSessionConfig session;
   final WSSyncConfig sync;
   final bool simulationEnabled;
+
+  /// Wire value: iOS=1, Android=2. Desktop requires an explicit agreement.
+  final int? phoneSystem;
   final WSConnectTimeouts connectTimeouts;
 
   /// 非主动断开时按 2、4、8 秒……最长 60 秒退避重连。

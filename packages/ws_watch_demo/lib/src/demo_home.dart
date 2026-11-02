@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
 
 import 'm2_simulation_lab_page.dart';
+import 'm3_connection_page.dart';
 
 /// 嵌入宿主 App 使用的入口页面，例如 HoneyBox。
 ///
@@ -68,9 +69,28 @@ class _WSWatchDemoHomeState extends State<WSWatchDemoHome> {
               },
             ),
           ),
+          Card(
+              child: ListTile(
+            leading: const Icon(Icons.watch_outlined),
+            title: const Text('M3 扫描与连接'),
+            subtitle: const Text('Simulator · 登录/绑定 · 初始化 · ready'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (context) => M3ConnectionPage(
+                    config: WSConfig(
+                        simulationEnabled: true,
+                        autoReconnect: widget.config.autoReconnect,
+                        phoneSystem: widget.config.phoneSystem,
+                        databasePath: widget.config.databasePath,
+                        link: widget.config.link,
+                        session: widget.config.session,
+                        connectTimeouts: widget.config.connectTimeouts,
+                        logger: widget.config.logger,
+                        logLevel: widget.config.logLevel)))),
+          )),
           const SizedBox(height: 8),
           Text(
-            '扫描与正式连接将在 M3 加入；完整调试工具在 M6。',
+            'M2 实验室与 M3 连接验收可独立使用；完整调试工具在 M6。',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),

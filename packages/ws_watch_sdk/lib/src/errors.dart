@@ -44,6 +44,11 @@ class WSDisconnectedException extends WSException {
 
 enum WSConnectFailure {
   bluetoothUnavailable,
+  transportUnavailable,
+  cancelled,
+  alreadyConnected,
+  storageFailed,
+  protocolError,
   gattMissing,
   bindRejected,
   confirmRejected,
@@ -84,4 +89,8 @@ class WSSessionInvalidatedException extends WSException {
 
 class WSDisposedException extends WSException {
   const WSDisposedException() : super('object has been disposed');
+}
+
+class WSStorageException extends WSException {
+  const WSStorageException(super.message);
 }

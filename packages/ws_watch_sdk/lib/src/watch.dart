@@ -2,6 +2,11 @@ import 'dart:async';
 
 import 'config.dart';
 import 'connection/connection_state.dart';
+import 'connection/connection_machine.dart';
+import 'connection/environment.dart';
+import 'scanner.dart';
+import 'model/device_info.dart';
+import 'capability/capabilities.dart';
 import 'debug/debug_api.dart';
 import 'errors.dart';
 import 'logger.dart';
@@ -11,28 +16,47 @@ import 'simulation/simulation_runtime.dart';
 
 /// SDK 入口。每台设备一个实例。
 ///
-/// M2 已提供调试门面与 [openSimulationLab]；正式连接与认证在 M3 接入，见设计文档第 9 节。
+/// 提供 M3 扫描、认证与初始化；[openSimulationLab] 保留为独立的 M2 实验入口。
 class WSWatch {
   WSWatch({this.config = const WSConfig()})
       : logger = config.logger ?? WSDebugPrintLogger(minLevel: config.logLevel);
 
   final WSDebugController _debug = WSDebugController();
+  final WSConnectionEnvironment _environment = WSConnectionEnvironment.current;
+  late final WSConnectionMachine _machine =
+      WSConnectionMachine(config, _debug, _environment);
+  static WSScanner scanner({WSConfig config = const WSConfig()}) =>
+      WSScanner(config: config);
+  WSDeviceInfo? get deviceInfo => _machine.deviceInfo;
+  WSCapabilities? get capabilities => _machine.capabilities;
+  String? get userId => _machine.userId;
+  String? get deviceId => _machine.deviceId;
+  Future<void> connect(String deviceId, {String? userId}) async {
+    if (_disposed) throw const WSDisposedException();
+    if (_simulationRuntime != null || _openingLab || _closingLab != null) {
+      throw StateError('close the M2 laboratory before connecting');
+    }
+    await _machine.connect(deviceId, userId: userId);
+  }
+
+  Future<void> disconnect() => _machine.disconnect();
+  Future<void> unbind() => _machine.unbind();
 
   WSDebugApi get debug => _debug;
 
   final WSConfig config;
   final WSLogger logger;
 
-  final StreamController<WSConnectionChange> _stateChanges =
-      StreamController<WSConnectionChange>.broadcast();
-  final WSConnectionState _state = WSConnectionState.disconnected;
   bool _disposed = false;
   Future<void>? _disposing;
   WSSimulationRuntime? _simulationRuntime;
+  bool _openingLab = false;
+  int _labEpoch = 0;
+  Future<void>? _closingLab;
 
-  WSConnectionState get state => _state;
+  WSConnectionState get state => _machine.state;
 
-  Stream<WSConnectionChange> get stateChanges => _stateChanges.stream;
+  Stream<WSConnectionChange> get stateChanges => _machine.changes;
 
   bool get isDisposed => _disposed;
 
@@ -49,21 +73,38 @@ class WSWatch {
         'Set WSConfig.simulationEnabled to true before opening the simulation lab.',
       );
     }
-    if (_simulationRuntime != null) {
+    if (_simulationRuntime != null ||
+        _openingLab ||
+        _closingLab != null ||
+        state != WSConnectionState.disconnected) {
       throw StateError('Simulation lab is already open.');
     }
-    final runtime =
-        await WSSimulationRuntime.open(config: config, mtu: mtu);
-    _simulationRuntime = runtime;
-    _debug.attach(runtime.session, allowRaw: () => !runtime.session.isClosed);
+    _openingLab = true;
+    final epoch = ++_labEpoch;
+    try {
+      final runtime = await WSSimulationRuntime.open(config: config, mtu: mtu);
+      if (_disposed || epoch != _labEpoch) {
+        await runtime.dispose();
+        throw const WSDisposedException();
+      }
+      _simulationRuntime = runtime;
+      _debug.attach(runtime.session, allowRaw: () => !runtime.session.isClosed);
+    } finally {
+      _openingLab = false;
+    }
   }
 
   /// 关闭模拟实验室并释放传输；[debug] 仍可复用，直至 [dispose]。
-  Future<void> closeSimulationLab() async {
-    if (_simulationRuntime == null) return;
-    await _debug.detach();
-    await _simulationRuntime!.dispose();
+  Future<void> closeSimulationLab() => _closingLab ??=
+      _closeSimulationLab().whenComplete(() => _closingLab = null);
+
+  Future<void> _closeSimulationLab() async {
+    _labEpoch++;
+    final runtime = _simulationRuntime;
+    if (runtime == null) return;
     _simulationRuntime = null;
+    await _debug.detach();
+    await runtime.dispose();
   }
 
   /// 实验室：设置语言编码（0x02 Key 0x03 操作码 0x00）。
@@ -95,7 +136,7 @@ class WSWatch {
   Future<void> _dispose() async {
     _disposed = true;
     await closeSimulationLab();
+    await _machine.dispose();
     await _debug.dispose();
-    await _stateChanges.close();
   }
 }

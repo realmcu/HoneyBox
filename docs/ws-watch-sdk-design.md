@@ -1,6 +1,6 @@
 # WS Watch SDK 与 Demo 设计文档
 
-> 状态：以 HoneyProtocol 为准，本文描述 SDK/Demo 工程与实现约定；2026-11-02 架构评审修订，新增接口为实现目标，M2 传输/会话基础已实现，业务连接与认证待 M3 接入
+> 状态：以 HoneyProtocol 为准，本文描述 SDK/Demo 工程与实现约定；2026-11-02 架构评审修订，新增接口为实现目标，M3 模拟扫描、登录/绑定/初始化、连接状态机与设备持久化已实现；真实 BLE UART 连接在 M7 验收
 > 范围：WS 手表 BLE SDK 的 Flutter 实现（`ws_watch_sdk`）及其 Demo（`ws_watch_demo`），在 HoneyBox 的 `packages/` 内开发；包边界清晰，将来可整体迁出
 > 协议依据：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/)（仓库 `realmcu/HoneyProtocol`，下文简称**协议规范**）。条目引用格式：`0xNN` Command + Key（设置类另含**操作码**，见 `0x02-settings.rst`）
 > 参考实现：Java SDK v2、HoneyBox JW 模块（`lib/services/jw/`）**仅作对照**，WS SDK 不依赖 JW 代码；JW 仍走 Realtek FF 服务，WS SDK 走协议规范的 **BLE UART Profile**（固件切换前用内置模拟设备联调）
@@ -1134,7 +1134,7 @@ HoneyBox 现有的 JW 代码保留不动，新 SDK 不复制、不依赖其中�
 | --- | --- | --- |
 | M1 工程骨架 | packages + HoneyBox 入口 + CI | 已有骨架；后续实现按本次修订同步配置和内部目录 |
 | M2 可靠传输与会话基础 | Transport、L1 Link、L2/地址模型、Session 最小队列、内部模拟器、调试门面 | 已实现；规范向量、Link/Session 与模拟故障测试通过，内部 WSPreparedSimulation 可执行 typed/Raw 收发；正式扫描/认证入口仍为 M3 |
-| M3 连接闭环 | 登录/绑定/初始化、状态机、能力三态、模拟扫描显式启用 | Demo 可连接 Simulator 到 ready；绑定等待、断开取消和旧 generation 隔离通过 |
+| M3 连接闭环 | 登录/绑定/初始化、状态机、能力三态、模拟扫描显式启用 | 已实现；Demo 可连接 Simulator 到 ready，设备信息/能力及默认身份入库；绑定等待、断开取消、旧 generation 隔离与自动重连有回归测试 |
 | M4 设置闭环 | 时间、语言、整体显示格式和便利方法 | 规范向量一致；Simulator 读写及通知路由通过，无字段覆盖问题 |
 | M5 同步闭环 | 先活动单类型入库，再心率；drift 与存储句柄管理 | Demo 发起单类型同步并查询，重复同步不增重复记录；失败不确认，确认未知可识别 |
 | M6 Demo 联调工具 | 帧日志、Raw、协议表、设备上报、独立 example | 脱离 HoneyBox 运行；仅用 Simulator 完成完整操作脚本；无对 SDK 内部 Link/Transport 的依赖 |
