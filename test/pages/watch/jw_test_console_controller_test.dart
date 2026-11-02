@@ -500,6 +500,32 @@ void main() {
     await c.run('manual-temperature-stop', {});
     expect(c.results['manual-temperature-stop']!.success, true);
   });
+  test(
+      'unknown firmware keeps config and control available and still blocks history cursor reset',
+      () async {
+    c.dispose();
+    final identity = repo.identityStore;
+    await repo.dispose();
+    await t.dispose();
+    t = FakeJwTransport();
+    installJwDeviceScript(t);
+    t.readValues['2a26'] = Uint8List.fromList('T999'.codeUnits);
+    t.readValues['2a27'] = Uint8List.fromList('H009'.codeUnits);
+    repo = JwDeviceRepository(
+        session: JwSession(t), identityStore: identity, transport: t);
+    await repo.initialize();
+    c = JwTestConsoleController(repo);
+    expect(repo.globalHistoryCursorResetAllowed, isFalse);
+    expect(c.disabledReason('config-hourSystem-read'), isNull);
+    expect(c.disabledReason('alarm-read'), isNull);
+    expect(c.disabledReason('photo-start'), isNull);
+    expect(c.disabledReason('history-sync'), isNull);
+    expect(c.disabledReason('history-reset'), contains('T005/H001'));
+    final count = t.writes.length;
+    await c.run('history-reset', {});
+    expect(c.results['history-reset']!.success, false);
+    expect(t.writes.length, count);
+  });
 }
 
 void _settings(FakeJwTransport t) {

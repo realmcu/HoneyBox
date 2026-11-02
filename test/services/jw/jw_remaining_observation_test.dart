@@ -138,11 +138,18 @@ void main() {
       expect(t.writes, isEmpty);
     });
   }
-  test('unknown profile zero TX', () async {
+  test('unknown profile can read alarms and still blocks history cursor reset',
+      () async {
+    response = {'operation': 'readAlarm', 'responseRawHex': ''};
     await create(firmware: 'Other');
+    expect((await read('readAlarm')).records, isEmpty);
+    expect(t.writes, isNotEmpty);
+    final writesAfterRead = t.writes.length;
     await expectLater(
-        read('readAlarm'), throwsA(isA<JwConfigurationException>()));
-    expect(t.writes, isEmpty);
+        repository.resetHistoryCursor(contract: contract),
+        throwsA(isA<JwConfigurationException>()
+            .having((e) => e.stage, 'stage', 'unsupported')));
+    expect(t.writes, hasLength(writesAfterRead));
   });
   test('sport query requires existing JW login zero TX', () async {
     await create(login: 1);
