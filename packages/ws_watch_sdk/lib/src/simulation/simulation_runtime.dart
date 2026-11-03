@@ -4,6 +4,7 @@ import '../protocol/cmd_02_settings.dart';
 import '../session/session.dart';
 import 'sim_watch_device.dart';
 import 'sim_watch_session.dart';
+import 'simulation_transport.dart';
 
 /// In-memory transport + session for M2 tests and the simulation lab UI.
 class WSSimulationRuntime {
@@ -30,11 +31,12 @@ class WSSimulationRuntime {
     }
     config.link.validate();
     config.session.validate();
-    final (host, peer) = SimWatchSession.pair(mtu: mtu);
+    final simulation = WSSimulatedConnection.create(config: config, mtu: mtu);
+    final host = simulation.host;
     try {
       await host.prepare();
-      await peer.prepare();
-      final device = SimWatchDevice(peer, linkConfig: config.link);
+      final peer = simulation.peer;
+      final device = simulation.device;
       final link = WSLink(
         host,
         config: config.link,
@@ -48,7 +50,6 @@ class WSSimulationRuntime {
       return WSSimulationRuntime._(host, peer, session, device);
     } catch (error) {
       await host.dispose();
-      await peer.dispose();
       rethrow;
     }
   }

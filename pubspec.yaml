@@ -7,6 +7,8 @@ environment:
   sdk: '>=3.6.0 <4.0.0'
 
 workspace:
+  - packages/watch_transport
+  - packages/watch_transport_simulation
   - packages/ws_watch_sdk
   - packages/ws_watch_demo
   - packages/ws_watch_demo/example

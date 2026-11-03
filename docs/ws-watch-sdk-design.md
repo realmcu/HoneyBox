@@ -5,6 +5,8 @@
 > 协议依据：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/)（仓库 `realmcu/HoneyProtocol`，下文简称**协议规范**）。条目引用格式：`0xNN` Command + Key（设置类另含**操作码**，见 `0x02-settings.rst`）
 > 参考实现：Java SDK v2、HoneyBox JW 模块（`lib/services/jw/`）**仅作对照**，WS SDK 不依赖 JW 代码；JW 仍走 Realtek FF 服务，WS SDK 走协议规范的 **BLE UART Profile**（固件切换前用内置模拟设备联调）
 > 联调顺序：先在**虚拟设备**上跑通连接与协议，固件就绪后同一套 SDK 连真机，仅底层传输分支不同
+> 共用能力：2026-11-03 确认 JW 与 WS 分别交付独立 SDK，模型和数据库各自维护；连接接口、BLE/simulation 实现与当前 L0/L1 帧通信分别提取，OTA 独立组合。不建立聚合 `watch_core`。包边界与 T1–T4 顺序见[迁移计划](ws-watch-migration-plan.md)，本文现有目录表示迁移前实现，不据此将 JW/采集/七牛纳入 WS SDK。
+> 当前优先级：T1–T3 完成后，以[完整 JW SDK 与真机闭环](jw-watch-sdk-implementation-plan.md)为主线，验证公共通信基础和 JW 独立数据库。WS 保持 M2–M6 回归，M7 等待固件；OTA、采集、七牛按独立模块安排，不作为 JW 主线的串行前置。
 
 ---
 
@@ -1081,14 +1083,15 @@ dependencies:
 ### 14.2 入口
 
 - `lib/pages/launcher/app_catalog.dart` 新增 `AppId.wsWatch`，卡片标题 "WS Watch"，打开 `WSWatchDemoHome`。
-- 现有代码全部保留、不做修改，包括 Watch 入口（旧 Watch 协议和 JW 页面）、`lib/services/jw/`、`lib/validation/jw_*`、`tool/jw_sdk_acceptance.ps1`。新 SDK 和 Demo 作为独立模块加入，联调期间新旧可以对照使用。
+- 现有 Watch 入口、`lib/services/jw/`、验收工具暂时保留。正式协议为现有 JW 与新的 WS；旧 FFC Watch 是早期 WS 调试原型，不作为第三套产品协议维护。
+- WS SDK/Demo 保持独立；JW 单独交付 `jw_watch_sdk`。`watch_transport` 定义连接字节接口，`watch_transport_ble` / `watch_transport_simulation` 实现连接方式，`watch_frame_channel` 封装当前前 8 字节 L0/L1 帧头及队列/ACK/seq/重传；各 SDK 生成和解析 L2，独立维护公开模型及数据库。OTA 独立，统一调试模块引用本 Demo，具体见[迁移计划](ws-watch-migration-plan.md)。这些是目标边界，尚未实施拆包。
 - 新旧模块各自管理 BLE 连接，同一台设备同一时间只应由一个模块连接；从一个入口切到另一个入口前，先断开当前连接。
 
 ### 14.3 平台
 
 - **Android 权限：** HoneyBox 与独立 example 分别声明对应 Android 版本的蓝牙/定位权限，Demo 通过 `permission_handler` 申请；SDK 返回未授权、蓝牙关闭等错误，不弹业务授权页面。
 - **Windows：** 补丁依赖同时在 HoneyBox 与独立 example 验证；不能依靠 HoneyBox 的 dependency_overrides 才能工作。发布前确定可分发的依赖来源、版本与平台支持声明。
-- **iOS：** HoneyBox 当前不支持 iOS。独立 Demo App 可以加上 iOS，需要配置 `NSBluetoothAlwaysUsageDescription`。
+- **iOS：** master 已加入 HoneyBox iOS 工程与 BLE 适配；独立 Demo 的 iOS 支持仍需单独配置并验收，包括 `NSBluetoothAlwaysUsageDescription`，不能由宿主工程推定已完成。
 
 ### 14.4 CI
 
@@ -1120,7 +1123,7 @@ dependencies:
 
 ## 16. 参考 HoneyBox JW 模块
 
-HoneyBox 现有的 JW 代码保留不动，新 SDK 不复制、不依赖其中任何代码，全部按本文档重新编写。JW 模块只作为实现参考，下表列出各部分可以参考的内容。
+现有 WS HoneyProtocol 实现保持独立。JW 量产行为另参考 `Cavo-Ble-SourceCode-Android` Android SDK。JW 与 WS 分别交付独立 SDK，共用当前 L0/L1 帧机制并组合所需连接方式，L2/业务模型/数据库各自维护；OTA 独立，见[迁移计划](ws-watch-migration-plan.md)。下表列出当前对应实现及 L2/GATT 差异，L0/L1 提取后以公共帧通道为准。不得将 JW GATT、历史 Key 或固件限制直接套入 WS 协议；采集、七牛和调试应用平台工具不纳入 WS 协议 SDK。
 
 | 现有代码 | 对应新 SDK 位置 | 参考内容 | 与 JW 的差异 |
 | --- | --- | --- | --- |
@@ -1146,9 +1149,9 @@ HoneyBox 现有的 JW 代码保留不动，新 SDK 不复制、不依赖其中�
 | M4 设置闭环 | 时间、语言、整体显示格式和便利方法 | 已实现；规范向量、Simulator 读写/通知、失败不写与断开隔离通过；便利方法独占 Session 队列，Demo 可安装验收 |
 | M5 同步闭环 | 活动桶 / 心率单类型同步；drift v2 迁移、查询删除、同步日志 | 已实现；Demo 支持同步进度、取消、断开查询和范围删除；重复同步去重、失败不确认、确认未知均有测试。安装后按验收步骤自测 |
 | M6 Demo 联调工具 | 帧日志、Raw、协议表、设备上报、独立 example | 已实现；各页面浮动入口、过滤/暂停/清空/导出、trace 结果卡片；Android/macOS 独立运行，Simulator 完整操作脚本与文件导出测试覆盖；Demo 仅使用 SDK 公开 API |
-| M7 真机与发布准备 | flutter_blue_plus、固件 UART、平台权限/依赖验收 | 相同业务用例真机通过；验证固件重传去重/断链清理和实际 Payload 上限 |
+| M7 真机与发布准备（等待 WS 固件） | 复用公共 transport/frame channel，验收固件 UART、L2/业务与平台差异 | 固件到位后相同业务用例真机通过；验证固件重传去重/断链清理和实际 Payload 上限。不是 JW T4 的前置条件 |
 
-开发顺序先贯通“模拟连接 → 登录 → 一个设置读写 → 一种历史入库”，再增加模块。M2 起软件流程可脱离真机开发；M7 完成前不承诺真机和平台兼容性已验证。
+M1–M6 按“模拟连接 → 登录 → 设置读写 → 历史入库”贯通。当前不再以扩大模拟器或等待 WS M7 为主线，后续按迁移计划先完成公共通信基础，再实现完整 JW SDK，以现有真机验证连接、业务与独立数据库。WS M7 完成前不承诺 WS 真机和平台兼容性已验证；JW 真机结果不替代 WS 固件验收。
 
 ---
 

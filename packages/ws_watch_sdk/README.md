@@ -3,6 +3,13 @@
 WS 手表 BLE UART 协议的 Flutter SDK。协议依据 HoneyProtocol，工程约定见
 [设计文档](../../docs/ws-watch-sdk-design.md)。
 
+## T1 连接基础提取
+
+内存字节连接已迁到 `watch_transport` / `watch_transport_simulation`，WS 通过内部薄
+adapter 保持原有 API 与错误类型。`SimWatchDevice` / `SimWatchState`、L2、健康模型及
+SQLite 继续由本 SDK 管理；公共 simulation 包通过设备工厂接收 WS 行为。
+模拟开关、默认设备 ID 和数据库路径不变。真实 BLE 与公共帧通道分别在 T2、T3 实施。
+
 ## 当前范围：M4
 
 已实现内部字节传输接口、内存双向模拟传输、L1 帧与 CRC-16/ARC、分片组包、

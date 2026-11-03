@@ -4,6 +4,7 @@ import '../errors.dart';
 import 'connection_state.dart';
 import '../simulation/sim_watch_device.dart';
 import '../simulation/sim_watch_session.dart';
+import '../simulation/simulation_transport.dart';
 import '../storage/device_store.dart';
 import '../transport/connection.dart';
 
@@ -41,13 +42,9 @@ class WSConnectionEnvironment {
   static Future<WSManagedTransport> openSimulator(
       WSConfig config, SimWatchState state,
       {int mtu = 247}) async {
-    final (host, peer) = SimWatchSession.pair(mtu: mtu);
-    await peer.prepare();
-    final device = SimWatchDevice(peer, linkConfig: config.link, state: state);
-    return WSManagedTransport(host, release: () async {
-      await device.dispose();
-      await peer.dispose();
-    });
+    final simulation =
+        WSSimulatedConnection.create(config: config, state: state, mtu: mtu);
+    return WSManagedTransport(simulation.host);
   }
 }
 
