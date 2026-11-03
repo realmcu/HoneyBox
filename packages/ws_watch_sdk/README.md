@@ -8,7 +8,7 @@ WS 手表 BLE UART 协议的 Flutter SDK。协议依据 HoneyProtocol，工程�
 内存字节连接已迁到 `watch_transport` / `watch_transport_simulation`，WS 通过内部薄
 adapter 保持原有 API 与错误类型。`SimWatchDevice` / `SimWatchState`、L2、健康模型及
 SQLite 继续由本 SDK 管理；公共 simulation 包通过设备工厂接收 WS 行为。
-模拟开关、默认设备 ID 和数据库路径不变。T2 已接入公共 BLE 扫描和 UART transport；公共帧通道在 T3 实施。WS 固件尚未验收。
+模拟开关、默认设备 ID 和数据库路径不变。T2 已接入公共 BLE 扫描和 UART transport；T3 已接入公共 `watch_frame_channel`，主机与模拟设备共用同一 L0/L1 实现。WS 固件尚未验收。
 
 ## 当前范围：M4
 
@@ -53,7 +53,7 @@ features → session → link → transport
 ```
 
 - `session` 维护业务队列及完整回应地址，设置通知不能完成读取查询。
-- `link` 只处理 L1。完整帧写入不可交错，ACK 可在帧边界优先发送，不等待业务查询结束。
+- `link` 是 `watch_frame_channel` 的 WS 兼容 adapter，只处理 L0/L1。完整帧写入不可交错，ACK 可在帧边界优先发送，不等待业务查询结束。
 - 分片写入失败或超时关闭连接；ACK 超时/ERR ACK 按配置同 seq 重试。
 - Query 的 ACK 或回应超时后关闭会话，队列失败，不跨连接重放请求。
 - Raw、typed 调用共用队列；未知/未实现地址默认不重试，废弃/保留范围拒绝发送。

@@ -58,6 +58,8 @@ void main() {
     };
     final op = n.setHeartRateStreaming(true);
     await n.setHeartRateStreaming(true);
+    // The shared frame queue may still be finishing the initialization ACK.
+    await Future<void>.delayed(Duration.zero);
     final sent = t.sent
         .where((f) => !f.ack)
         .map((f) => JwCodec.decodeL2(f.payload))

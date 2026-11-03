@@ -7,6 +7,7 @@ environment:
   sdk: '>=3.6.0 <4.0.0'
 
 workspace:
+  - packages/watch_frame_channel
   - packages/watch_transport
   - packages/watch_transport_ble
   - packages/watch_transport_ble/example
@@ -16,6 +17,8 @@ workspace:
   - packages/ws_watch_demo/example
 
 dependencies:
+  watch_frame_channel:
+    path: packages/watch_frame_channel
   flutter:
     sdk: flutter
 

@@ -1,10 +1,10 @@
 # 手表工程迁移：连接、帧通信与 SDK 组合
 
-> 2026-11-03，按本轮讨论修订。JW / WS 两个 SDK 独立，拆分连接方式与当前共用的 L0/L1 帧通信；不再建立 `watch_core`。本文为目标与首批范围，T1 已完成连接抽象与 simulation 提取，T2 已落地 BLE transport 并完成 macOS JW 真机冒烟。master 合并提交 `3443802`，验证修复 `1ae57ab`；T1 已由用户提交推送，本轮 T2 尚未提交。
+> 2026-11-03，按本轮讨论修订。JW / WS 两个 SDK 独立，拆分连接方式与当前共用的 L0/L1 帧通信；不再建立 `watch_core`。本文记录目标边界与实施结果。T1/T2 已由用户提交推送；本轮 T3 提取公共帧通道并接入现有 JW、WS 和 WS 模拟设备，实际交付与验证见第 19 节。master 合并提交 `3443802`，验证修复 `1ae57ab`。
 
 阅读顺序：第 1–6 节确定整体边界；第 7–12 节说明接口与各批迁移；第 13–16 节说明兼容、验收、回退和首次实施清单。源码路径默认相对 HoneyBox 根目录；目录与接口草案表示目标，不表示已创建。
 
-当前 T1 已完成；T2 代码及 Android/macOS 构建、macOS JW 真机冒烟已完成，Windows 编译与设备验收待 Windows 环境执行；T3–T4 尚未开始。主线是 T1–T3 通信基础 → T4 完整 JW SDK 与真机闭环。WS M7 等待固件，不阻塞主线；OTA/采集/七牛单列为独立工作流。T1 的实际改动与验证结果见第 17 节，T2 见第 18 节。
+当前 T1/T2 已完成；T3 代码已落地，验证见 §19。Windows 编译与设备验收仍待 Windows 环境执行；T4 尚未开始。主线是 T1–T3 通信基础 → T4 完整 JW SDK 与真机闭环。WS M7 等待固件，不阻塞主线；OTA/采集/七牛单列为独立工作流。T1 的实际改动与验证结果见第 17 节，T2 见第 18 节，T3 见第 19 节。
 
 **码云总任务**：[【HoneyBox】【WS Watch SDK】基于 HoneyBox 搭建 Flutter SDK 与 Demo 工程（第一阶段）](https://e.gitee.com/priodigit/dashboard?issue=IKKGIB)（正文含 WS M1–M6 与下方主线/并列任务索引）。各批次对应 issue 见 §5、§12.1、§12.3。
 
@@ -93,7 +93,7 @@ WS SDK → 主机帧通道 → simulation 主机端
 | --- | --- | --- |
 | **T1 连接抽象与 simulation** | [IKSKQV](https://e.gitee.com/priodigit/dashboard?issue=IKSKQV) | 新建 `watch_transport` / `watch_transport_simulation`，迁内存通道，WS 通过薄 adapter 接回现有 Link；默认身份/数据库/业务 API 不动。验证字节双向传输、主动推送、小包、断开/释放、跨重连设备状态，以及现有 WS M2–M6 回归（**已完成**，见 §17） |
 | **T2 BLE transport** | [IKSKQX](https://e.gitee.com/priodigit/dashboard?issue=IKSKQX) | 新建 `watch_transport_ble`，提取已有真实连接能力、profile 和资源协调；迁 WS 真实扫描并提供真实连接 adapter，以现有 JW 真机做连接/命令冒烟。宿主/Capture/原生 OTA 的过渡入口加入同一设备占用协调；无 WS 固件时只验证 transport，不宣称完成 WS M7 |
-| **T3 公共帧通道** | [IKSKQY](https://e.gitee.com/priodigit/dashboard?issue=IKSKQY) | 比对 JW/WS 当前 L0/L1，提取 `watch_frame_channel`，接两套 SDK 和 WS 模拟设备。验证前 8 字节、CRC/ACK/seq、重传/去重、跨分片、整帧不交错、断链清队列及双方现有行为 |
+| **T3 公共帧通道** | [IKSKQY](https://e.gitee.com/priodigit/dashboard?issue=IKSKQY) | 比对 JW/WS 当前 L0/L1，提取 `watch_frame_channel`，接两套 SDK 和 WS 模拟设备。验证前 8 字节、CRC/ACK/seq、重传/去重、跨分片、整帧不交错、断链清队列及双方现有行为（**已实现**，见 §19） |
 | **T4 完整 JW SDK（主线）** | 总 [IKSKW1](https://e.gitee.com/priodigit/dashboard?issue=IKSKW1)，子任务 §12.1 | 以现有 Android JW API 和量产设备为基准，实现独立 SDK、业务模型、JW 数据库、设置/同步/测量/控制/通知及真机 Demo；逐阶段通过真实设备检验 T1–T3，详见第 12 节及专项计划。不是仅把当前 Flutter JW 目录搬成包 |
 
 实施顺序为 **T1 → T2 → T3 → T4.0–T4.7**。T1 只提取现有 simulation 并保持回归，不新增 JW 模拟设备或扩大 WS 模拟场景；T2/T3 立即使用 JW 真机验证，随后资源优先投入完整 JW SDK。现有 WS Link/Session 的超时/重传参数在 T3 映射到公共实现，保持外部 API 兼容。
@@ -451,3 +451,86 @@ Windows plugin 的自动注册、独立 CMake 与源码已交付，但当前只�
 SDK/宿主均不使用共享租约自动接管其他应用已经连接的设备。协调器限同 isolate 的合作入口；自定义 runtime 必须统一注入，不能声称跨进程锁住系统蓝牙。OTA/Capture 本轮接入资源管理，没有将整个模块搬入 SDK，也未执行升级或采集验收。
 
 下一主线为 T3 公共 L0/L1 帧通道。继续使用 JW 真机检查 ACK/seq/重传/分片/旧代次隔离，随后进入 T4 完整 JW SDK 和独立数据库，不增加模拟器业务投入。
+
+
+## 19. T3 实施记录（2026-11-03 · [IKSKQY](https://e.gitee.com/priodigit/dashboard?issue=IKSKQY)）
+
+### 19.1 实际交付与依赖
+
+新建纯 Dart `packages/watch_frame_channel`，运行时只依赖 `watch_transport`。
+公开入口包括 `WatchFrame` / `WatchFrameAssembler`、`WatchFrameChannel`、配置、错误、
+payload/帧观测、发送句柄与 `WatchFramePort`。`fromConnection` 适配公共 transport；
+回调 port 允许旧连接复用现有租约，不重复连接或订阅 GATT。
+
+- WS `frame.dart` / `frame_assembler.dart` / `link.dart` 成为兼容 adapter，保留原有类型、
+  配置、异常、generation/requestId/traceId 与原始事件时间；主机和 `SimWatchDevice`
+  经同一个 adapter 使用公共实现。WS 不使用业务回应提前确认。
+- 现有 JW `JwCodec` 的 CRC/帧编码、`JwFrameDecoder` 的增量解码改用公共实现；
+  `JwSession` 将 ACK、seq、重试、分片/控制队列和去重交给 channel。
+  L2 TLV、串行业务队列、回应匹配/超时、未匹配 key 分流、健康数据和存储仍留 JW。
+- JW 在 L2 确认匹配后调用 `confirmReceived`；句柄只确认本连接当前在途发送，
+  不允许确认其他连接、排队或已结束的发送。先收到 NACK 后同轮收到真实回应仍能证明收包，
+  但不能掩盖平台 write 失败。公共层不包含 JW command/key 判断。
+- BLE 独立 example 的语言探针移除自写 CRC/帧解析与 ACK，使用公共 channel。
+  真机集成脚本再注入 5 字节写入上限和一次丢 ACK，只发送语言读请求。
+- 新包加入 workspace 与 CI 单独测试步骤；SDK、宿主和 BLE example 声明直接依赖。
+  各包边界和 API/生命周期示例见 [watch_frame_channel README](../packages/watch_frame_channel/README.md)。
+
+### 19.2 行为对照与恢复边界
+
+| 项目 | WS adapter | JW adapter |
+| --- | --- | --- |
+| payload 上限 | 沿用配置，默认 65535 | 236，总帧 244；L2 仍自行校验 |
+| ACK 超时 / 重试 | 5 秒 / 3 次，保持可配置 | 3 秒 / 2 次，保持每命令 retry override |
+| flags | 仅 `00/10/30` | 明确接收 `00/10/30/40/50/70`；未知保留位不再按普通数据解释 |
+| CRC / 可信头组包超时 | ERR ACK | 静默丢弃；CRC 坏帧内继续寻找新帧头 |
+| 去重 | 原有 64 项 / 30 秒 | 保留 128 项容量，新增 30 秒时效；避免同连接 seq 复用一直被旧缓存压住 |
+| 组包间隔 | 保留配置，默认 5 秒 | 新增 5 秒清理，避免旧半帧长期阻塞后续数据 |
+| 错误 | 映射回 WS 原有异常，底层写错误保留原始对象 | 保留 JW stage 和既有错误文字 |
+
+公共发送队列默认限制 64 个在途/排队发送，控制队列限制 64 个待写 ACK；
+SDK 的业务队列仍独立。发送溢出拒绝新提交，控制队列溢出终止连接，不能静默丢 ACK。
+接收缓存最大为一帧，使用队列从头移除噪声，避免最大 WS 帧上限下逐字节搬移整个数组。
+
+完整帧的分片串行，动态读取 transport 写入限制，ACK 在帧边界优先。首次写入前登记 pending，
+重试复用 seq/完整字节；新 channel 默认从 1 开始，65535 后回绕到 0。
+重复数据仍回 ACK，只有首次 payload 交给 SDK；相同 seq 不同 payload 交付并产生冲突观测。
+
+分片写入失败/超时立即失败所有发送并终止字节流，不继续追加帧；关闭取消订阅、组包计时器和缓存。
+JW 对完整帧 ACK/业务回应超时仍按原有方式终止会话、拒绝后续业务，物理连接由拥有者关闭；
+半帧写失败、通知错误或控制队列溢出则主动断开以恢复边界。宿主识别这次失败清理，
+保留原始失败原因，不让随后的主动断开把页面错误覆盖成普通“已断开”。
+
+JW provider 的重复点击测试增加一次异步调度等待，等待初始化回应的控制 ACK 与公共帧队列完成交接，
+仍断言只发送一次业务命令。既有健康 UI fixture 修正就绪判断：等待目标页面挂载且没有待绘制帧，
+再判断加载条消失，避免页面尚未挂载就提前退出真实 I/O 等待、随后在 fake clock 中一直等进度动画。
+没有放宽用例的循环/超时或业务结果断言。
+
+### 19.3 验证
+
+- 公共帧通道 26 项测试通过：独立 CRC 标准检查值/固定字节向量、JW 抓包、严格 flags、
+  数组快照、每个拆包边界/粘包/大段噪声、最大长度、早到/迟到/错 seq ACK、ERR/丢失 ACK、
+  原字节重传、精确句柄确认、ACK 优先/整帧不交错、动态分片、重复/冲突、队列溢出、
+  半帧/挂起写失败、通知错误与断开清理。
+- root **1067 项通过、原有 2 项跳过**；WS SDK 131 项、Demo 13 项、独立 example 1 项通过。
+  transport 2 项、simulation 12 项、BLE 29 项回归通过。
+- workspace analyze 无问题；全仓 Dart 格式检查、`git diff --check` 通过。
+- 独立纯 Dart 消费工程不使用 HoneyBox workspace 或 override，直接引用真实 frame/transport/simulation
+  包，pub get、analyze 和两个 channel 在 7 字节写入上限上的发送/ACK/释放运行通过；
+  运行时仅解析这三个纯 Dart 包。
+- WS 独立 Demo macOS M6 脚本通过：模拟扫描/连接→Raw L2/ACK→历史同步及持久化。
+  HoneyBox Android debug APK 构建通过；无 Android 手机连接验收，Windows 编译/真机状态仍见 §18。
+- 真机过程先沿用上一轮确认的 GHW-01D，验证了 MTU 247、语言编码 1、电量 52%、
+  两次新连接；追加 5 字节写入/丢一次真实 ACK 后，同字节同 seq 重传探针成功，
+  随后重连在原生 BLE connect 阶段超时。
+- 用户随后明确本轮目标应是 **2616_GHDBSC，MAC 69:2D:0C:AD:00:1D**。
+  脚本增加名称/MAC/平台 ID 的精确筛选及可配置扫描时长，避免把 macOS UUID 当 MAC。
+  本机先按名称+MAC、再仅按 MAC 延长到 25 秒扫描，均未发现该目标；没有连接其他候选替代。
+  **本轮指定目标的真机验收尚未完成**；前述其他设备的成功不计作本目标通过。
+  目标恢复可扫描后用 BLE example 脚本继续，见其 README。
+
+### 19.4 后续
+
+T3 不迁移健康模型、数据库或 OTA/采集/七牛，不新增 JW 模拟设备；这些边界未变。
+下一主线为 T4.0，再按专项计划逐步形成完整 `jw_watch_sdk` 和真实设备业务闭环。
+WS 固件和 Windows 环境验证仍单独跟踪，不把共享帧测试通过视为它们已经验收。

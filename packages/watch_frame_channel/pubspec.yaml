@@ -1,0 +1,14 @@
+name: watch_frame_channel
+description: Pure Dart eight-byte L0/L1 framing and reliable payload delivery.
+version: 0.1.0
+publish_to: 'none'
+resolution: workspace
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+dependencies:
+  watch_transport:
+    path: ../watch_transport
+dev_dependencies:
+  lints: ^4.0.0
+  flutter_test:
+    sdk: flutter

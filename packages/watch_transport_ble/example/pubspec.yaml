@@ -6,6 +6,8 @@ resolution: workspace
 environment:
   sdk: '>=3.6.0 <4.0.0'
 dependencies:
+  watch_frame_channel:
+    path: ../../watch_frame_channel
   flutter:
     sdk: flutter
   watch_transport:

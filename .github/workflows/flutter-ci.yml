@@ -58,6 +58,10 @@ jobs:
 
       # packages/ 下的工程属于同一个 pub workspace，上面的 pub get / analyze 已覆盖；
       # flutter test 只跑当前包，需要分别执行。
+      - name: Run watch_frame_channel tests
+        working-directory: packages/watch_frame_channel
+        run: flutter test
+
       - name: Run watch_transport tests
         working-directory: packages/watch_transport
         run: flutter test

@@ -103,6 +103,7 @@ class JwDeviceRepository {
     _busy = true;
     _publish(state.copyWith(operationInProgress: true));
     _down = transport.disconnected.listen((_) {
+      if (session.isClosingFailedTransport) return;
       _lost = true;
       _earlyHeart = null;
       _publish(state.copyWith(

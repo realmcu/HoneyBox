@@ -9,6 +9,8 @@ environment:
   flutter: '>=3.27.0'
 
 dependencies:
+  watch_frame_channel:
+    path: ../watch_frame_channel
   watch_transport_ble:
     path: ../watch_transport_ble
   watch_transport:

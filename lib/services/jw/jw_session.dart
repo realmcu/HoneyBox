@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:math';
+import 'package:watch_frame_channel/watch_frame_channel.dart';
 import 'jw_codec.dart';
 import 'jw_protocol.dart';
 import 'jw_transport.dart';
@@ -13,26 +15,13 @@ class JwLinkException implements Exception {
 }
 
 class _Pending {
-  final int seq;
   final JwRequest request;
-  var ack = Completer<bool>();
+  WatchFrameSend? send;
   final reply = Completer<JwMessage>();
-  _Pending(this.seq, this.request) {
-    // Disconnect can arrive inside the platform write before the await below.
-    _watchAck();
-    reply.future.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+  _Pending(this.request) {
+    reply.future.ignore();
   }
-  void _watchAck() {
-    ack.future.then<void>((_) {}, onError: (Object _, StackTrace __) {});
-  }
-
-  void resetAck() {
-    ack = Completer<bool>();
-    _watchAck();
-  }
-
   void fail(JwLinkException e) {
-    if (!ack.isCompleted) ack.completeError(e);
     if (!reply.isCompleted) reply.completeError(e);
   }
 }
@@ -42,28 +31,30 @@ class JwSession {
   final Duration ackTimeout;
   final Duration replyTimeout;
   final int ackRetries;
-  final _decoder = JwFrameDecoder();
+  WatchFrameChannel? _channel;
   final _incomingFrames = StreamController<JwFrame>.broadcast(sync: true);
   final _outgoingFrames = StreamController<JwFrame>.broadcast(sync: true);
   final _events = StreamController<JwMessage>.broadcast(sync: true);
   final _failures = StreamController<JwLinkException>.broadcast(sync: true);
-  final _seen = <String>{};
   final _abort = Completer<void>();
   final _tasks = <int, void Function(JwLinkException)>{};
-  StreamSubscription<Uint8List>? _rx;
-  StreamSubscription<void>? _down;
+  StreamSubscription<WatchFrameEvent>? _frames;
+  StreamSubscription<WatchReceivedPayload>? _payloads;
   Future<void> _tail = Future.value();
-  Future<void> _ackTail = Future.value();
   Future<void>? _opening;
   Future<void>? _closing;
   _Pending? _pending;
   JwLinkException? _failure;
   var _epoch = 0;
-  var _seq = 0;
   var _taskId = 0;
   var _queued = 0;
-  var _ackQueued = 0;
-  bool _accept = false;
+  bool _closingFailedTransport = false;
+  Future<void>? _transportClosing;
+  Future<void> _disconnectTransport() =>
+      _transportClosing ??= transport.disconnect();
+
+  /// Cleanup of a failed byte stream must not replace the published failure.
+  bool get isClosingFailedTransport => _closingFailedTransport;
   bool _isOpen = false;
   bool _closed = false;
   JwSession(this.transport,
@@ -80,12 +71,6 @@ class JwSession {
 
   /// Attempted frames, including retries and ACKs; not proof of device receipt.
   Stream<JwFrame> get outgoingFrames => _outgoingFrames.stream;
-  void _observeOutgoing(Uint8List bytes) {
-    if (!_outgoingFrames.isClosed) {
-      _outgoingFrames.add(JwFrameDecoder().add(bytes).single);
-    }
-  }
-
   Stream<JwMessage> get events => _events.stream;
   Stream<JwLinkException> get failures => _failures.stream;
   bool get isOpen => _isOpen;
@@ -93,18 +78,55 @@ class JwSession {
   Future<void> _open() async {
     if (_closed) throw const JwLinkException('open', 'Session already closed');
     final epoch = ++_epoch;
-    _accept = true;
-    _decoder.clear();
-    _rx = transport.notifications.listen((bytes) {
-      if (!_accept || epoch != _epoch) return;
-      for (final frame in _decoder.add(bytes)) {
-        _receive(frame);
+    final channel = _channel = WatchFrameChannel(
+        WatchFramePort(
+            received: transport.notifications,
+            disconnected: transport.disconnected,
+            maxWriteLength: () => max(1, min(244, transport.mtu - 3)),
+            write: (bytes) => transport.write(bytes, withResponse: true),
+            close: () async {
+              // A fully written frame which times out can be closed logically.
+              // Failed chunks/receive streams need a physical reset of framing.
+              if (const ['write', 'notify', 'queue']
+                  .contains(_failure?.stage)) {
+                _closingFailedTransport = true;
+                try {
+                  await _disconnectTransport();
+                } finally {
+                  _closingFailedTransport = false;
+                }
+              }
+            }),
+        profile: WatchFrameProfile.jw,
+        generation: epoch,
+        config: WatchFrameConfig(
+            ackTimeout: ackTimeout,
+            maxRetries: ackRetries,
+            maxPayloadLength: 236,
+            deduplicationCapacity: 128),
+        mapError: _mapFrameError);
+    _frames = channel.frames.listen((event) {
+      if (epoch != _epoch || _closed) return;
+      if (event.kind != WatchFrameKind.data &&
+          event.kind != WatchFrameKind.retry &&
+          event.kind != WatchFrameKind.ack &&
+          event.kind != WatchFrameKind.errAck) {
+        return;
       }
-    },
-        onError: (Object _) => _fail(
-            const JwLinkException('notify', 'Notification stream failed')));
-    _down = transport.disconnected.listen(
-        (_) => _fail(const JwLinkException('disconnect', 'Link disconnected')));
+      final f = WatchFrame.decode(event.raw,
+          profile: WatchFrameProfile.jw, maxPayloadLength: 236);
+      final frame =
+          JwFrame(f.seq, f.isAck, f.noAck, f.payload, error: f.isError);
+      (event.direction == WatchFrameDirection.rx
+              ? _incomingFrames
+              : _outgoingFrames)
+          .add(frame);
+    });
+    _payloads = channel.payloads.listen((frame) {
+      if (epoch == _epoch && !_closed) _receive(frame.bytes);
+    });
+    unawaited(
+        channel.terminated.then((reason) => _fail(_mapFrameError(reason))));
     try {
       await Future.any<void>([
         transport.subscribe(),
@@ -175,44 +197,14 @@ class JwSession {
 
   Future<JwMessage> _execute(JwRequest request,
       {required bool expectReply}) async {
-    final p = _Pending(_seq = (_seq + 1) & 0xffff, request);
+    final p = _Pending(request);
     _pending = p;
-    final frame = JwCodec.encode(
-        seq: p.seq,
-        payload: JwCodec.encodeL2(
-            request.command, [JwField(request.key, request.value)]));
     try {
-      final retryLimit = request.ackRetryLimit ?? ackRetries;
-      for (var attempt = 0; attempt <= retryLimit; attempt++) {
-        if (attempt > 0) {
-          p.resetAck();
-          // A real matching application reply remains proof across retries.
-          if (p.reply.isCompleted) p.ack.complete(true);
-        }
-        if (!_isOpen) {
-          throw _failure ??
-              const JwLinkException('disconnect', 'Session ended');
-        }
-        try {
-          _observeOutgoing(frame);
-          await transport.write(frame, withResponse: true);
-        } catch (e) {
-          throw e is JwLinkException
-              ? e
-              : const JwLinkException('write', 'FF02 write failed');
-        }
-        try {
-          final accepted = await p.ack.future.timeout(ackTimeout);
-          if (accepted) break;
-          if (attempt == retryLimit) {
-            throw const JwLinkException('nack', 'Device rejected the frame');
-          }
-        } on TimeoutException {
-          if (attempt == retryLimit) {
-            throw const JwLinkException('ack', 'Transport ACK timed out');
-          }
-        }
-      }
+      p.send = _channel!.startSend(
+          JwCodec.encodeL2(
+              request.command, [JwField(request.key, request.value)]),
+          maxRetries: request.ackRetryLimit ?? ackRetries);
+      await p.send!.completed;
       if (!expectReply) return JwMessage(request.command, []);
       try {
         return await p.reply.future.timeout(replyTimeout);
@@ -231,22 +223,11 @@ class JwSession {
     }
   }
 
-  void _receive(JwFrame frame) {
-    if (!_incomingFrames.isClosed) _incomingFrames.add(frame);
+  void _receive(Uint8List payload) {
     final p = _pending;
-    if (frame.ack) {
-      if (p?.seq == frame.seq && !p!.ack.isCompleted) {
-        p.ack.complete(!frame.error);
-      }
-      return;
-    }
-    if (!frame.noAck) _ack(frame.seq);
-    final key = '${frame.seq}:${frame.payload.join(',')}';
-    if (!_seen.add(key)) return;
-    if (_seen.length > 128) _seen.remove(_seen.first);
     JwMessage message;
     try {
-      message = JwCodec.decodeL2(frame.payload);
+      message = JwCodec.decodeL2(payload);
     } on FormatException {
       return;
     }
@@ -257,7 +238,7 @@ class JwSession {
           p.request.responseKey == field.key &&
           !p.reply.isCompleted) {
         // A matching L2 reply proves reception even when L1 ACK arrives later.
-        if (!p.ack.isCompleted) p.ack.complete(true);
+        if (p.send != null) _channel!.confirmReceived(p.send!);
         p.reply.complete(p.request.singleFieldReply
             ? message
             : JwMessage(message.command, [field]));
@@ -270,34 +251,12 @@ class JwSession {
     }
   }
 
-  void _ack(int seq) {
-    if (_ackQueued >= 64) {
-      _fail(const JwLinkException('queue', 'ACK queue full'));
-      return;
-    }
-    final epoch = _epoch;
-    _ackQueued++;
-    _ackTail = _ackTail.then((_) async {
-      if (!_accept || epoch != _epoch) return;
-      try {
-        final frame =
-            JwCodec.encode(seq: seq, payload: Uint8List(0), ack: true);
-        _observeOutgoing(frame);
-        await transport.write(frame, withResponse: true);
-      } catch (_) {
-        _fail(const JwLinkException('write', 'ACK write failed'));
-      }
-    }).whenComplete(() => _ackQueued--);
-  }
-
   void _fail(JwLinkException error) {
     if (_failure != null) return;
     _failure = error;
     _epoch++;
     _isOpen = false;
-    _accept = false;
-    _decoder.clear();
-    _seen.clear();
+    unawaited(_channel?.close(error));
     _pending?.fail(error);
     for (final cancel in _tasks.values.toList()) {
       cancel(error);
@@ -310,10 +269,11 @@ class JwSession {
   Future<void> _close() async {
     _closed = true;
     _fail(const JwLinkException('disconnect', 'Session closed'));
-    await _rx?.cancel();
-    await _down?.cancel();
+    await _frames?.cancel();
+    await _payloads?.cancel();
+    await _channel?.close(_failure);
     try {
-      await transport.disconnect();
+      await _disconnectTransport();
     } finally {
       await _incomingFrames.close();
       await _outgoingFrames.close();
@@ -321,4 +281,35 @@ class JwSession {
       await _failures.close();
     }
   }
+}
+
+JwLinkException _mapFrameError(Object error) {
+  if (error is JwLinkException) return error;
+  if (error is WatchFrameWriteException) {
+    return JwLinkException(
+        'write', error.isControl ? 'ACK write failed' : 'FF02 write failed');
+  }
+  if (error is! WatchFrameException) {
+    return const JwLinkException('protocol', 'Request failed');
+  }
+  return JwLinkException(
+      switch (error.kind) {
+        WatchFrameErrorKind.ackTimeout => 'ack',
+        WatchFrameErrorKind.writeTimeout => 'write',
+        WatchFrameErrorKind.nack => 'nack',
+        WatchFrameErrorKind.receive => 'notify',
+        WatchFrameErrorKind.write => 'write',
+        WatchFrameErrorKind.disconnected => 'disconnect',
+        WatchFrameErrorKind.queueFull => 'queue',
+      },
+      switch (error.kind) {
+        WatchFrameErrorKind.ackTimeout => 'Transport ACK timed out',
+        WatchFrameErrorKind.nack => 'Device rejected the frame',
+        WatchFrameErrorKind.receive => 'Notification stream failed',
+        WatchFrameErrorKind.writeTimeout ||
+        WatchFrameErrorKind.write =>
+          'FF02 write failed',
+        WatchFrameErrorKind.disconnected => 'Link disconnected',
+        WatchFrameErrorKind.queueFull => 'Frame queue full',
+      });
 }

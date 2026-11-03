@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:watch_frame_channel/watch_frame_channel.dart';
 
 class JwFrame {
   final int seq;
@@ -29,16 +30,7 @@ class JwMessage {
 abstract final class JwCodec {
   static const maxFrameLength = 244;
   static const maxValueLength = 231;
-  static int crc16Arc(Uint8List bytes) {
-    var crc = 0;
-    for (final byte in bytes) {
-      crc ^= byte;
-      for (var i = 0; i < 8; i++) {
-        crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xa001 : crc >> 1;
-      }
-    }
-    return crc & 0xffff;
-  }
+  static int crc16Arc(Uint8List bytes) => watchCrc16(bytes);
 
   static void _u8(int n) {
     RangeError.checkValueInInterval(n, 0, 255);
@@ -54,18 +46,8 @@ abstract final class JwCodec {
       throw RangeError('JW frame length');
     }
     if (ack && payload.isNotEmpty) throw ArgumentError('ACK has no payload');
-    final crc = crc16Arc(payload);
-    return Uint8List.fromList([
-      0xab,
-      (ack ? 0x10 : 0) | (noAck ? 0x40 : 0),
-      payload.length >> 8,
-      payload.length & 255,
-      crc >> 8,
-      crc & 255,
-      seq >> 8,
-      seq & 255,
-      ...payload
-    ]);
+    return WatchFrame(seq: seq, payload: payload, isAck: ack, noAck: noAck)
+        .encode();
   }
 
   static Uint8List encodeL2(int command, List<JwField> fields) {
@@ -104,39 +86,28 @@ abstract final class JwCodec {
   }
 }
 
-/// Keeps at most one firmware-sized residual frame, even for huge noisy input.
+/// Compatibility facade over the common incremental L0/L1 decoder.
 class JwFrameDecoder {
-  final _buffer = <int>[];
-  void clear() => _buffer.clear();
+  JwFrameDecoder() {
+    _assembler = WatchFrameAssembler(
+        timeout: null,
+        maxPayloadLength: 236,
+        profile: WatchFrameProfile.jw,
+        onFrame: (f, _) => _frames
+            .add(JwFrame(f.seq, f.isAck, f.noAck, f.payload, error: f.isError)),
+        onError: (_, __, ___) {});
+  }
+  late final WatchFrameAssembler _assembler;
+  final _frames = <JwFrame>[];
+  void clear() {
+    _assembler.clear();
+    _frames.clear();
+  }
+
   List<JwFrame> add(Uint8List bytes) {
-    final frames = <JwFrame>[];
-    for (final byte in bytes) {
-      _buffer.add(byte);
-      while (_buffer.isNotEmpty) {
-        if (_buffer[0] != 0xab) {
-          _buffer.removeAt(0);
-          continue;
-        }
-        if (_buffer.length < 8) break;
-        final n = (_buffer[2] << 8) | _buffer[3];
-        final ack = (_buffer[1] & 0x10) != 0;
-        final crc = (_buffer[4] << 8) | _buffer[5];
-        if (n > JwCodec.maxFrameLength - 8 || (ack && (n != 0 || crc != 0))) {
-          _buffer.removeAt(0);
-          continue;
-        }
-        if (_buffer.length < 8 + n) break;
-        final payload = Uint8List.fromList(_buffer.sublist(8, 8 + n));
-        if (JwCodec.crc16Arc(payload) != crc) {
-          _buffer.removeAt(0);
-          continue;
-        }
-        frames.add(JwFrame((_buffer[6] << 8) | _buffer[7], ack,
-            (_buffer[1] & 0x40) != 0, payload,
-            error: (_buffer[1] & 0x20) != 0));
-        _buffer.removeRange(0, 8 + n);
-      }
-    }
-    return frames;
+    _assembler.add(bytes);
+    final result = List<JwFrame>.of(_frames);
+    _frames.clear();
+    return result;
   }
 }

@@ -1085,7 +1085,7 @@ dependencies:
 
 - `lib/pages/launcher/app_catalog.dart` 新增 `AppId.wsWatch`，卡片标题 "WS Watch"，打开 `WSWatchDemoHome`。
 - 现有 Watch 入口、`lib/services/jw/`、验收工具暂时保留。正式协议为现有 JW 与新的 WS；旧 FFC Watch 是早期 WS 调试原型，不作为第三套产品协议维护。
-- WS SDK/Demo 保持独立；JW 单独交付 `jw_watch_sdk`。`watch_transport` 定义连接字节接口，`watch_transport_ble` / `watch_transport_simulation` 实现连接方式，`watch_frame_channel` 封装当前前 8 字节 L0/L1 帧头及队列/ACK/seq/重传；各 SDK 生成和解析 L2，独立维护公开模型及数据库。OTA 独立，统一调试模块引用本 Demo，具体见[迁移计划](ws-watch-migration-plan.md)。这些是目标边界，尚未实施拆包。
+- WS SDK/Demo 保持独立；JW 单独交付 `jw_watch_sdk`。`watch_transport` 定义连接字节接口，`watch_transport_ble` / `watch_transport_simulation` 实现连接方式，`watch_frame_channel` 封装当前前 8 字节 L0/L1 帧头及队列/ACK/seq/重传；各 SDK 生成和解析 L2，独立维护公开模型及数据库。OTA 独立，统一调试模块引用本 Demo，具体见[迁移计划](ws-watch-migration-plan.md)。T1–T3 已落地连接抽象、simulation、BLE 与公共帧通道；JW 独立 SDK/数据库与调试模块按迁移计划继续实施。
 - 新旧模块各自管理 BLE 连接，同一台设备同一时间只应由一个模块连接；从一个入口切到另一个入口前，先断开当前连接。
 
 ### 14.3 平台

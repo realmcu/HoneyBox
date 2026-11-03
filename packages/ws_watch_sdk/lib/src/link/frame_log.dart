@@ -11,9 +11,10 @@ class WSLinkEvent {
       this.seq,
       this.requestId,
       this.traceId,
-      required this.connectionGeneration})
+      required this.connectionGeneration,
+      DateTime? time})
       : raw = Uint8List.fromList(raw).asUnmodifiableView(),
-        time = DateTime.now();
+        time = time ?? DateTime.now();
   final DateTime time;
   final int connectionGeneration;
   final String? requestId, traceId;

@@ -298,7 +298,13 @@ void main() {
       for (var i = 0; i < 100; i++) {
         await tester.pump(const Duration(milliseconds: 20));
         await Future<void>.delayed(const Duration(milliseconds: 20));
-        if (find.byType(LinearProgressIndicator).evaluate().isEmpty) break;
+        // Wait for the route to mount and render its async loading state;
+        // an empty indicator before the first route frame is not readiness.
+        if (find.byType(JwHealthPage).evaluate().isNotEmpty &&
+            !tester.binding.hasScheduledFrame &&
+            find.byType(LinearProgressIndicator).evaluate().isEmpty) {
+          break;
+        }
       }
     });
     await tester.pumpAndSettle();
