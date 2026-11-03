@@ -192,3 +192,31 @@ final logs = await watch.data.syncLogs(deviceId: kWsWatchSimDeviceId);
 - 确认前保存临时审计日志，确认后更新；若最终日志更新失败，返回 incomplete/storageFailed 并保留已实际取得的 confirmation=acked，设备可能已完成标记。
 
 M5 安装验收：HoneyBox → WS Watch → **M5 历史数据** → 连接 Simulator → 开始单类型同步。默认每种两条数据，日期为 **2026-10-12**。首次新增 2，第二次新增 0 / 重复 2；可切换心率、断开查询、退出重进或重启 App 查询、按用户与时间过滤并删除。已安装过数据时首次也可能显示重复。M3 ready 后也能进入共享连接的 M5 页面；返回只释放本页订阅和未完成同步，连接由 M3 管理。
+
+
+### M6：公开调试门面
+
+`watch.debug.protocols` 在连接前后均可浏览，只读列表包含完整地址、名称、specRef、状态与原因；M2 独立实验室打开期间保留原有 4 条语言协议。已实现条目为 active，规范示例的其余已知地址标为 unimplemented；未知地址没有伪造业务实现。保留 Command / Key 的全部版本与子地址禁止 Raw 发送。
+
+```dart
+final frameSub = watch.debug.frames.listen((frame) {
+  print('${frame.direction.name} ${frame.kind.name} generation=${frame.connectionGeneration} '
+      'trace=${frame.traceId} request=${frame.requestId} seq=${frame.seq}');
+});
+final reportSub = watch.debug.reports.listen((report) {
+  print('${report.time} generation=${report.connectionGeneration} ${report.kind.name} ${report.address}');
+});
+await watch.connect(kWsWatchSimDeviceId);
+final bytes = await watch.debug.trace('language-read', () => watch.debug.sendRaw(
+  WSRawRequest(cmd: 2, version: 0, key: 3, settingOpcode: 1, data: [],
+    replyAddress: const WSReplyAddress(cmd: 2, version: 0, key: 3,
+      settingOpcode: 2, direction: WSWireDirection.deviceToPhone),
+    replyTimeout: const Duration(seconds: 5)),
+)); // 操作数据，不含 opcode；如 [1]
+await frameSub.cancel();
+await reportSub.cancel();
+```
+
+Raw 共享 Session 队列与超时规则，仅在 ready（或明确打开的 M2 实验室）可用；历史同步控制互斥继续生效。主动上报不自动带上当前请求的 trace。unimplemented/unknown Raw 默认不自动重试；等待回应超时后必须重新连接，避免迟到回应串单。
+
+协议目录更新：在 SDK 目录执行 `python3 tool/generate_protocol_catalog.py`，然后 `dart format lib/src/protocol/catalog.dart`；检查生成差异并运行 SDK 测试。脚本读取同级 HoneyProtocol 仓库，生成物已提交在源码中，运行 SDK/Demo 无需 HoneyProtocol 或 Python。

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
+import 'debug/debug_scope.dart';
 
 /// Standalone simulator acceptance, or reuse the M3 page's connected watch.
 class M4SettingsPage extends StatefulWidget {
@@ -60,7 +61,7 @@ class _M4SettingsPageState extends State<M4SettingsPage> {
       _result = null;
     });
     try {
-      await action();
+      await DemoDebugScope.runAction(_watch, success, action);
       if (mounted) setState(() => _result = success);
     } catch (e) {
       if (mounted) setState(() => _error = e);
@@ -115,7 +116,8 @@ class _M4SettingsPageState extends State<M4SettingsPage> {
         enabled && settings.languageSupport != WSFeatureSupport.unsupported;
     final displayEnabled = enabled &&
         settings.displayFormatSupport != WSFeatureSupport.unsupported;
-    return Scaffold(
+    return DemoDebugScaffold(
+        watch: _watch,
         appBar: AppBar(title: const Text('M4 设置')),
         body: ListView(padding: const EdgeInsets.all(16), children: [
           Text('当前状态：${_watch.state.name}', key: const Key('m4-state')),
@@ -144,6 +146,7 @@ class _M4SettingsPageState extends State<M4SettingsPage> {
           ]),
           if (_busy) const LinearProgressIndicator(),
           if (_result != null) Text(_result!, key: const Key('m4-result')),
+          const DemoActionCard(),
           if (_error != null)
             SelectableText('$_error',
                 style: TextStyle(color: Theme.of(context).colorScheme.error)),

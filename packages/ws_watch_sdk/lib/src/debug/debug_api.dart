@@ -7,6 +7,7 @@ import '../link/frame_log.dart';
 import '../protocol/address.dart';
 import '../protocol/message.dart';
 import '../protocol/status.dart';
+import '../protocol/core_registry.dart';
 import '../session/session.dart';
 import 'models.dart';
 
@@ -63,6 +64,7 @@ class WSDebugController implements WSDebugApi {
     if (_disposed) throw const WSDisposedException();
     if (_session != null) throw StateError('detach the previous session first');
     _session = session;
+    _attachedViews = _views(session);
     _allowRaw = allowRaw;
     _frameSubscription = session.link.frames.listen((event) {
       if (_disposed || !identical(session, _session)) return;
@@ -105,6 +107,7 @@ class WSDebugController implements WSDebugApi {
 
   Future<void> detach() async {
     _session = null;
+    _attachedViews = null;
     _allowRaw = null;
     await _frameSubscription?.cancel();
     await _reportSubscription?.cancel();
@@ -116,15 +119,18 @@ class WSDebugController implements WSDebugApi {
   Stream<WSFrameEvent> get frames => _frames.stream;
   @override
   Stream<WSDeviceReport> get reports => _reports.stream;
-  @override
-  List<WSProtocolView> get protocols =>
-      List.unmodifiable(_session?.registry.entries.map((e) => WSProtocolView(
+  static List<WSProtocolView> _views(WSSession? session) => List.unmodifiable(
+      (session?.registry ?? WSInitializationProtocol.registry()).entries.map(
+          (e) => WSProtocolView(
               address: e.address,
               name: e.name,
               specRef: e.specRef,
               status: e.status,
-              reason: e.reason)) ??
-          []);
+              reason: e.reason)));
+  static final _defaultViews = _views(null);
+  List<WSProtocolView>? _attachedViews;
+  @override
+  List<WSProtocolView> get protocols => _attachedViews ?? _defaultViews;
   @override
   Future<T> trace<T>(String traceId, Future<T> Function() action) async {
     if (_disposed) throw const WSDisposedException();

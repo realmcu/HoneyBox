@@ -10,3 +10,5 @@ export 'src/m3_connection_page.dart';
 export 'src/m4_settings_page.dart';
 
 export 'src/m5_history_page.dart';
+
+export 'src/demo_raw_sheet.dart';

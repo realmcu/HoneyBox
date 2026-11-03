@@ -51,10 +51,15 @@ class WSDeviceReport {
       required this.kind,
       required List<int> data,
       this.value,
-      this.error})
-      : data = Uint8List.fromList(data).asUnmodifiableView();
+      this.error,
+      this.connectionGeneration = 0,
+      DateTime? time})
+      : data = Uint8List.fromList(data).asUnmodifiableView(),
+        time = time ?? DateTime.now();
   final WSProtocolAddress? address;
   final WSReportKind kind;
   final Uint8List data;
   final Object? value, error;
+  final DateTime time;
+  final int connectionGeneration;
 }

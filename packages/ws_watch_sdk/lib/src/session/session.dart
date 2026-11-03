@@ -301,7 +301,16 @@ class WSSession {
   }
 
   void _report(WSDeviceReport report) {
-    if (!_reports.isClosed) _reports.add(report);
+    if (!_reports.isClosed) {
+      _reports.add(WSDeviceReport(
+          address: report.address,
+          kind: report.kind,
+          data: report.data,
+          value: report.value,
+          error: report.error,
+          time: report.time,
+          connectionGeneration: link.generation));
+    }
   }
 
   void _invalidate(Object reason, {Object? activeError}) {

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
+import 'debug/debug_scope.dart';
 
 /// M5 acceptance with the default persistent store, or an existing M3 watch.
 class M5HistoryPage extends StatefulWidget {
@@ -57,7 +58,7 @@ class _M5HistoryPageState extends State<M5HistoryPage> {
       _message = null;
     });
     try {
-      await action();
+      await DemoDebugScope.runAction(_watch, '历史数据操作', action);
     } catch (e) {
       if (mounted) setState(() => _message = '$e');
     } finally {
@@ -99,10 +100,11 @@ class _M5HistoryPageState extends State<M5HistoryPage> {
     _progress = null;
     final sync = _watch.data.sync(type: _type);
     _sync = sync;
-    await _progressSub?.cancel();
+    final previousProgress = _progressSub;
     _progressSub = sync.progress.listen((p) {
       if (mounted) setState(() => _progress = p);
     });
+    await previousProgress?.cancel();
     try {
       final result = await sync.result;
       if (mounted) setState(() => _result = result);
@@ -120,7 +122,8 @@ class _M5HistoryPageState extends State<M5HistoryPage> {
   Widget build(BuildContext context) {
     final ready = _watch.state == WSConnectionState.ready;
     final p = _progress;
-    return Scaffold(
+    return DemoDebugScaffold(
+        watch: _watch,
         appBar: AppBar(title: const Text('M5 历史数据')),
         body: ListView(padding: const EdgeInsets.all(16), children: [
           Text('当前状态：${_watch.state.name}', key: const Key('m5-state')),
@@ -178,6 +181,7 @@ class _M5HistoryPageState extends State<M5HistoryPage> {
                 key: const Key('m5-result')),
           if (_message != null)
             SelectableText(_message!, key: const Key('m5-message')),
+          const DemoActionCard(),
           const Divider(),
           const Text('本地查询 / 删除（与连接状态无关）'),
           _field('设备 ID（必填）', _device),

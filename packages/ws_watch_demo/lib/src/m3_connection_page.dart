@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
+import 'debug/debug_scope.dart';
 import 'm4_settings_page.dart';
 import 'm5_history_page.dart';
 
@@ -71,7 +72,7 @@ class _M3ConnectionPageState extends State<M3ConnectionPage> {
       _result = null;
     });
     try {
-      await action();
+      await DemoDebugScope.runAction(_watch, label, action);
       if (mounted) setState(() => _result = '$label：成功');
     } catch (error) {
       if (mounted) {
@@ -101,7 +102,8 @@ class _M3ConnectionPageState extends State<M3ConnectionPage> {
     final ready = _watch.state == WSConnectionState.ready;
     final disconnected = _watch.state == WSConnectionState.disconnected;
     final info = _watch.deviceInfo;
-    return Scaffold(
+    return DemoDebugScaffold(
+      watch: _watch,
       appBar: AppBar(title: const Text('M3 扫描与连接')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Text('当前状态：${_watch.state.name}',
@@ -174,6 +176,7 @@ class _M3ConnectionPageState extends State<M3ConnectionPage> {
               child: const Text('解绑')),
         ]),
         if (_result != null) Text(_result!),
+        const DemoActionCard(),
         if (_error != null)
           SelectableText('$_error',
               style: TextStyle(color: Theme.of(context).colorScheme.error)),

@@ -6,6 +6,7 @@ import 'cmd_03_bind.dart';
 import 'cmd_05_history.dart';
 import 'protocol.dart';
 import 'registry.dart';
+import 'catalog.dart';
 
 abstract final class WSInitializationProtocol {
   static final setSystemEntry =
@@ -53,7 +54,7 @@ abstract final class WSInitializationProtocol {
       decodeData: decodeCapabilities);
   static WSProtocolRegistry registry() {
     final language = WSSettingsProtocol.registry();
-    return WSProtocolRegistry([
+    final active = [
       ...language.entries,
       ...WSSettingsProtocol.m4Entries,
       ...WSBindProtocol.entries,
@@ -66,16 +67,28 @@ abstract final class WSInitializationProtocol {
       capabilityRequest,
       capabilityReply,
       capabilityNotify
-    ], reports: [
-      ...WSSettingsProtocol.m4Reports,
-      ...WSHistoryProtocol.reports,
-      WSReport<int>(
-          entry: WSSettingsProtocol.languageNotify,
-          decodeData: WSSettingsProtocol.decodeLanguage),
-      WSReport<WSDeviceInfo>(
-          entry: infoNotify, decodeData: WSDeviceInfo.fromBytes),
-      WSReport<Uint8List>(
-          entry: capabilityNotify, decodeData: decodeCapabilities),
-    ]);
+    ];
+    final addresses = active.map((e) => e.address).toSet();
+    return WSProtocolRegistry(
+        [
+          ...active,
+          ...WSProtocolCatalog.entries
+              .where((e) => !addresses.contains(e.address)),
+        ],
+        blockedCommands: WSProtocolCatalog.reservedCommands,
+        blockedKeys: {
+          for (final key in WSProtocolCatalog.reservedSettingKeys) (2, key)
+        },
+        reports: [
+          ...WSSettingsProtocol.m4Reports,
+          ...WSHistoryProtocol.reports,
+          WSReport<int>(
+              entry: WSSettingsProtocol.languageNotify,
+              decodeData: WSSettingsProtocol.decodeLanguage),
+          WSReport<WSDeviceInfo>(
+              entry: infoNotify, decodeData: WSDeviceInfo.fromBytes),
+          WSReport<Uint8List>(
+              entry: capabilityNotify, decodeData: decodeCapabilities),
+        ]);
   }
 }

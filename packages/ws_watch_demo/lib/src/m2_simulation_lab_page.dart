@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
+import 'debug/debug_scope.dart';
 
 /// M2 内存模拟实验室：打开传输会话、语言读写、查看帧与上报。
 ///
@@ -44,7 +45,7 @@ class _M2SimulationLabPageState extends State<M2SimulationLabPage> {
       _lastResult = null;
     });
     try {
-      await _watch.debug.trace(label, action);
+      await DemoDebugScope.runAction(_watch, label, action);
       if (mounted) {
         setState(() => _lastResult = '$label：成功');
       }
@@ -137,7 +138,8 @@ class _M2SimulationLabPageState extends State<M2SimulationLabPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final open = _watch.isSimulationLabOpen;
-    return Scaffold(
+    return DemoDebugScaffold(
+      watch: _watch,
       appBar: AppBar(title: const Text('M2 模拟实验室')),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -197,8 +199,8 @@ class _M2SimulationLabPageState extends State<M2SimulationLabPage> {
                 subtitle: _lastError != null ? Text('$_lastError') : null,
               ),
             ),
-          Text('帧日志 (${_frames.length})',
-              style: theme.textTheme.titleSmall),
+          const DemoActionCard(),
+          Text('帧日志 (${_frames.length})', style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
           if (_frames.isEmpty)
             Text(
@@ -225,8 +227,7 @@ class _M2SimulationLabPageState extends State<M2SimulationLabPage> {
               ),
             ),
           const SizedBox(height: 12),
-          Text('设备上报 (${_reports.length})',
-              style: theme.textTheme.titleSmall),
+          Text('设备上报 (${_reports.length})', style: theme.textTheme.titleSmall),
           if (_reports.isNotEmpty)
             ..._reports.take(5).map(
                   (r) => ListTile(

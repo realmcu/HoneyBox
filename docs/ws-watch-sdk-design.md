@@ -1,6 +1,6 @@
 # WS Watch SDK 与 Demo 设计文档
 
-> 状态：以 HoneyProtocol 为准，本文描述 SDK/Demo 工程与实现约定；2026-11-02 架构评审修订，新增接口为实现目标，M4 时间/语言/显示格式设置与 Demo 已实现，M3 连接与设备持久化继续保留；真实 BLE UART 连接在 M7 验收
+> 状态：以 HoneyProtocol 为准，本文描述 SDK/Demo 工程与实现约定；2026-11-02 架构评审修订，M3–M6 已实现：连接、设置、历史持久化与 Demo 联调工具；真实 BLE UART 连接在 M7 验收
 > 范围：WS 手表 BLE SDK 的 Flutter 实现（`ws_watch_sdk`）及其 Demo（`ws_watch_demo`），在 HoneyBox 的 `packages/` 内开发；包边界清晰，将来可整体迁出
 > 协议依据：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/)（仓库 `realmcu/HoneyProtocol`，下文简称**协议规范**）。条目引用格式：`0xNN` Command + Key（设置类另含**操作码**，见 `0x02-settings.rst`）
 > 参考实现：Java SDK v2、HoneyBox JW 模块（`lib/services/jw/`）**仅作对照**，WS SDK 不依赖 JW 代码；JW 仍走 Realtek FF 服务，WS SDK 走协议规范的 **BLE UART Profile**（固件切换前用内置模拟设备联调）
@@ -1016,12 +1016,12 @@ class WSWatchDemoHome extends StatelessWidget {
 class WSWatchDemoApp extends StatelessWidget {}
 ```
 
-`DemoScope`（InheritedWidget）持有当前 `WSWatch` 实例，供各页面通过 `DemoScope.of(context).watch` 获取。由外层 StatefulWidget 明确创建并在退出时 dispose，页面释放自身订阅与扫描器。独立 App 使用 `example/`，配置与 HoneyBox 一致；模拟模式显式开启。
+各页面通过可选 `watch` 构造参数复用现有连接；未传入时由页面创建并在退出时 dispose。M3 打开 M4/M5、任意页面打开 M6 时共用当前 watch，返回不释放借用的连接。M2 保持独立实验会话。`DemoDebugScope` 按 watch 共享有界采集器，页面创建时即订阅，最后一层页面退出时释放订阅；调试页不会漏掉打开之前的帧。独立 App 使用 `example/`，显式开启模拟模式，提供 Android / macOS 运行壳，与 HoneyBox 分开安装、各自保存数据。
 
 ### 13.3 公共执行方法
 
 ```dart
-Future<void> runAction(BuildContext context, String title, Future<Object?> Function() action);
+Future<T> DemoDebugScope.runAction<T>(WSWatch watch, String title, Future<T> Function() action);
 ```
 
 执行 SDK 调用，并把以下信息显示在结果卡片上：
@@ -1050,7 +1050,8 @@ Future<void> runAction(BuildContext context, String title, Future<Object?> Funct
 - **帧日志：**
   - 实时列表：时间、方向、类型（数据 / ACK / ERR ACK / 重发 / 分片 / CRC 错误）、seq、command / key 及协议名称、hex；
   - 支持按方向、command、key 过滤，支持暂停、清空；
-  - 可以导出为文本文件。
+  - 可以导出为文本文件：当前过滤帧 + 缓存内上报与操作记录。移动端系统文件选择器直接保存 bytes；桌面端选择路径后写入 UTF-8，macOS 开启用户所选文件读写 entitlement。
+  - Demo 默认缓存最多 400 帧、200 条上报，共用 512 KiB 原始数据预算（每条另预留 256B 元数据），超限淘汰旧条目；最多 20 条操作摘要，单项返回值/错误最多 2048 字符。暂停时跳过新帧与上报，继续后不补录；清空只清本地调试缓存，不删除历史数据库。
 - **原始发送：**
   - 填写 command、version、key、设置操作码和操作数据（hex），可选完整回应地址和超时；UI 明示操作数据不含操作码；
   - 发送结果和相关帧显示在下方；
@@ -1059,7 +1060,8 @@ Future<void> runAction(BuildContext context, String title, Future<Object?> Funct
   - 按 Command / Version / Key / 操作码 / 方向 / specRef 浏览注册表；
   - `active` 的条目可一键带入"原始发送"；
   - `dropped` / `reserved` 的条目禁止发送；`unimplemented` 显示未实现但可带入 Raw，均显示原因。
-- **设备上报：** 显示所有设备主动上报，"已废弃数据"和"未登记数据"高亮显示。
+- **设备上报：** 显示所有未被 Query 消费的通知/回包、时间、连接 generation 和原始操作数据；废弃、保留、未登记、未实现及解码失败数据高亮。未匹配上报不自动关联当前 trace。
+- **目录来源：** 已实现可执行条目优先，其余规范示例地址由 `ws_watch_sdk/tool/generate_protocol_catalog.py` 从 HoneyProtocol RST 生成只读元数据，标记 unimplemented；保留 Command `07/0B/0E/0F` 和健康监测各组第四个 Key 以范围约束所有子地址。未发现明确废弃条目时不人为制造 dropped；未知地址仍保留原文。M2 实验室保持语言四条注册表，正式会话和离线浏览使用完整核心目录。
 
 ---
 
@@ -1143,7 +1145,7 @@ HoneyBox 现有的 JW 代码保留不动，新 SDK 不复制、不依赖其中�
 | M3 连接闭环 | 登录/绑定/初始化、状态机、能力三态、模拟扫描显式启用 | 已实现；Demo 可连接 Simulator 到 ready，设备信息/能力及默认身份入库；绑定等待、断开取消、旧 generation 隔离与自动重连有回归测试 |
 | M4 设置闭环 | 时间、语言、整体显示格式和便利方法 | 已实现；规范向量、Simulator 读写/通知、失败不写与断开隔离通过；便利方法独占 Session 队列，Demo 可安装验收 |
 | M5 同步闭环 | 活动桶 / 心率单类型同步；drift v2 迁移、查询删除、同步日志 | 已实现；Demo 支持同步进度、取消、断开查询和范围删除；重复同步去重、失败不确认、确认未知均有测试。安装后按验收步骤自测 |
-| M6 Demo 联调工具 | 帧日志、Raw、协议表、设备上报、独立 example | 脱离 HoneyBox 运行；仅用 Simulator 完成完整操作脚本；无对 SDK 内部 Link/Transport 的依赖 |
+| M6 Demo 联调工具 | 帧日志、Raw、协议表、设备上报、独立 example | 已实现；各页面浮动入口、过滤/暂停/清空/导出、trace 结果卡片；Android/macOS 独立运行，Simulator 完整操作脚本与文件导出测试覆盖；Demo 仅使用 SDK 公开 API |
 | M7 真机与发布准备 | flutter_blue_plus、固件 UART、平台权限/依赖验收 | 相同业务用例真机通过；验证固件重传去重/断链清理和实际 Payload 上限 |
 
 开发顺序先贯通“模拟连接 → 登录 → 一个设置读写 → 一种历史入库”，再增加模块。M2 起软件流程可脱离真机开发；M7 完成前不承诺真机和平台兼容性已验证。

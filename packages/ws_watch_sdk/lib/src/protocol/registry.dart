@@ -39,7 +39,21 @@ class WSProtocolRegistry {
   final Set<int> _blockedCommands;
   final Set<(int, int)> _blockedKeys;
   List<WSProtocolEntry> get entries => List.unmodifiable(_entries.values);
-  WSProtocolEntry? lookup(WSProtocolAddress address) => _entries[address];
+  WSProtocolEntry? lookup(WSProtocolAddress address) {
+    final exact = _entries[address];
+    if (exact != null) return exact;
+    if (_blockedCommands.contains(address.cmd) ||
+        _blockedKeys.contains((address.cmd, address.key))) {
+      return WSProtocolEntry(
+          address: address,
+          name: '保留协议范围',
+          specRef: 'index / 0x02-settings',
+          status: WSProtocolStatus.reserved,
+          reason: '整个 Command / Key 范围保留，禁止发送');
+    }
+    return null;
+  }
+
   List<WSProtocolEntry> listByCommandKey(int cmd, int key) =>
       List.unmodifiable(_entries.values
           .where((e) => e.address.cmd == cmd && e.address.key == key));

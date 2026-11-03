@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
+import 'debug/debug_scope.dart';
+import 'demo_raw_sheet.dart';
 
 import 'm2_simulation_lab_page.dart';
 import 'm3_connection_page.dart';
@@ -30,7 +32,8 @@ class _WSWatchDemoHomeState extends State<WSWatchDemoHome> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
+    return DemoDebugScaffold(
+      watch: _watch,
       appBar: AppBar(title: const Text('WS Watch')),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -129,9 +132,18 @@ class _WSWatchDemoHomeState extends State<WSWatchDemoHome> {
                                       widget.config.connectTimeouts,
                                   logger: widget.config.logger,
                                   logLevel: widget.config.logLevel)))))),
+          Card(
+              child: ListTile(
+                  leading: const Icon(Icons.bug_report_outlined),
+                  title: const Text('Raw 调试'),
+                  subtitle: const Text('右下角按钮 · L2 hex 发送 · 可选协议表带入'),
+                  trailing: const Icon(Icons.open_in_new),
+                  onTap: () => showDemoRawDebugSheet(context,
+                      watch: _watch,
+                      capture: DemoDebugScope.of(context)))),
           const SizedBox(height: 8),
           Text(
-            'M2 实验室、M3 连接、M4 设置及 M5 历史数据可独立验收；完整调试工具在 M6。',
+            'M2–M5 各页验收；ready 后点右下角 Raw 按钮发 L2 hex。',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
