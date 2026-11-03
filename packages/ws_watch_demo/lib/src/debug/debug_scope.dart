@@ -76,17 +76,17 @@ class _DemoDebugScopeState extends State<DemoDebugScope> {
               right: 16,
               bottom: 16,
               child: SafeArea(
-                  child: FloatingActionButton.small(
-                      heroTag: null,
-                      tooltip: 'Raw 调试',
-                      key: const Key('ws-debug-tools'),
-                      onPressed: () => showDemoRawDebugSheet(
-                            context,
-                            watch: widget.watch,
-                            capture: DemoDebugScope.of(context),
-                          ),
-                      child: const Icon(Icons.bug_report_outlined)),
-                )),
+                child: FloatingActionButton.small(
+                    heroTag: null,
+                    tooltip: 'Raw 调试',
+                    key: const Key('ws-debug-tools'),
+                    onPressed: () => showDemoRawDebugSheet(
+                          context,
+                          watch: widget.watch,
+                          capture: _lease.capture,
+                        ),
+                    child: const Icon(Icons.bug_report_outlined)),
+              )),
       ]));
 }
 
