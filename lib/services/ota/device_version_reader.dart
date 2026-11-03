@@ -1,4 +1,6 @@
 import 'dart:typed_data';
+import 'package:watch_transport_ble/watch_transport_ble.dart'
+    show WatchBleCoordinator;
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
@@ -14,7 +16,9 @@ class FlutterBlueDeviceVersionReader implements DeviceVersionReader {
     final device = BluetoothDevice.fromId(deviceId);
     // 不接管其他功能的连接；无法证明独占时保持未知。
     if (device.isConnected) return null;
+    final lease = WatchBleCoordinator.shared.acquire(deviceId);
     try {
+      await WatchBleCoordinator.shared.stopScanning();
       await device.connect(
           license: License.nonprofit, timeout: const Duration(seconds: 20));
       final services = await device.discoverServices();
@@ -35,6 +39,8 @@ class FlutterBlueDeviceVersionReader implements DeviceVersionReader {
     } finally {
       // 清理失败必须向上抛出，避免 SDK 和临时连接并发。
       await device.disconnect();
+      if (device.isConnected) throw StateError('版本读取连接尚未断开');
+      lease.release();
     }
   }
 }

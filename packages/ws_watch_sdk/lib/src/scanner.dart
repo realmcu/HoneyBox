@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:watch_transport_ble/watch_transport_ble.dart';
 import 'config.dart';
 import 'errors.dart';
 import 'simulation/sim_watch_session.dart';
@@ -22,17 +22,12 @@ class WSScanner {
   final _devices = StreamController<List<WSScanDevice>>.broadcast();
   final _errors = StreamController<Object>.broadcast();
   final Map<String, WSScanDevice> _found = {};
-  StreamSubscription<List<ScanResult>>? _subscription;
+  StreamSubscription<List<WatchBleAdvertisement>>? _subscription;
   bool _disposed = false, _running = false;
   int _epoch = 0;
-  static WSScanner? _radioOwner;
-  static Future<void> _radioTail = Future.value();
+  final _radio = WatchBleScanner();
+  StreamSubscription<Object>? _radioErrors;
   Timer? _timeout;
-  static Future<void> _radio(Future<void> Function() action) {
-    final work = _radioTail.then((_) => action());
-    _radioTail = work.catchError((Object _) {});
-    return work;
-  }
 
   List<WSScanDevice> get devices => List.unmodifiable(_found.values);
   Stream<List<WSScanDevice>> get results => _devices.stream;
@@ -63,37 +58,28 @@ class WSScanner {
     _publish();
     _timeout = Timer(timeout, () => unawaited(stop()));
     if (!includeRealDevices) return;
-    if (_radioOwner != null) {
-      _errors.add(StateError('another WSScanner owns the BLE radio scan'));
-      return;
-    }
-    _radioOwner = this;
     try {
-      _subscription = FlutterBluePlus.onScanResults.listen((results) {
+      _subscription = _radio.results.listen((results) {
         if (_disposed || !_running || epoch != _epoch) return;
         for (final result in results) {
-          final id = result.device.remoteId.str;
-          // Physical advertisements never gain the reserved simulator identity.
+          final id = result.deviceId;
           if (id == kWsWatchSimDeviceId) continue;
-          _found[id] = WSScanDevice(
-              deviceId: id,
-              name: result.advertisementData.advName,
-              rssi: result.rssi);
+          _found[id] =
+              WSScanDevice(deviceId: id, name: result.name, rssi: result.rssi);
         }
         _publish();
-      }, onError: (Object error) {
+      });
+      _radioErrors = _radio.errors.listen((error) {
         if (!_disposed && epoch == _epoch) _errors.add(error);
       });
-      await _radio(() async {
-        if (_disposed || epoch != _epoch) return;
-        await FlutterBluePlus.startScan(timeout: timeout);
-      });
+      await _radio.start(timeout: timeout);
+      if (_disposed || epoch != _epoch) await _radio.stop();
     } catch (error) {
-      if (epoch != _epoch) return;
       if (!_disposed && epoch == _epoch) _errors.add(error);
       await _subscription?.cancel();
       _subscription = null;
-      if (identical(_radioOwner, this)) _radioOwner = null;
+      await _radioErrors?.cancel();
+      _radioErrors = null;
     }
   }
 
@@ -110,22 +96,16 @@ class WSScanner {
     _timeout?.cancel();
     await _subscription?.cancel();
     _subscription = null;
-    if (identical(_radioOwner, this)) {
-      try {
-        await _radio(() async {
-          if (identical(_radioOwner, this)) {
-            await FlutterBluePlus.stopScan();
-          }
-        });
-      } catch (_) {/* local subscription still released */}
-      if (identical(_radioOwner, this)) _radioOwner = null;
-    }
+    await _radioErrors?.cancel();
+    _radioErrors = null;
+    await _radio.stop();
   }
 
   Future<void> dispose() => _disposing ??= _dispose();
   Future<void> _dispose() async {
     _disposed = true;
     await stop();
+    await _radio.dispose();
     await _devices.close();
     await _errors.close();
   }

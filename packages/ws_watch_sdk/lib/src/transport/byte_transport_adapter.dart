@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 import 'package:watch_transport/watch_transport.dart';
+import 'package:watch_transport_ble/watch_transport_ble.dart';
+import '../connection/connection_state.dart';
 import '../errors.dart';
 import 'connection.dart';
 
@@ -28,7 +30,31 @@ class WSByteTransportAdapter implements WSTransportConnection {
   }
 
   @override
-  Future<void> prepare() => _mapError(connection.connect);
+  Future<void> prepare() async {
+    try {
+      await connection.connect();
+    } on WatchBleException catch (error) {
+      final reason = switch (error.code) {
+        WatchTransportErrorCode.profileUnavailable =>
+          WSConnectFailure.gattMissing,
+        WatchTransportErrorCode.permissionDenied ||
+        WatchTransportErrorCode.adapterOff =>
+          WSConnectFailure.bluetoothUnavailable,
+        WatchTransportErrorCode.timeout => WSConnectFailure.timeout,
+        WatchTransportErrorCode.busy => WSConnectFailure.alreadyConnected,
+        _ => WSConnectFailure.transportUnavailable,
+      };
+      throw WSConnectException(
+          error.stage == BleConnectionStage.connecting
+              ? WSConnectionState.connecting
+              : WSConnectionState.discovering,
+          reason,
+          error.message);
+    } on WatchTransportException catch (error) {
+      throw WSDisconnectedException(error.message);
+    }
+  }
+
   @override
   Future<void> write(Uint8List chunk) =>
       _mapError(() => connection.write(chunk));

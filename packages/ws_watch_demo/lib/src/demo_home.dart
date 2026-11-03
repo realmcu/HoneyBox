@@ -139,8 +139,7 @@ class _WSWatchDemoHomeState extends State<WSWatchDemoHome> {
                   subtitle: const Text('右下角按钮 · L2 hex 发送 · 可选协议表带入'),
                   trailing: const Icon(Icons.open_in_new),
                   onTap: () => showDemoRawDebugSheet(context,
-                      watch: _watch,
-                      capture: DemoDebugScope.of(context)))),
+                      watch: _watch, capture: DemoDebugScope.of(context)))),
           const SizedBox(height: 8),
           Text(
             'M2–M5 各页验收；ready 后点右下角 Raw 按钮发 L2 hex。',

@@ -1,10 +1,10 @@
 # 手表工程迁移：连接、帧通信与 SDK 组合
 
-> 2026-11-03，按本轮讨论修订。JW / WS 两个 SDK 独立，拆分连接方式与当前共用的 L0/L1 帧通信；不再建立 `watch_core`。本文为目标与首批范围，T1 已完成连接抽象与 simulation 提取。master 合并提交 `3443802`，验证修复 `1ae57ab`，未推送。
+> 2026-11-03，按本轮讨论修订。JW / WS 两个 SDK 独立，拆分连接方式与当前共用的 L0/L1 帧通信；不再建立 `watch_core`。本文为目标与首批范围，T1 已完成连接抽象与 simulation 提取，T2 已落地 BLE transport 并完成 macOS JW 真机冒烟。master 合并提交 `3443802`，验证修复 `1ae57ab`；T1 已由用户提交推送，本轮 T2 尚未提交。
 
 阅读顺序：第 1–6 节确定整体边界；第 7–12 节说明接口与各批迁移；第 13–16 节说明兼容、验收、回退和首次实施清单。源码路径默认相对 HoneyBox 根目录；目录与接口草案表示目标，不表示已创建。
 
-当前 T1 已实现并完成自动回归；T2–T4 尚未开始。主线是 T1–T3 通信基础 → T4 完整 JW SDK 与真机闭环。WS M7 等待固件，不阻塞主线；OTA/采集/七牛单列为独立工作流。T1 的实际改动与验证结果见第 17 节；本轮没有 BLE/JW 真机验收。
+当前 T1 已完成；T2 代码及 Android/macOS 构建、macOS JW 真机冒烟已完成，Windows 编译与设备验收待 Windows 环境执行；T3–T4 尚未开始。主线是 T1–T3 通信基础 → T4 完整 JW SDK 与真机闭环。WS M7 等待固件，不阻塞主线；OTA/采集/七牛单列为独立工作流。T1 的实际改动与验证结果见第 17 节，T2 见第 18 节。
 
 **码云总任务**：[【HoneyBox】【WS Watch SDK】基于 HoneyBox 搭建 Flutter SDK 与 Demo 工程（第一阶段）](https://e.gitee.com/priodigit/dashboard?issue=IKKGIB)（正文含 WS M1–M6 与下方主线/并列任务索引）。各批次对应 issue 见 §5、§12.1、§12.3。
 
@@ -376,11 +376,11 @@ BLE profile 通过配置明确服务 UUID、收/发特征、属性与写入模�
 2. 每次切换记录旧路径、新路径、最后同步 commit、受影响入口、测试及待实机项；迁完的模块只在 package 修改，旧宿主实现删除或变为薄 adapter。
 3. T1 回退只替换 WS transport 装配；T2 按整个连接入口回退 BLE backend；T3 按整个连接栈回退，不能两套帧通道同时监听/ACK 同一连接。回退前结束当前连接与待执行任务。
 4. 旧实现仅在有明确回退需要的过渡批次保留；不无限期维护双实现。不将旧目录的新改动凭手工记忆同步，切换前核对源 commit 到当前的增量。
-5. 迁移不包含 push、发布 SDK 或清理用户历史数据；各批代码与文档可本地 review，发布方式另行确定。当前 T1 两个基础包已实现并接入 WS，其余新包仍为计划。JW T4 为后续主线，独立工具工作流自行安排，不把 WS M7 当成进入 T4 的前置条件。
+5. 迁移不包含 push、发布 SDK 或清理用户历史数据；各批代码与文档可本地 review，发布方式另行确定。当前 T1 两个基础包和 T2 BLE 包已实现并接入 WS，其余新包仍为计划。JW T4 为后续主线，独立工具工作流自行安排，不把 WS M7 当成进入 T4 的前置条件。
 
 ## 16. 首次实施任务清单
 
-T1 已按以下清单完成，下一批进入 T2/T3，随后以 T4 JW 真机为主线；无需等待新 WS 固件。T1 仅提取现有模拟能力及基础契约所需测试，不把新增模拟器功能当作进入真机开发的前置：
+T1 已按以下清单完成，T2 本轮已实施，后续进入 T3，随后以 T4 JW 真机为主线；无需等待新 WS 固件。T1 仅提取现有模拟能力及基础契约所需测试，不把新增模拟器功能当作进入真机开发的前置：
 
 - [x] 建立 `watch_transport` 的连接、目标、状态、写入限制与错误契约。
 - [x] 建立 `watch_transport_simulation`，提取双向内存通道、现有 WS 设备工厂/注册及必要确定性故障钩子；不新增 JW 模拟设备。
@@ -417,3 +417,37 @@ T1 已按以下清单完成，下一批进入 T2/T3，随后以 T4 JW 真机为�
 接收缓冲的 64 KiB 限制针对无人订阅期间；已暂停订阅的缓存由 Dart stream 管理，协议消费者须持续消费。取消/超时不能强制终止工厂的任意外部 Future，迟到行为句柄会被释放，关闭端点不会再投递字节。
 
 下一步按 T2 提取 BLE transport，以 JW 真机验证真实连接与原始字节收发，再进入 T3 公共帧通道；本轮模拟回归不作为任何真实固件验收结论。
+
+
+## 18. T2 实施记录（2026-11-03 · [IKSKQX](https://e.gitee.com/priodigit/dashboard?issue=IKSKQX)）
+
+### 18.1 实际交付
+
+- 新建 `watch_transport_ble`：中立广播 DTO / scanner、可注入平台 backend、类型化 GATT profile、真实 FlutterBluePlus adapter、单次连接对象、动态 MTU/写入限制、接收缓冲、通知订阅及清理。
+- 平台写队列、MTU 协商和连接参数调优已迁入 BLE 包；HoneyBox 旧路径保留薄转导出。投屏帧开销、pacer/calibrator、导航及 JW 业务仍留宿主，未整块搬动 BleManager。
+- `WatchBleCoordinator.shared` 为同 isolate 的合作入口共享租约；不同设备可并行，同设备在原生 connect 前占用。连接取消/超时立即结束调用者等待，但清理要等待迟到平台操作结束并确认断开，之后才释放；清理失败保留租约并允许重试。
+- HoneyBox 普通连接、Capture 及其配置扫描、OTA 版本/设备探测、Dart DFU、Android native OTA 接入同一协调器。DFU 事务保留正常态 ID 并追加 DFU/重启 ID；Android native OTA 使用全局排他，只有原生 close 确认成功才释放，不因超时或 busy 关闭失败而释放。
+- 扫描采用带 owner 的 token，连接主动撤销旧扫描，旧 token 重复清理不停止新 owner。平台 stop 失败保留预留，可显式重试。
+- WS scanner 的真实广播改为公共 scanner 适配，模拟设备合并与 DTO 保持在 WS；默认连接工厂增加 UART profile，BLE 错误映射回原有 WS connect/error 类型。
+- 独立 `watch_transport_ble/example`：JW/WS profile 选择、扫描、状态、原始 HEX 收发、断开，以及 JW 标准电量读取/语言查询。诊断命令只在 example 生成，不引入 HoneyBox/JW/WS SDK 或数据库。
+- Windows WinRT 调优工作线程、地址解析和 MethodChannel 已从媒体插件迁出，由 BLE 包自有插件自动注册；媒体插件不再注册 BLE 通道。地址解析有独立 CMake/CTest，Dart 通道绑定有测试。
+
+### 18.2 实测结果
+
+- 本机 Flutter 3.47.5 / Dart 3.13.4，workspace analyze 与全仓 Dart 格式检查通过。全仓检查发现既有 Demo `demo_home.dart` / `demo_raw_sheet.dart` 格式差异，已仅按 formatter 统一排版，不改逻辑。
+- BLE 假平台/协调器/调优测试 29 项通过；新增宿主原生 OTA 占用边界 2 项通过，原有 BleManager JW 旧连接不干扰替换连接的测试继续通过并增加公共租约断言。
+- root 1067 项通过、原有 2 项跳过；WS SDK 131 项、Demo 13 项、example 1 项通过；WS 独立 macOS M6 扫描/模拟连接→Raw→历史同步集成脚本通过。
+- 回归过程曾在并行构建期间出现一项既有 Widget 的 `pumpAndSettle` 超时，单文件及后续完整 root 重跑均通过；WS macOS 脚本首次停留，终止后以原脚本重新运行通过，没有修改用例或放宽断言。
+- 新诊断 example：Android debug APK、macOS 原生应用构建通过。独立消费工程不使用 HoneyBox workspace/override，直接依赖真实 BLE package 的 pub get 与测试通过。
+- 用户指定 **GHW-01D**，使用 Mac 内置蓝牙实测：扫描到目标，连续两轮创建新连接，均成功校验 Realtek FF profile、协商 MTU 247、订阅 FF03、经 FF02 发送 `02/4f` 语言查询并收到 CRC 正确的 `02/50` 回应（语言编码 1），标准 Battery Service `180f/2a19` 读到 52%，每轮结束释放后可再次连接。
+- 真机脚本位于 `example/integration_test/jw_ble_smoke_test.dart`，指定 `--dart-define=BLE_DEVICE_ID=<当前平台ID>` 执行。多候选不自动挑选其他设备；未登录/绑定或修改设置/历史/固件。
+- 初次使用 OTA BWPS 电量命令在该固件上只收到 ACK，无业务回应；核对旧 Android JW SDK 后改为标准 Battery Service，并另用语言读请求验证完整通知回应。该差异仅影响诊断用例，不将 BWPS 不支持解释为 transport 失败。
+- BLE 原生地址解析独立 CMake/CTest 通过；这不是 Windows WinRT 插件编译或调优效果的验收结果。CI 已加入 BLE 包测试，远端 CI 尚未运行。
+
+### 18.3 边界与后续
+
+Windows plugin 的自动注册、独立 CMake 与源码已交付，但当前只有 Mac 环境，**Windows 编译、真实扫描/连接与调优效果待实测**；Android 本轮只有构建，没有手机连接验收。WS 无正式固件，UART 装配不等于 M7 完成。
+
+SDK/宿主均不使用共享租约自动接管其他应用已经连接的设备。协调器限同 isolate 的合作入口；自定义 runtime 必须统一注入，不能声称跨进程锁住系统蓝牙。OTA/Capture 本轮接入资源管理，没有将整个模块搬入 SDK，也未执行升级或采集验收。
+
+下一主线为 T3 公共 L0/L1 帧通道。继续使用 JW 真机检查 ACK/seq/重传/分片/旧代次隔离，随后进入 T4 完整 JW SDK 和独立数据库，不增加模拟器业务投入。

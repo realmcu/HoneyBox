@@ -58,6 +58,9 @@ xcuserdata/
 # ws_watch_demo 的独立运行工程需要 macOS 平台目录
 !packages/ws_watch_demo/example/macos/
 !packages/ws_watch_demo/example/macos/Runner.xcworkspace
+# BLE 独立诊断工程同样需要提交 Xcode workspace。
+!packages/watch_transport_ble/example/macos/Runner.xcworkspace/
+!packages/watch_transport_ble/example/macos/Runner.xcworkspace/**
 
 # Linux generated build inputs
 /linux/flutter/ephemeral/

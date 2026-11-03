@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:watch_transport_ble/watch_transport_ble.dart'
+    show WatchBleCoordinator, WatchBleLease;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 // ignore: depend_on_referenced_packages
 import 'package:flutter_blue_plus_platform_interface/flutter_blue_plus_platform_interface.dart';
@@ -31,6 +33,19 @@ class CaptureBleConnection implements CaptureConnection {
   bool _wasConnected = false;
   List<BluetoothService> services = [];
   bool _owned = false;
+  WatchBleLease? _lease;
+  Future<void>? _closing, _connectWork;
+  bool _closed = false;
+  final _operations = <Future<void>>{};
+  Future<T> _track<T>(Future<T> work) {
+    late final Future<void> done;
+    done = work
+        .then<void>((_) {}, onError: (Object _) {})
+        .whenComplete(() => _operations.remove(done));
+    _operations.add(done);
+    return work;
+  }
+
   CaptureBleConnection(String id) : device = BluetoothDevice.fromId(id);
   @override
   int? get mtu =>
@@ -42,16 +57,25 @@ class CaptureBleConnection implements CaptureConnection {
 
   @override
   Future<void> connect() {
-    final run = _connecting.then((_) => _connect());
+    if (_closed) return Future.error(StateError('采集连接已关闭'));
+    if (_connectWork != null) return _connectWork!;
+    final run = _connectWork = _connecting.then((_) => _connect());
     _connecting = run.then((_) {}, onError: (Object _) {});
     return run;
   }
 
   Future<void> _connect() async {
     await ensureCapturePermissions();
-    // Do not take over a connection held by Watch/eBadge or another module.
-    if (device.isConnected) throw StateError('设备已被其他功能连接，请先断开后再采集');
+    if (_closed) throw StateError('采集连接已关闭');
+    _lease = WatchBleCoordinator.shared.acquire(device.remoteId.str);
+    if (device.isConnected) {
+      _lease!.release();
+      _lease = null;
+      throw StateError('设备已被其他功能连接，请先断开后再采集');
+    }
     _owned = true;
+    await WatchBleCoordinator.shared.stopScanning();
+    if (_closed) throw StateError('采集连接已关闭');
     _state = device.connectionState.listen((s) {
       if (s == BluetoothConnectionState.connected) _wasConnected = true;
       if (_owned &&
@@ -65,7 +89,9 @@ class CaptureBleConnection implements CaptureConnection {
     // On Android connect() already negotiates MTU (requests 512).
     await device.connect(
         license: License.nonprofit, timeout: const Duration(seconds: 20));
+    if (_closed) throw StateError('采集连接已关闭');
     final primary = await device.discoverServices();
+    if (_closed) throw StateError('采集连接已关闭');
     final visited = <BluetoothService>{};
     services = [];
     void addService(BluetoothService service) {
@@ -102,6 +128,7 @@ class CaptureBleConnection implements CaptureConnection {
   @override
   Future<void> subscribe(
       CaptureChannel channel, void Function(List<int>) receive) async {
+    if (_closed) throw StateError('采集连接已关闭');
     final matches =
         characteristics.where((c) => captureChannelFor(c) == channel).toList();
     if (matches.length != 1) throw StateError('找不到唯一特征 ${channel.key}，请重新配置');
@@ -114,12 +141,13 @@ class CaptureBleConnection implements CaptureConnection {
     }));
     // Track before enabling so partial failures still get cleaned up.
     _enabled.add(c);
-    await c.setNotifyValue(true);
+    await _track(c.setNotifyValue(true));
   }
 
   @override
   Future<void> write(CaptureChannel channel, List<int> bytes,
       {required bool withResponse}) async {
+    if (_closed) throw StateError('采集连接已关闭');
     final matches =
         characteristics.where((c) => captureChannelFor(c) == channel).toList();
     if (matches.length != 1) throw StateError('找不到唯一写入特征 ${channel.key}');
@@ -129,11 +157,28 @@ class CaptureBleConnection implements CaptureConnection {
         : !c.properties.writeWithoutResponse) {
       throw StateError('特征不支持所选写入方式：${channel.key}');
     }
-    await c.write(bytes, withoutResponse: !withResponse, timeout: 10);
+    await _track(c.write(List<int>.from(bytes),
+        withoutResponse: !withResponse, timeout: 10));
   }
 
   @override
-  Future<void> close() async {
+  Future<void> close() => _closing ??= _close().catchError((Object error) {
+        _closing = null;
+        throw error;
+      });
+  Future<void> _close() async {
+    _closed = true;
+    if (_owned) {
+      try {
+        await device.disconnect();
+      } catch (_) {}
+    }
+    try {
+      await _connectWork;
+    } catch (_) {}
+    while (_operations.isNotEmpty) {
+      await Future.wait(_operations.toList());
+    }
     await _state?.cancel();
     _state = null;
     for (final sub in _subscriptions) {
@@ -151,9 +196,12 @@ class CaptureBleConnection implements CaptureConnection {
     } finally {
       _enabled.clear();
       if (_owned) {
-        _owned = false;
         await device.disconnect();
+        if (device.isConnected) throw StateError('采集连接尚未断开');
+        _owned = false;
       }
+      _lease?.release();
+      _lease = null;
       if (!_events.isClosed) await _events.close();
     }
   }

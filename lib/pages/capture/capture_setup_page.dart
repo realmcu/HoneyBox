@@ -1,3 +1,5 @@
+import 'package:watch_transport_ble/watch_transport_ble.dart'
+    show WatchBleCoordinator, BleScanLease;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -108,13 +110,13 @@ class _CaptureSetupPageState extends State<CaptureSetupPage> {
     if (mounted) setState(() => _error = '$e');
   }
 
+  BleScanLease? _scanLease;
   Future<void> _stopScan() async {
     await _scan?.cancel();
     _scan = null;
-    if (_scanning) {
-      _scanning = false;
-      await FlutterBluePlus.stopScan();
-    }
+    _scanning = false;
+    await _scanLease?.close();
+    _scanLease = null;
   }
 
   Future<void> _startScan() async {
@@ -130,9 +132,23 @@ class _CaptureSetupPageState extends State<CaptureSetupPage> {
         if (mounted && !_leaving) setState(() => _results = results);
       }, onError: _setError);
       _scanning = true;
-      await FlutterBluePlus.startScan(
-          timeout: const Duration(seconds: 12), androidUsesFineLocation: true);
+      final lease = await WatchBleCoordinator.shared.startScan(
+          start: () => FlutterBluePlus.startScan(
+              timeout: const Duration(seconds: 12),
+              androidUsesFineLocation: true),
+          stop: FlutterBluePlus.stopScan,
+          onRevoked: () {
+            _scanning = false;
+            _scan?.cancel();
+            _scan = null;
+          });
+      if (!mounted || _leaving || !_scanning) {
+        await lease.close();
+      } else {
+        _scanLease = lease;
+      }
     } catch (e) {
+      await _stopScan();
       _setError(e);
     } finally {
       if (mounted) setState(() => _busy = false);

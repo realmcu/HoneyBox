@@ -8,7 +8,7 @@ WS 手表 BLE UART 协议的 Flutter SDK。协议依据 HoneyProtocol，工程�
 内存字节连接已迁到 `watch_transport` / `watch_transport_simulation`，WS 通过内部薄
 adapter 保持原有 API 与错误类型。`SimWatchDevice` / `SimWatchState`、L2、健康模型及
 SQLite 继续由本 SDK 管理；公共 simulation 包通过设备工厂接收 WS 行为。
-模拟开关、默认设备 ID 和数据库路径不变。真实 BLE 与公共帧通道分别在 T2、T3 实施。
+模拟开关、默认设备 ID 和数据库路径不变。T2 已接入公共 BLE 扫描和 UART transport；公共帧通道在 T3 实施。WS 固件尚未验收。
 
 ## 当前范围：M4
 
@@ -38,8 +38,8 @@ await watch.dispose();
 await scanner.dispose();
 ```
 
-扫描可选真实 BLE 广播，由宿主申请平台权限；M3 正式连接仅支持显式开启的 Simulator。
-真实 BLE UART 连接和手表验收属于 M7。Simulator 模拟 300ms 后自动确认绑定，绑定状态
+扫描可选真实 BLE 广播，由宿主申请平台权限；默认连接支持显式开启的 Simulator 与 T2 提供的 UART transport。
+UART 固件业务和发布验收仍属于 M7。Simulator 模拟 300ms 后自动确认绑定，绑定状态
 保留在当前进程；退出应用后模拟设备重置，但 SQLite 默认 ID 保留。
 桌面模拟默认使用 Android 手机系统值；桌面真机系统编码须另行约定，可配置 `phoneSystem`。
 `debug` 在初始化时可观察帧，Raw 仅在 ready 后开放。M4 已通过 `watch.settings` 提供正式设置 API。

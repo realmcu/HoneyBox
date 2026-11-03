@@ -51,6 +51,10 @@ enum WatchTransportErrorCode {
   deviceNotFound,
   unsupported,
   receiveOverflow,
+  permissionDenied,
+  adapterOff,
+  profileUnavailable,
+  read,
 }
 
 class WatchTransportException implements Exception {

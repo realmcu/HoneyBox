@@ -7,6 +7,7 @@
 > 联调顺序：先在**虚拟设备**上跑通连接与协议，固件就绪后同一套 SDK 连真机，仅底层传输分支不同
 > 共用能力：2026-11-03 确认 JW 与 WS 分别交付独立 SDK，模型和数据库各自维护；连接接口、BLE/simulation 实现与当前 L0/L1 帧通信分别提取，OTA 独立组合。不建立聚合 `watch_core`。包边界与 T1–T4 顺序见[迁移计划](ws-watch-migration-plan.md)，本文现有目录表示迁移前实现，不据此将 JW/采集/七牛纳入 WS SDK。
 > 当前优先级：T1–T3 完成后，以[完整 JW SDK 与真机闭环](jw-watch-sdk-implementation-plan.md)为主线，验证公共通信基础和 JW 独立数据库。WS 保持 M2–M6 回归，M7 等待固件；OTA、采集、七牛按独立模块安排，不作为 JW 主线的串行前置。
+> T2 进展：公共 BLE scanner/UART transport 已装配，原有模拟连接保留。公共 BLE 底层已由 GHW-01D 在 macOS 验证真实字节收发/重连；WS 固件业务和 Windows 平台仍需分别验收，详见迁移计划第 18 节。
 
 ---
 

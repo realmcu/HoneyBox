@@ -66,6 +66,10 @@ jobs:
         working-directory: packages/watch_transport_simulation
         run: flutter test
 
+      - name: Run watch_transport_ble tests
+        working-directory: packages/watch_transport_ble
+        run: flutter test
+
       - name: Run ws_watch_sdk tests
         working-directory: packages/ws_watch_sdk
         run: flutter test

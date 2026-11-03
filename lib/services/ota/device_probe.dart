@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 import 'dart:async';
+import 'package:watch_transport_ble/watch_transport_ble.dart'
+    show WatchBleCoordinator, WatchBleLease;
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -206,17 +208,40 @@ class FlutterBlueDeviceProbe implements DeviceProbe {
 
 class _BlueConnection implements DeviceProbeConnection {
   final BluetoothDevice device;
+  WatchBleLease? _lease;
+  Future<void>? _connecting;
+  final _pending = <Future<void>>{};
+  Future<T> _track<T>(Future<T> work) {
+    late final Future<void> done;
+    done = work
+        .then<void>((_) {}, onError: (Object _) {})
+        .whenComplete(() => _pending.remove(done));
+    _pending.add(done);
+    return work;
+  }
+
   BluetoothCharacteristic? _bwpsWrite, _bwpsNotify;
   _BlueConnection(String id) : device = BluetoothDevice.fromId(id);
   @override
   bool get isConnected => device.isConnected;
   @override
-  Future<void> connect() => device.connect(
-      license: License.nonprofit, timeout: const Duration(seconds: 20));
+  Future<void> connect() => _connecting ??= _connect();
+  Future<void> _connect() async {
+    _lease = WatchBleCoordinator.shared.acquire(device.remoteId.str);
+    if (device.isConnected) {
+      _lease!.release();
+      _lease = null;
+      throw StateError('设备已被其他功能连接');
+    }
+    await WatchBleCoordinator.shared.stopScanning();
+    await device.connect(
+        license: License.nonprofit, timeout: const Duration(seconds: 20));
+  }
+
   @override
   Future<Map<String, Future<List<int>> Function()>> discover() async {
-    final services =
-        await device.discoverServices().timeout(const Duration(seconds: 20));
+    final services = await _track(device.discoverServices())
+        .timeout(const Duration(seconds: 20));
     final result = <String, Future<List<int>> Function()>{};
     for (final service in services) {
       // 出处：固件仓库只读分析 2026-10-31，调用方提供，未在本仓库复核。
@@ -240,8 +265,8 @@ class _BlueConnection implements DeviceProbeConnection {
                 '0000180f-0000-1000-8000-00805f9b34fb') {
           continue;
         }
-        result[uuid] =
-            () => characteristic.read().timeout(const Duration(seconds: 10));
+        result[uuid] = () =>
+            _track(characteristic.read()).timeout(const Duration(seconds: 10));
       }
     }
     return result;
@@ -254,17 +279,32 @@ class _BlueConnection implements DeviceProbeConnection {
           : _bwpsNotify!.onValueReceived;
   @override
   Future<void> enableBwpsNotifications() async {
-    await _bwpsNotify!.setNotifyValue(true);
+    await _track(_bwpsNotify!.setNotifyValue(true));
   }
 
   @override
   Future<void> disableBwpsNotifications() async {
-    await _bwpsNotify!.setNotifyValue(false);
+    await _track(_bwpsNotify!.setNotifyValue(false));
   }
 
   @override
   Future<void> writeBwps(List<int> value) =>
-      _bwpsWrite!.write(value, withoutResponse: false);
+      _track(_bwpsWrite!.write(value, withoutResponse: false));
   @override
-  Future<void> disconnect() => device.disconnect();
+  Future<void> disconnect() async {
+    if (_lease == null) return;
+    try {
+      await device.disconnect();
+    } catch (_) {}
+    try {
+      await _connecting;
+    } catch (_) {}
+    while (_pending.isNotEmpty) {
+      await Future.wait(_pending.toList());
+    }
+    await device.disconnect();
+    if (device.isConnected) throw StateError('预读取连接尚未断开');
+    _lease?.release();
+    _lease = null;
+  }
 }

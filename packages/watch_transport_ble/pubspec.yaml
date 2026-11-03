@@ -1,0 +1,24 @@
+name: watch_transport_ble
+description: BLE device transport, GATT profiles, scanning and shared resource ownership.
+version: 0.1.0
+publish_to: 'none'
+resolution: workspace
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+  flutter: '>=3.27.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  watch_transport:
+    path: ../watch_transport
+  flutter_blue_plus: ^2.3.10
+  flutter_blue_plus_platform_interface: ^9.0.3
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: WatchTransportBlePluginCApi

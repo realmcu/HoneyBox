@@ -1,6 +1,6 @@
-#include "honey_media_windows/bluetooth_link.h"
+#include "bluetooth_address.h"
 
-namespace hmw {
+namespace watch_ble {
 namespace {
 
 constexpr size_t kOctets = 6U;
@@ -45,4 +45,4 @@ bool ParseBluetoothAddress(std::string_view text, uint64_t* address) {
   return true;
 }
 
-}  // namespace hmw
+}  // namespace watch_ble

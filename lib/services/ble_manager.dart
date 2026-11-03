@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart'
     show debugPrint, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:watch_transport_ble/watch_transport_ble.dart'
+    show WatchBleCoordinator, WatchBleLease, BleScanLease;
 import 'android_ble_permissions.dart';
 
 import 'ble_chunk_calibrator.dart';
@@ -34,6 +36,7 @@ class _JwNotifyBinding {
 class _BleConnectionResources {
   const _BleConnectionResources({
     required this.device,
+    this.lease,
     required this.mtu,
     required this.writeQueue,
     required this.connectionStateSub,
@@ -59,6 +62,7 @@ class _BleConnectionResources {
   });
 
   final BluetoothDevice device;
+  final WatchBleLease? lease;
   final int mtu;
   final BleWriteQueue writeQueue;
   final StreamSubscription<BluetoothConnectionState> connectionStateSub;
@@ -247,6 +251,8 @@ class BleManager {
   /// the async subscription cancel completes — so buffered `onScanResults`
   /// batches that arrive mid-teardown are dropped instead of mutating providers
   /// whose ScanPage widget is already being disposed (markNeedsBuild crash).
+  BleScanLease? _scanLease;
+  Future<void> _scanCleanup = Future.value();
   bool _scanActive = false;
   int _scanGeneration = 0;
   Completer<BluetoothAdapterState?>? _adapterWait;
@@ -332,6 +338,7 @@ class BleManager {
     if (_disposed) return;
     stopScan();
     final generation = _scanGeneration;
+    await _scanCleanup;
 
     final allowed = await _ensureBlePermissions();
     if (_disposed || generation != _scanGeneration) return;
@@ -399,16 +406,28 @@ class BleManager {
       // is not applicable on Windows desktop, so branch the call by platform.
       final withServices =
           serviceUuid == null ? const <Guid>[] : [Guid(serviceUuid)];
-      if (Platform.isAndroid) {
-        await FlutterBluePlus.startScan(
-          withServices: withServices,
-          oneByOne: true,
-          androidScanMode: AndroidScanMode.lowLatency,
-          androidUsesFineLocation: true,
-        );
+      final lease = await WatchBleCoordinator.shared.startScan(
+          start: () async {
+            if (_disposed || generation != _scanGeneration) return;
+            if (Platform.isAndroid) {
+              await FlutterBluePlus.startScan(
+                  withServices: withServices,
+                  oneByOne: true,
+                  androidScanMode: AndroidScanMode.lowLatency,
+                  androidUsesFineLocation: true);
+            } else {
+              await FlutterBluePlus.startScan(
+                  withServices: withServices, oneByOne: true);
+            }
+          },
+          stop: FlutterBluePlus.stopScan,
+          onRevoked: () {
+            if (generation == _scanGeneration) stopScan();
+          });
+      if (_disposed || generation != _scanGeneration) {
+        await lease.close();
       } else {
-        await FlutterBluePlus.startScan(
-            withServices: withServices, oneByOne: true);
+        _scanLease = lease;
       }
     } catch (e) {
       if (_disposed || generation != _scanGeneration) return;
@@ -427,7 +446,13 @@ class BleManager {
     _scanSub = null;
     _scanErrorSub?.cancel();
     _scanErrorSub = null;
-    FlutterBluePlus.stopScan();
+    final lease = _scanLease;
+    _scanLease = null;
+    if (lease != null) {
+      _scanCleanup = lease.close().catchError((Object error) {
+        debugPrint('BLE scan cleanup failed: $error');
+      });
+    }
     if (_state == BleState.scanning) {
       _setState(BleState.disconnected);
     }
@@ -452,8 +477,8 @@ class BleManager {
     _deviceId = deviceId;
     _deviceName = deviceName;
     final device = BluetoothDevice(remoteId: DeviceIdentifier(deviceId));
-    _connectingDevice = device;
-    _connectingGeneration = connectionGeneration;
+    WatchBleLease? lease;
+    var ownsDevice = false;
 
     StreamSubscription<BluetoothConnectionState>? connectionStateSub;
     StreamSubscription<List<int>>? commandNotificationSub;
@@ -487,7 +512,8 @@ class BleManager {
       if (_connectionOwner.isCurrent(connectionGeneration)) return true;
       await releaseSetup();
       try {
-        await device.disconnect();
+        if (ownsDevice) await device.disconnect();
+        if (!device.isConnected) lease?.release();
       } catch (e) {
         debugPrint('BleManager: stale connection disconnect failed: $e');
       }
@@ -495,6 +521,13 @@ class BleManager {
     }
 
     try {
+      lease = WatchBleCoordinator.shared.acquire(deviceId);
+      if (device.isConnected) throw StateError('设备已被其他功能连接');
+      ownsDevice = true;
+      _connectingDevice = device;
+      _connectingGeneration = connectionGeneration;
+      await WatchBleCoordinator.shared.stopScanning();
+      if (!await keepCurrent()) return false;
       debugPrint('BleManager: connecting to $deviceName ($deviceId)');
 
       // Connect with timeout.
@@ -534,6 +567,7 @@ class BleManager {
       final services = device.servicesList;
       final jwConnected = await _attachJw(
         services: services,
+        lease: lease,
         allowJw: allowJw || _requireJwProfile,
         device: device,
         connectionGeneration: connectionGeneration,
@@ -808,6 +842,7 @@ class BleManager {
       if (!await keepCurrent()) return false;
       final resources = _BleConnectionResources(
         device: device,
+        lease: lease,
         mtu: mtu,
         writeQueue: writeQueue,
         connectionStateSub: connectionStateSub,
@@ -855,7 +890,8 @@ class BleManager {
       debugPrint('BleManager: connect failed: $e');
       await releaseSetup();
       try {
-        await device.disconnect();
+        if (ownsDevice) await device.disconnect();
+        if (!ownsDevice || !device.isConnected) lease?.release();
       } catch (disconnectError) {
         debugPrint(
           'BleManager: failed connection disconnect error: '
@@ -1018,6 +1054,7 @@ class BleManager {
   /// and null when [services] is not a JW target (caller continues with media).
   Future<bool?> _attachJw({
     required List<BluetoothService> services,
+    required WatchBleLease? lease,
     required bool allowJw,
     required BluetoothDevice device,
     required int connectionGeneration,
@@ -1139,6 +1176,7 @@ class BleManager {
 
     final resources = _BleConnectionResources(
       device: device,
+      lease: lease,
       mtu: jwMtu,
       writeQueue: writeQueue,
       connectionStateSub: connectionStateSub,
@@ -1242,8 +1280,15 @@ class BleManager {
     unawaited(resources.connectionStateSub.cancel());
     resources.l1?.reset();
     resources.naviL1?.reset();
-    if (disconnectLink) {
-      unawaited(resources.device.disconnect().catchError((Object _) {}));
+    if (disconnectLink || resources.device.isConnected) {
+      unawaited(resources.device.disconnect().then((_) {
+        if (!resources.device.isConnected) resources.lease?.release();
+      }).catchError((Object error) {
+        debugPrint(
+            'BLE disconnect not confirmed; device lease retained: $error');
+      }));
+    } else {
+      resources.lease?.release();
     }
   }
 
@@ -1263,6 +1308,7 @@ class BleManager {
   }
 
   void _cleanup() {
+    stopScan();
     _scanGeneration++;
     _cancelAdapterWait();
     _scanActive = false;

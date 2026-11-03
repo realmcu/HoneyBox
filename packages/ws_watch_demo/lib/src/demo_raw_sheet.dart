@@ -89,9 +89,7 @@ class _DemoRawDebugSheetState extends State<DemoRawDebugSheet> {
             data: request.data,
             replyAddress: reply,
             replyTimeout: _waitReply ? const Duration(seconds: 5) : null));
-        return result == null
-            ? 'L1 ACK'
-            : '回应操作数据：${debugHex(result)}';
+        return result == null ? 'L1 ACK' : '回应操作数据：${debugHex(result)}';
       });
       if (mounted) setState(() => _message = '成功 · $value');
     } catch (e) {
@@ -109,8 +107,8 @@ class _DemoRawDebugSheetState extends State<DemoRawDebugSheet> {
     final hex = debugHex(exampleRequestHex(protocol.address));
     setState(() {
       _l2.text = hex;
-      _waitReply = protocol.address.cmd == 2 &&
-          protocol.address.settingOpcode == 1;
+      _waitReply =
+          protocol.address.cmd == 2 && protocol.address.settingOpcode == 1;
       if (_waitReply) {
         _replyL2.text = debugHex(exampleReplyHex(protocol.address));
       }
@@ -134,83 +132,76 @@ class _DemoRawDebugSheetState extends State<DemoRawDebugSheet> {
     final theme = Theme.of(context);
     final maxHeight = MediaQuery.sizeOf(context).height * 0.82;
     return SizedBox(
-        height: maxHeight,
-        child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            children: [
-                    Text('Raw 调试',
-                        style: theme.textTheme.titleLarge,
-                        key: const Key('raw-sheet-title')),
-                    Text('状态：${widget.watch.state.name}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant)),
-                    const SizedBox(height: 8),
-                    const Text(
-                        'L2 请求 hex（空格分隔，不含 L1）。设置类含操作码；读语言示例：02 00 03 00 01 01'),
-                    TextField(
-                        controller: _l2,
-                        enabled: !_busy,
-                        maxLines: 3,
-                        decoration: const InputDecoration(
-                            labelText: 'L2 请求 hex',
-                            border: OutlineInputBorder()),
-                        key: const Key('raw-l2-request')),
-                    SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('等待完整回应'),
-                        value: _waitReply,
-                        onChanged:
-                            _busy ? null : (v) => setState(() => _waitReply = v)),
-                    if (_waitReply)
-                      TextField(
-                          controller: _replyL2,
-                          enabled: !_busy,
-                          maxLines: 2,
-                          decoration: const InputDecoration(
-                              labelText: 'L2 回应地址 hex（device→phone）',
-                              border: OutlineInputBorder()),
-                          key: const Key('raw-l2-reply')),
-                    FilledButton(
-                        onPressed: _canSend ? _send : null,
-                        key: const Key('raw-send'),
-                        child: const Text('发送 Raw')),
-                    if (!_canSend && widget.watch.state != WSConnectionState.ready)
-                      Text('请先在 M3 连接进入 ready，或使用 M2 实验室。',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.error)),
-                    if (_message != null) ...[
-                      const SizedBox(height: 12),
-                      SelectableText(_message!,
-                          key: const Key('raw-result')),
-                    ],
-                    const Divider(height: 32),
-                    ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('从协议表带入'),
-                        trailing: Icon(_showProtocols
-                            ? Icons.expand_less
-                            : Icons.expand_more),
-                        onTap: () =>
-                            setState(() => _showProtocols = !_showProtocols)),
-                    if (_showProtocols) ...[
-                      TextField(
-                          controller: _protocolSearch,
-                          decoration: const InputDecoration(
-                              labelText: '搜索 active 请求',
-                              border: OutlineInputBorder(),
-                              isDense: true),
-                          onChanged: (_) => setState(() {})),
-                      for (final p in _filteredProtocols)
-                        ListTile(
-                            dense: true,
-                            title: Text(p.name, maxLines: 1),
-                            subtitle: Text('${p.address}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis),
-                            onTap: () => _applyProtocol(p)),
-                    ],
-            ],
-        ),
+      height: maxHeight,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        children: [
+          Text('Raw 调试',
+              style: theme.textTheme.titleLarge,
+              key: const Key('raw-sheet-title')),
+          Text('状态：${widget.watch.state.name}',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 8),
+          const Text('L2 请求 hex（空格分隔，不含 L1）。设置类含操作码；读语言示例：02 00 03 00 01 01'),
+          TextField(
+              controller: _l2,
+              enabled: !_busy,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                  labelText: 'L2 请求 hex', border: OutlineInputBorder()),
+              key: const Key('raw-l2-request')),
+          SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('等待完整回应'),
+              value: _waitReply,
+              onChanged: _busy ? null : (v) => setState(() => _waitReply = v)),
+          if (_waitReply)
+            TextField(
+                controller: _replyL2,
+                enabled: !_busy,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                    labelText: 'L2 回应地址 hex（device→phone）',
+                    border: OutlineInputBorder()),
+                key: const Key('raw-l2-reply')),
+          FilledButton(
+              onPressed: _canSend ? _send : null,
+              key: const Key('raw-send'),
+              child: const Text('发送 Raw')),
+          if (!_canSend && widget.watch.state != WSConnectionState.ready)
+            Text('请先在 M3 连接进入 ready，或使用 M2 实验室。',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error)),
+          if (_message != null) ...[
+            const SizedBox(height: 12),
+            SelectableText(_message!, key: const Key('raw-result')),
+          ],
+          const Divider(height: 32),
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('从协议表带入'),
+              trailing:
+                  Icon(_showProtocols ? Icons.expand_less : Icons.expand_more),
+              onTap: () => setState(() => _showProtocols = !_showProtocols)),
+          if (_showProtocols) ...[
+            TextField(
+                controller: _protocolSearch,
+                decoration: const InputDecoration(
+                    labelText: '搜索 active 请求',
+                    border: OutlineInputBorder(),
+                    isDense: true),
+                onChanged: (_) => setState(() {})),
+            for (final p in _filteredProtocols)
+              ListTile(
+                  dense: true,
+                  title: Text(p.name, maxLines: 1),
+                  subtitle: Text('${p.address}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () => _applyProtocol(p)),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -8,6 +8,8 @@ environment:
 
 workspace:
   - packages/watch_transport
+  - packages/watch_transport_ble
+  - packages/watch_transport_ble/example
   - packages/watch_transport_simulation
   - packages/ws_watch_sdk
   - packages/ws_watch_demo
@@ -33,12 +35,16 @@ dependencies:
   flutter_secure_storage: ^9.2.4
   pointycastle: ^3.9.1
   palette_generator: ^0.3.3+7
+  watch_transport_ble:
+    path: packages/watch_transport_ble
   ws_watch_demo:
     path: packages/ws_watch_demo
   archive: ^4.5.2
   share_plus: ^12.0.2
 
 dev_dependencies:
+  watch_transport:
+    path: packages/watch_transport
   flutter_test:
     sdk: flutter
 

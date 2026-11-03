@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:watch_transport_ble/watch_transport_ble.dart'
+    show WatchBleCoordinator, WatchBleLease, BleScanLease;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'rtl8762_upgrade.dart';
 import 'rtl8762_activation.dart';
@@ -12,6 +14,8 @@ class Rtl8762FlutterBlueAdapter implements Rtl8762Device, RtlDfuTransport {
   StreamSubscription<List<int>>? _notifications;
   Completer<Uint8List>? _reply;
   bool _ownsConnection = false;
+  WatchBleLease? _lease;
+  BleScanLease? _scanLease;
   Rtl8762FlutterBlueAdapter(String deviceId)
       : _device = BluetoothDevice(remoteId: DeviceIdentifier(deviceId));
 
@@ -24,7 +28,12 @@ class Rtl8762FlutterBlueAdapter implements Rtl8762Device, RtlDfuTransport {
   List<BluetoothService> _services = [];
 
   Future<void> _connect() async {
+    _lease ??= WatchBleCoordinator.shared.acquire(_device.remoteId.str);
+    _lease!.addDevice(_device.remoteId.str);
+    if (_device.isConnected && !_ownsConnection) throw StateError('设备已被其他功能连接');
     if (!_device.isConnected) {
+      await WatchBleCoordinator.shared.stopScanning();
+      _ownsConnection = true;
       await _device.connect(
           license: License.nonprofit, timeout: const Duration(seconds: 30));
       _ownsConnection = true;
@@ -64,8 +73,8 @@ class Rtl8762FlutterBlueAdapter implements Rtl8762Device, RtlDfuTransport {
       a.length == b.length &&
       List.generate(a.length, (i) => a[i] == b[i]).every((x) => x);
   Future<BluetoothDevice> _find(Uint8List identity, {required bool dfu}) async {
-    await FlutterBluePlus.stopScan();
     final found = Completer<BluetoothDevice>();
+    found.future.ignore();
     final started = DateTime.now();
     final sub = FlutterBluePlus.onScanResults.listen((results) {
       for (final result in results) {
@@ -82,11 +91,20 @@ class Rtl8762FlutterBlueAdapter implements Rtl8762Device, RtlDfuTransport {
       }
     });
     try {
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 45));
+      _scanLease = await WatchBleCoordinator.shared.startScan(
+          start: () =>
+              FlutterBluePlus.startScan(timeout: const Duration(seconds: 45)),
+          stop: FlutterBluePlus.stopScan,
+          onRevoked: () {
+            if (!found.isCompleted) {
+              found.completeError(StateError('OTA 扫描被连接操作终止'));
+            }
+          });
       return await found.future.timeout(const Duration(seconds: 45));
     } finally {
       await sub.cancel();
-      await FlutterBluePlus.stopScan();
+      await _scanLease?.close();
+      _scanLease = null;
     }
   }
 
@@ -191,7 +209,12 @@ class Rtl8762FlutterBlueAdapter implements Rtl8762Device, RtlDfuTransport {
   Future<void> close() async {
     await _notifications?.cancel();
     _notifications = null;
-    await FlutterBluePlus.stopScan();
-    if (_ownsConnection && _device.isConnected) await _device.disconnect();
+    await _scanLease?.close();
+    _scanLease = null;
+    if (_ownsConnection) await _device.disconnect();
+    if (_ownsConnection && _device.isConnected) throw StateError('OTA 连接尚未断开');
+    _ownsConnection = false;
+    _lease?.release();
+    _lease = null;
   }
 }

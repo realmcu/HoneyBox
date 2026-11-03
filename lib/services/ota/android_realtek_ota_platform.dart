@@ -1,4 +1,6 @@
 import 'package:flutter/services.dart';
+import 'package:watch_transport_ble/watch_transport_ble.dart'
+    show WatchBleCoordinator, WatchBleLease;
 import 'ota_platform.dart';
 import 'firmware_inspection.dart';
 import 'device_version_reader.dart';
@@ -10,6 +12,7 @@ class AndroidRealtekOtaPlatform implements OtaPlatform {
   final DeviceVersionReader versionReader;
   AndroidRealtekOtaPlatform(
       {this.versionReader = const FlutterBlueDeviceVersionReader()});
+  WatchBleLease? _lease;
   bool _reading = false;
   bool _needsClose = false;
   bool _preparing = false;
@@ -54,9 +57,11 @@ class AndroidRealtekOtaPlatform implements OtaPlatform {
     if (sessionId == null || sessionId.isEmpty) {
       throw ArgumentError('sessionId required');
     }
+    _lease = WatchBleCoordinator.shared.acquire(deviceId, exclusive: true);
     _preparing = true;
     _needsClose = true;
     try {
+      await WatchBleCoordinator.shared.stopScanning();
       await _commands.invokeMethod<void>(
           'prepare', {'address': deviceId, 'sessionId': sessionId});
       _prepared = true;
@@ -85,6 +90,9 @@ class AndroidRealtekOtaPlatform implements OtaPlatform {
       _needsClose = false;
       _started = false;
       _prepared = false;
+      // Native close rejects while DFU is running; only its success releases BLE.
+      _lease?.release();
+      _lease = null;
     } finally {
       _closing = false;
     }

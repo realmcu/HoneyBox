@@ -1,51 +1,40 @@
-#include "honey_media_windows/bluetooth_link.h"
-
+#include "include/watch_transport_ble/watch_transport_ble_plugin_c_api.h"
+#include <flutter/method_channel.h>
+#include <flutter/plugin_registrar_windows.h>
+#include <flutter/standard_method_codec.h>
 #include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Foundation.h>
-
 #include <condition_variable>
-#include <deque>
-#include <map>
-#include <mutex>
-#include <thread>
 #include <utility>
+#include "bluetooth_address.h"
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
 
-namespace hmw {
 namespace {
-
 namespace bt = winrt::Windows::Devices::Bluetooth;
-
-Error LinkError(Status status, std::string message) {
-  return {status, std::move(message)};
-}
-
-// Owns every Windows Runtime call on one worker thread. Bluetooth calls block,
-// and the Flutter platform thread must never wait on the radio.
-class WinrtBluetoothLinkTuner final : public BluetoothLinkTuner {
+class WinrtBluetoothLinkTuner final {
  public:
   WinrtBluetoothLinkTuner() {
     worker_ = std::thread([this] { Run(); });
   }
 
-  ~WinrtBluetoothLinkTuner() override { Shutdown(); }
+  ~WinrtBluetoothLinkTuner() { Shutdown(); }
 
-  Outcome RequestThroughput(uint64_t address) override {
-    if (address == 0U) {
-      return {LinkError(Status::kInvalidArgument,
-                        "Bluetooth address must not be zero")};
-    }
-    if (!Post([this, address] { AcquireOnWorker(address); })) {
-      return {LinkError(Status::kInvalidState,
-                        "Bluetooth link tuner is shut down")};
-    }
-    return {};
+  bool RequestThroughput(uint64_t address) {
+    return address != 0U && Post([this, address] { AcquireOnWorker(address); });
   }
 
-  void Release(uint64_t address) override {
+  void Release(uint64_t address) {
     (void)Post([this, address] { ReleaseOnWorker(address); });
   }
 
-  void Shutdown() override {
+  void Shutdown() {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       if (!running_) return;
@@ -127,10 +116,40 @@ class WinrtBluetoothLinkTuner final : public BluetoothLinkTuner {
   std::map<uint64_t, winrt::Windows::Foundation::IClosable> held_;
 };
 
+class WatchBlePlugin final : public flutter::Plugin {
+ public:
+  explicit WatchBlePlugin(flutter::PluginRegistrarWindows* registrar)
+      : channel_(registrar->messenger(), "watch_transport_ble/link",
+                 &flutter::StandardMethodCodec::GetInstance()) {
+    channel_.SetMethodCallHandler([this](const auto& call, auto result) {
+      const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+      const std::string* id = nullptr;
+      if (args != nullptr) {
+        const auto it = args->find(flutter::EncodableValue("remoteId"));
+        if (it != args->end()) id = std::get_if<std::string>(&it->second);
+      }
+      uint64_t address = 0U;
+      if (id == nullptr || (!watch_ble::ParseBluetoothAddress(*id, &address) || address == 0U)) {
+        result->Error("invalid_argument", "Expected a nonzero AA:BB:CC:DD:EE:FF remoteId");
+      } else if (call.method_name() == "requestThroughput") {
+        if (tuner_.RequestThroughput(address)) result->Success();
+        else result->Error("closed", "BLE tuner stopped");
+      } else if (call.method_name() == "releaseThroughput") {
+        tuner_.Release(address); result->Success();
+      } else {
+        result->NotImplemented();
+      }
+    });
+  }
+  ~WatchBlePlugin() override { channel_.SetMethodCallHandler(nullptr); tuner_.Shutdown(); }
+ private:
+  WinrtBluetoothLinkTuner tuner_;
+  flutter::MethodChannel<flutter::EncodableValue> channel_;
+};
 }  // namespace
 
-std::unique_ptr<BluetoothLinkTuner> BluetoothLinkTuner::Create() {
-  return std::make_unique<WinrtBluetoothLinkTuner>();
+void WatchTransportBlePluginCApiRegisterWithRegistrar(FlutterDesktopPluginRegistrarRef registrar) {
+  auto* windows = flutter::PluginRegistrarManager::GetInstance()
+      ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar);
+  windows->AddPlugin(std::make_unique<WatchBlePlugin>(windows));
 }
-
-}  // namespace hmw

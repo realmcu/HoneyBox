@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:watch_transport_ble/watch_transport_ble.dart'
+    show WatchBleCoordinator;
 
 // Exercise BleManager's actual flutter_blue_plus binding without a radio.
 // The interface is provided by flutter_blue_plus's existing dependency.
@@ -126,6 +128,8 @@ void main() {
     });
 
     expect(await manager.connect('old-device', 'S200', allowJw: true), isTrue);
+    expect(() => WatchBleCoordinator.shared.acquire('old-device'),
+        throwsA(isA<Exception>()));
     final oldPort = manager.jwTransport!;
     // A radio disconnect invalidates the old port before deferred session close.
     platform.emitState(const DeviceIdentifier('old-device'),
