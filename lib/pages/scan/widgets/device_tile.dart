@@ -8,8 +8,10 @@ class DeviceTile extends StatelessWidget {
   final String name;
   final int? rssi;
   final bool connectable;
+  final Map<int, List<int>> manufacturerData;
   final bool isConnecting;
   final VoidCallback? onConnect;
+  final String actionLabel;
 
   /// 虚拟调试设备:在标签行额外显示一枚橙色"调试"徽标以示区分。
   final bool debug;
@@ -20,8 +22,10 @@ class DeviceTile extends StatelessWidget {
     required this.name,
     this.rssi,
     this.connectable = true,
+    this.manufacturerData = const {},
     this.isConnecting = false,
     this.onConnect,
+    this.actionLabel = '连接',
     this.debug = false,
   });
 
@@ -63,6 +67,13 @@ class DeviceTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (manufacturerData.isNotEmpty)
+                      Text(
+                          manufacturerData.entries
+                              .map((e) =>
+                                  "厂商 ${e.key.toRadixString(16).padLeft(4, '0').toUpperCase()}: ${e.value.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(':')}")
+                              .join('\n'),
+                          style: tt.bodySmall),
                     const SizedBox(height: 7),
                     Wrap(
                       spacing: 6,
@@ -109,7 +120,7 @@ class DeviceTile extends StatelessWidget {
                           ),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        child: const Text('连接'),
+                        child: Text(actionLabel),
                       ),
               ),
             ],

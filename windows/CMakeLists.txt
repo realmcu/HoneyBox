@@ -57,6 +57,11 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("runner")
 
 
+# Windows-native media adapter. Its build remains independent of Flutter and
+# consumes the platform-neutral honey_media_core target.
+add_subdirectory("media")
+add_subdirectory("camera")
+
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)

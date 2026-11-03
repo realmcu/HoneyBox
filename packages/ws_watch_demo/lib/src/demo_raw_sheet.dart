@@ -36,7 +36,7 @@ class DemoRawDebugSheet extends StatefulWidget {
 
 class _DemoRawDebugSheetState extends State<DemoRawDebugSheet> {
   final _l2 = TextEditingController(text: '02 00 03 00 01 01');
-  final _replyL2 = TextEditingController(text: '02 00 03 00 02 02');
+  final _replyL2 = TextEditingController(text: '02 00 03 00 01 02');
   final _protocolSearch = TextEditingController();
   bool _waitReply = true, _busy = false, _showProtocols = false;
   String? _message;

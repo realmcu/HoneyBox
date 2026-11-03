@@ -50,28 +50,34 @@ void main() {
               return Scaffold(
                   body: FilledButton(
                       onPressed: () => showDemoRawDebugSheet(context,
-                          watch: watch,
-                          capture: DemoDebugScope.of(context)),
+                          watch: watch, capture: DemoDebugScope.of(context)),
                       child: const Text('open')));
             }))));
-    await watch.connect(kWsWatchSimDeviceId);
+    var connected = false;
+    unawaited(watch.connect(kWsWatchSimDeviceId).then((_) => connected = true));
     await drain(tester);
+    expect(connected, isTrue);
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('raw-sheet-title')), findsOneWidget);
     await tester.tap(find.byKey(const Key('raw-send')));
     await drain(tester);
-    expect(find.textContaining('成功 · 回应操作数据：01'), findsOneWidget);
-    await tester.enterText(find.byKey(const Key('raw-l2-request')),
-        '02 00 03 00 02 00 07');
+    expect(
+        tester.widget<SelectableText>(find.byKey(const Key('raw-result'))).data,
+        '成功 · 回应操作数据：01');
+    await tester.enterText(
+        find.byKey(const Key('raw-l2-request')), '02 00 03 00 02 00 07');
     await tester.tap(find.byType(SwitchListTile));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('raw-send')));
     await drain(tester);
     expect(device.language, 7);
     await tester.pumpWidget(const SizedBox());
-    await watch.dispose();
-    await store.close();
+    var disposed = false;
+    unawaited(watch.dispose().then((_) => disposed = true));
+    await drain(tester);
+    expect(disposed, isTrue);
+    await tester.runAsync(store.close);
     expect(tester.takeException(), isNull);
   });
 }

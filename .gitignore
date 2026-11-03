@@ -2,6 +2,8 @@
 .dart_tool/
 .packages
 build/
+/build/media-core-*/
+/.codex-build-tools.path
 .flutter-plugins
 .flutter-plugins-dependencies
 **/doc/api/
@@ -36,7 +38,6 @@ android/mapfeature/src/main/cpp/libjpeg-turbo/fuzz/
 android/mapfeature/src/main/cpp/libjpeg-turbo/test/
 
 # iOS
-ios/
 *.hmap
 *.ipa
 *.dSYM.zip
@@ -47,15 +48,19 @@ DerivedData/
 build/
 
 # macOS
-macos/
+/macos/Flutter/ephemeral/
 *.xcworkspace
+!ios/Runner.xcworkspace/
+!ios/Runner.xcworkspace/**
+!macos/Runner.xcworkspace/
+!macos/Runner.xcworkspace/**
 xcuserdata/
 # ws_watch_demo 的独立运行工程需要 macOS 平台目录
 !packages/ws_watch_demo/example/macos/
 !packages/ws_watch_demo/example/macos/Runner.xcworkspace
 
-# Linux
-linux/
+# Linux generated build inputs
+/linux/flutter/ephemeral/
 
 # Web
 web/

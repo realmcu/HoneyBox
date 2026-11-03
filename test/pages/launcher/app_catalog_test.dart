@@ -4,10 +4,15 @@ import 'package:honeybox/pages/launcher/app_catalog.dart';
 
 void main() {
   group('kAppCatalog', () {
-    test('contains exactly ebadge, watch, dashboard, wsWatch in this order',
-        () {
-      expect(kAppCatalog.map((e) => e.id).toList(),
-          [AppId.ebadge, AppId.watch, AppId.dashboard, AppId.wsWatch]);
+    test('contains all six app entries in the merged order', () {
+      expect(kAppCatalog.map((e) => e.id).toList(), [
+        AppId.ebadge,
+        AppId.watch,
+        AppId.dashboard,
+        AppId.wsWatch,
+        AppId.capture,
+        AppId.ota,
+      ]);
     });
 
     test('every entry has non-empty title, subtitle, deviceFilter', () {
@@ -19,10 +24,10 @@ void main() {
       }
     });
 
-    test('uses the product names eBadge, Watch, Dashboard, WS Watch', () {
+    test('uses the product names from both branches', () {
       expect(
         kAppCatalog.map((e) => e.title).toList(),
-        ['eBadge', 'Watch', 'Dashboard', 'WS Watch'],
+        ['eBadge', 'Watch', 'Dashboard', 'WS Watch', '数据采集', 'OTA'],
       );
     });
 
@@ -36,6 +41,8 @@ void main() {
       expect(byId[AppId.watch], 'Watch');
       expect(byId[AppId.dashboard], 'Dashboard');
       expect(byId[AppId.wsWatch], 'WS Watch');
+      expect(byId[AppId.capture], '*');
+      expect(byId[AppId.ota], '*');
     });
   });
 
@@ -45,6 +52,8 @@ void main() {
       expect(routeNameFor(AppId.watch), '/watch-root');
       expect(routeNameFor(AppId.dashboard), '/dashboard-root');
       expect(routeNameFor(AppId.wsWatch), '/ws-watch-root');
+      expect(routeNameFor(AppId.capture), '/capture-root');
+      expect(routeNameFor(AppId.ota), '/ota-root');
     });
   });
 }

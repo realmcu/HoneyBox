@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -30,20 +30,42 @@ const Color _kDone = Color(0xFF34C759); // iOS green
 class StreamPage extends ConsumerStatefulWidget {
   final String deviceName;
   final String deviceId;
+  final EncoderService? encoder;
+  final Future<PermissionStatus> Function()? requestCameraPermission;
+  final Future<EncoderConfig> Function()? loadEncoderConfig;
+  final Duration cameraReadyTimeout;
+  final Duration encoderStopTimeout;
+  final StreamTransport Function(StreamTransportKind kind)? transportFactory;
 
   const StreamPage({
     super.key,
     required this.deviceName,
     required this.deviceId,
+    this.encoder,
+    this.requestCameraPermission,
+    this.loadEncoderConfig,
+    this.cameraReadyTimeout = const Duration(seconds: 10),
+    this.encoderStopTimeout = const Duration(seconds: 5),
+    this.transportFactory,
   });
 
   @override
   ConsumerState<StreamPage> createState() => _StreamPageState();
 }
 
+enum _CameraAttemptState { pending, ready, failed }
+
+class _CameraAttempt {
+  _CameraAttempt(this.id);
+
+  final int id;
+  _CameraAttemptState state = _CameraAttemptState.pending;
+}
+
 class _StreamPageState extends ConsumerState<StreamPage>
     with WidgetsBindingObserver {
-  final EncoderService _encoder = EncoderService();
+  late final EncoderService _encoder;
+  late final void Function(String message) _encoderRunErrorDispatcher;
 
   EncoderConfig _config = const EncoderConfig();
   CameraInfo? _camera;
@@ -54,6 +76,10 @@ class _StreamPageState extends ConsumerState<StreamPage>
   bool _permissionDenied = false;
   String? _error;
   bool _facingFront = false;
+  bool _cameraStarting = true;
+  int _nextCameraAttemptId = 0;
+  _CameraAttempt? _cameraAttempt;
+  Timer? _cameraReadyTimer;
 
   /// Latest captured JPEG bytes (single-slot demo cache). Populated by
   /// [_takePicture] — invoked via a hidden long-press on the shutter, and in
@@ -115,6 +141,18 @@ class _StreamPageState extends ConsumerState<StreamPage>
   /// natively are forwarded here in order via a small bounded queue.
   StreamSession? _session;
   StreamSubscription<Uint8List>? _notifySub;
+  StreamSubscription<bool>? _availabilitySub;
+  int _projectionGeneration = 0;
+  int? _encoderStartedGeneration;
+  int? _encoderStopRequestedGeneration;
+  StreamSession? _encoderRunSession;
+  bool _encoderRunWifi = false;
+  bool _encoderRunStreams = false;
+  Completer<bool>? _encoderStopBarrier;
+  Timer? _encoderStopTimer;
+  bool _encoderStopReportsResult = true;
+  bool _projectionStartPending = false;
+  int? _sendingGeneration;
 
   /// WiFi projection: encoded frames go straight to the TCP client (framed with
   /// the 6-byte WiFi header — no L2 / credits / handshake). The client itself is
@@ -123,7 +161,6 @@ class _StreamPageState extends ConsumerState<StreamPage>
   TcpVideoClient? _wifiClient;
 
   final List<(Uint8List, bool)> _sendQueue = []; // (frame, isKey)
-  bool _sending = false;
   bool _streaming = false; // this run projects (vs. record-only for H.264)
   int _chunkSize = 0; // transport per-KS_FRAME payload budget (for diagnostics)
   static const int _kMaxSendQueue = 6;
@@ -155,87 +192,11 @@ class _StreamPageState extends ConsumerState<StreamPage>
   @override
   void initState() {
     super.initState();
+    _encoder = widget.encoder ?? EncoderService();
+    _encoderRunErrorDispatcher = _handleEncoderError;
     WidgetsBinding.instance.addObserver(this);
 
-    _encoder
-      ..onCamera = (info) {
-        if (!mounted) return;
-        setState(() {
-          _camera = info;
-          _facingFront = info.facingFront;
-          _error = null;
-          _ev = _ev.clamp(info.evMin, info.evMax);
-        });
-        _remoteSession?.reportSnapshot(
-          recording: false,
-          facing: _facingFront ? 1 : 0,
-          zoom: _zoom,
-          hasLastShot: _lastShot != null,
-          lastShotId: 0,
-        );
-      }
-      ..onStats = (stats) {
-        if (!mounted) return;
-        setState(() {
-          _stats = stats;
-          // While streaming, onFrame tracks the transmitted size (fresher);
-          // otherwise use the native encoded last-frame size.
-          if (!_streaming) _lastFrameBytes = stats.lastBytes;
-        });
-      }
-      ..onStarted = (path, w, h) {
-        if (!mounted) return;
-        setState(() {
-          _encoding = true;
-          _result = null;
-          _stats = const EncoderStats();
-          _lastFrameBytes = 0;
-          _frameSnaps.clear();
-          _actualW = w;
-          _actualH = h;
-        });
-        _startInfoTimer();
-      }
-      ..onStopped = (result) {
-        _teardownSession();
-        _stopInfoTimer();
-        if (!mounted) return;
-        setState(() {
-          _encoding = false;
-          _streaming = false;
-          _lastFrameBytes = 0;
-          _result = result;
-        });
-      }
-      ..onError = (message) {
-        _teardownSession();
-        _stopInfoTimer();
-        if (!mounted) return;
-        setState(() {
-          _error = message;
-          _encoding = false;
-          _streaming = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
-      }
-      ..onInfo = (message) {
-        if (!mounted || message.isEmpty) return;
-        // Stash diagnostics silently; only rendered when the toggle is on.
-        setState(() => _diag = message);
-      }
-      ..onPreview = (encoded, textureId, w, h) {
-        if (!mounted) return;
-        setState(() {
-          _encodedPreview = encoded;
-          _decodedTextureId = textureId;
-          _decodedW = w;
-          _decodedH = h;
-        });
-      }
-      ..onFrame = _onEncodedFrame;
-
+    _bindEncoderDispatchers();
     _encoder.listen();
     _bootstrapCamera();
 
@@ -250,42 +211,180 @@ class _StreamPageState extends ConsumerState<StreamPage>
     );
   }
 
-  Future<void> _bootstrapCamera() async {
-    // Restore the last-used encoding parameters, but always reset zoom to 1×
-    // on entry — digital zoom is a per-session choice, not a preference. Users
-    // start every screen fresh at full field of view.
-    final saved = await EncoderConfigStore.load();
-    if (mounted) {
+  bool _isCurrentCameraAttempt(_CameraAttempt attempt) =>
+      mounted && _cameraAttempt?.id == attempt.id;
+
+  _CameraAttempt _beginCameraAttempt() {
+    final attempt = _CameraAttempt(++_nextCameraAttemptId);
+    _cameraAttempt = attempt;
+    _encoder.onCamera = (info) {
+      _handleCameraReady(attempt, info);
+    };
+    return attempt;
+  }
+
+  void _handleCameraReady(_CameraAttempt attempt, CameraInfo info) {
+    if (!_isCurrentCameraAttempt(attempt) ||
+        attempt.state == _CameraAttemptState.failed) {
+      return;
+    }
+    attempt.state = _CameraAttemptState.ready;
+    _cameraReadyTimer?.cancel();
+    setState(() {
+      _camera = info;
+      _cameraStarting = false;
+      _facingFront = info.facingFront;
+      _error = null;
+      _ev = _ev.clamp(info.evMin, info.evMax);
+    });
+    _remoteSession?.reportSnapshot(
+      recording: false,
+      facing: _facingFront ? 1 : 0,
+      zoom: _zoom,
+      hasLastShot: _lastShot != null,
+      lastShotId: 0,
+    );
+  }
+
+  void _handleCameraError(_CameraAttempt attempt, String message) {
+    if (!_isCurrentCameraAttempt(attempt) ||
+        attempt.state == _CameraAttemptState.failed) {
+      return;
+    }
+    if (attempt.state == _CameraAttemptState.pending || _camera == null) {
+      _failCameraStartup(attempt, message);
+      return;
+    }
+    _teardownSession();
+    _stopInfoTimer();
+    setState(() {
+      _error = message;
+      _encoding = false;
+      _streaming = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  String _startupError(String? message) {
+    final normalized = (message ?? '').replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.isEmpty) return '摄像头启动失败，请检查设备后重试。';
+    if (normalized.startsWith('摄像头启动超时')) return normalized;
+    final bounded =
+        normalized.length > 80 ? '${normalized.substring(0, 80)}…' : normalized;
+    return bounded.startsWith('摄像头启动失败') ? bounded : '摄像头启动失败：$bounded';
+  }
+
+  void _failCameraStartup(_CameraAttempt attempt, String message) {
+    if (!_isCurrentCameraAttempt(attempt) ||
+        attempt.state != _CameraAttemptState.pending) {
+      return;
+    }
+    attempt.state = _CameraAttemptState.failed;
+    _cameraReadyTimer?.cancel();
+    setState(() {
+      _camera = null;
+      _cameraStarting = false;
+      _error = _startupError(message);
+    });
+  }
+
+  void _startCameraReadyTimeout(_CameraAttempt attempt) {
+    _cameraReadyTimer?.cancel();
+    _cameraReadyTimer = Timer(widget.cameraReadyTimeout, () {
+      if (!_isCurrentCameraAttempt(attempt) ||
+          attempt.state != _CameraAttemptState.pending) {
+        return;
+      }
+      _cameraReadyTimer = null;
+      _failCameraStartup(attempt, '摄像头启动超时，请检查设备后重试。');
+    });
+  }
+
+  Future<void> _bootstrapCamera({bool retry = false}) async {
+    final attempt = _beginCameraAttempt();
+    _cameraReadyTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _error = null;
+      _camera = null;
+      _cameraStarting = true;
+    });
+
+    if (retry) {
+      await _encoder.restartCameraSession();
+      if (!_isCurrentCameraAttempt(attempt)) return;
+    }
+
+    try {
+      // Restore the last-used encoding parameters, but always reset zoom to 1×
+      // on entry — digital zoom is a per-session choice, not a preference.
+      final saved =
+          await (widget.loadEncoderConfig ?? EncoderConfigStore.load)();
+      if (!_isCurrentCameraAttempt(attempt)) return;
       setState(() {
         _config = saved.copyWith(cropZoom: _kMinZoom);
         _zoom = _kMinZoom;
       });
-    }
 
-    final status = await Permission.camera.request();
-    if (!status.isGranted) {
-      if (mounted) setState(() => _permissionDenied = true);
-      return;
+      final requestPermission =
+          widget.requestCameraPermission ?? Permission.camera.request;
+      final status = await requestPermission();
+      if (!_isCurrentCameraAttempt(attempt)) return;
+      if (!status.isGranted) {
+        attempt.state = _CameraAttemptState.failed;
+        setState(() {
+          _permissionDenied = true;
+          _cameraStarting = false;
+        });
+        return;
+      }
+      setState(() => _permissionDenied = false);
+      _startCameraReadyTimeout(attempt);
+      await _encoder.openCamera(_config, facingFront: _facingFront);
+    } on MissingPluginException {
+      _failCameraStartup(attempt, '当前平台未提供摄像头功能，请确认应用已正确安装。');
+    } on PlatformException catch (error) {
+      if (error.code == 'MissingPluginException') {
+        _failCameraStartup(
+          attempt,
+          '当前平台未提供摄像头功能，请确认应用已正确安装。',
+        );
+      } else {
+        _failCameraStartup(attempt, error.message ?? '摄像头不可用');
+      }
+    } catch (_) {
+      _failCameraStartup(attempt, '摄像头启动失败，请检查设备后重试。');
     }
-    if (mounted) setState(() => _permissionDenied = false);
-    await _encoder.openCamera(_config, facingFront: _facingFront);
+  }
+
+  void _retryCamera() {
+    if (_cameraStarting) return;
+    unawaited(_bootstrapCamera(retry: true));
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (!_permissionDenied && _camera == null) {
-        _encoder.openCamera(_config, facingFront: _facingFront);
+      if (!_permissionDenied && _camera == null && !_cameraStarting) {
+        unawaited(_bootstrapCamera(retry: true));
       }
     } else {
-      // Releasing in the background also stops any in-flight encode natively.
-      if (_encoding) _encoder.stopEncoding();
+      _cameraAttempt?.state = _CameraAttemptState.failed;
+      _cameraAttempt = null;
+      _cameraReadyTimer?.cancel();
+      final encoderGeneration = _encoderStartedGeneration;
       _teardownSession();
       _stopInfoTimer();
+      if (encoderGeneration != null) {
+        _requestEncoderStop(encoderGeneration, reportResult: false);
+      }
       _encoder.closeCamera();
       if (mounted) {
         setState(() {
           _camera = null;
+          _cameraStarting = false;
           _encoding = false;
           _streaming = false;
           _encodedPreview = false;
@@ -298,10 +397,14 @@ class _StreamPageState extends ConsumerState<StreamPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _cameraAttempt?.state = _CameraAttemptState.failed;
+    _cameraAttempt = null;
+    _cameraReadyTimer?.cancel();
     _focusTimer?.cancel();
     _zoomTimer?.cancel();
     _flashTimer?.cancel();
     _stopInfoTimer();
+    _retireEncoderRun(stopped: false);
     _teardownSession();
     _encoder.dispose();
     _lastShot = null;
@@ -355,18 +458,34 @@ class _StreamPageState extends ConsumerState<StreamPage>
     return (w, h);
   }
 
-  StreamTransport _transportFor(StreamTransportKind kind) => switch (kind) {
+  StreamTransport _defaultTransportFor(StreamTransportKind kind) =>
+      switch (kind) {
         StreamTransportKind.ble =>
           BleStreamTransport(ref.read(bleManagerProvider)),
         StreamTransportKind.wifi => WifiStreamTransport(),
       };
 
+  StreamTransport _transportFor(StreamTransportKind kind) =>
+      widget.transportFactory?.call(kind) ?? _defaultTransportFor(kind);
+
   /// Shutter: start/stop projection. MSV1/JPEG stream over the transport (and
   /// optionally record); H.264 is a file-recording test only.
   Future<void> _toggleProjection() async {
-    if (_encoding) {
-      _encoder.stopEncoding(); // onStopped tears the session down
-      _session?.close();
+    final encoderRunning =
+        _encoderStartedGeneration != null && !_encoderStopping;
+    if (_encoding || _session != null || _wifiMode || encoderRunning) {
+      _stopProjection();
+      return;
+    }
+    if (_projectionStartPending) return;
+    _projectionStartPending = true;
+    final encoderStopped = await _awaitEncoderStopped();
+    _projectionStartPending = false;
+    if (!mounted) return;
+    if (!encoderStopped) {
+      setState(() {
+        _error = '编码器尚未停止，无法重新投屏';
+      });
       return;
     }
     setState(() {
@@ -381,13 +500,15 @@ class _StreamPageState extends ConsumerState<StreamPage>
       return;
     }
 
+    _teardownSession();
+    final generation = ++_projectionGeneration;
     final codec = _streamCodec(_config.format);
     final transport = _transportFor(_config.transport);
     if (!transport.isAvailable) {
       if (_config.recordToFile) {
         _flash('未连接可投屏设备，仅本地录制');
         setState(() => _streaming = false);
-        _encoder.startEncoding(_config, stream: false);
+        _startNativeEncoding(generation, stream: false);
       } else {
         _flash(_config.transport == StreamTransportKind.wifi
             ? 'WiFi 投屏即将支持'
@@ -396,29 +517,57 @@ class _StreamPageState extends ConsumerState<StreamPage>
       return;
     }
 
-    // Open the session first so the initial key frame isn't dropped.
-    _teardownSession();
     final session = StreamSession(
       send: transport.send,
       chunkSize: () => transport.chunkSize,
+      onWriteRejected: transport.shrinkChunkSize,
     );
     _session = session;
     _chunkSize = transport.chunkSize;
+    _availabilitySub = transport.availabilityChanges.listen((available) {
+      if (!available) {
+        _handleTransportUnavailable(generation, session);
+      }
+    });
     _notifySub = transport.notifications.listen(session.onNotify);
 
     final (w, h) = _encDims(_config);
     final ok = await session.open(codec, w, h, _config.fps);
-    if (!mounted) return;
+    if (!_isProjectionCurrent(generation, session: session)) return;
     if (!ok) {
-      _teardownSession();
-      _flash('投屏握手失败或超时');
+      final message = _openFailureMessage(session);
+      _teardownSession(expectedSession: session);
+      _flash(message);
+      return;
+    }
+    if (!transport.isAvailable) {
+      _handleTransportUnavailable(generation, session);
       return;
     }
     debugPrint('流/会话已开 codec=0x${codec.toRadixString(16)} ${w}x$h '
         'flowOn=${session.flowOn} 初始信用=${session.credits} chunk=$_chunkSize');
 
     _sendQueue.clear();
-    _sending = false;
+    _resetSendStats();
+    setState(() => _streaming = true);
+    _startNativeEncoding(
+      generation,
+      session: session,
+      stream: true,
+    );
+  }
+
+  String _openFailureMessage(StreamSession session) {
+    return switch (session.lastOpenFailure) {
+      StreamOpenFailure.rejected =>
+        '投屏握手被拒绝（result=0x${(session.lastAckResult ?? 0).toRadixString(16).padLeft(2, '0').toUpperCase()}）',
+      StreamOpenFailure.transport => '投屏握手发送失败',
+      StreamOpenFailure.timeout => '投屏握手超时',
+      StreamOpenFailure.none => '投屏握手失败',
+    };
+  }
+
+  void _resetSendStats() {
     _sentFrames = 0;
     _sentKeys = 0;
     _sentBytes = 0;
@@ -430,68 +579,340 @@ class _StreamPageState extends ConsumerState<StreamPage>
     _sendClock
       ..reset()
       ..start();
-    setState(() => _streaming = true);
-    _encoder.startEncoding(_config, stream: true);
+  }
+
+  bool _isProjectionCurrent(
+    int generation, {
+    StreamSession? session,
+    bool wifi = false,
+    bool requireSink = true,
+  }) {
+    if (!mounted || generation != _projectionGeneration) return false;
+    if (!requireSink) return true;
+    if (wifi) return _wifiMode;
+    return session != null && identical(_session, session);
+  }
+
+  void _bindEncoderDispatchers() {
+    _encoder
+      ..onStarted = (path, w, h) {
+        _handleEncoderStarted(w, h);
+      }
+      ..onStopped = (result) {
+        _handleEncoderStopped(result);
+      }
+      ..onFrame = (data, key) {
+        _handleEncoderFrame(data, key);
+      }
+      ..onStats = _handleEncoderStats
+      ..onInfo = _handleEncoderInfo
+      ..onPreview = _handleEncoderPreview
+      ..onError = _encoderRunErrorDispatcher;
+  }
+
+  bool get _encoderStopping {
+    final generation = _encoderStartedGeneration;
+    return generation != null && _encoderStopRequestedGeneration == generation;
+  }
+
+  bool _encoderEventIsCurrent({bool allowCamera = false}) {
+    final generation = _encoderStartedGeneration;
+    if (generation != null) {
+      if (_encoderStopping) return false;
+      return _isProjectionCurrent(
+        generation,
+        session: _encoderRunSession,
+        wifi: _encoderRunWifi,
+        requireSink: _encoderRunStreams,
+      );
+    }
+    final attempt = _cameraAttempt;
+    return allowCamera &&
+        mounted &&
+        attempt != null &&
+        attempt.state != _CameraAttemptState.failed;
+  }
+
+  void _handleEncoderStarted(int w, int h) {
+    if (!_encoderEventIsCurrent()) return;
+    setState(() {
+      _encoding = true;
+      _result = null;
+      _stats = const EncoderStats();
+      _lastFrameBytes = 0;
+      _frameSnaps.clear();
+      _actualW = w;
+      _actualH = h;
+    });
+    _startInfoTimer();
+  }
+
+  void _handleEncoderStopped(EncoderResult result) {
+    final generation = _encoderStartedGeneration;
+    if (generation == null) return;
+    final session = _encoderRunSession;
+    final wasStopping = _encoderStopping;
+    final reportResult = !wasStopping || _encoderStopReportsResult;
+    final wasCurrent = _isProjectionCurrent(
+      generation,
+      session: session,
+      wifi: _encoderRunWifi,
+      requireSink: _encoderRunStreams,
+    );
+    if (!wasStopping && wasCurrent) {
+      _teardownSession(expectedSession: session);
+    }
+    _stopInfoTimer();
+    _retireEncoderRun(stopped: true);
+    if (!mounted || (!wasStopping && !wasCurrent)) return;
+    setState(() {
+      _encoding = false;
+      _streaming = false;
+      _lastFrameBytes = 0;
+      if (reportResult) _result = result;
+    });
+  }
+
+  void _handleEncoderFrame(Uint8List data, bool key) {
+    final generation = _encoderStartedGeneration;
+    if (generation == null || !_encoderEventIsCurrent()) return;
+    _onEncodedFrame(
+      data,
+      key,
+      generation,
+      session: _encoderRunSession,
+      wifi: _encoderRunWifi,
+    );
+  }
+
+  void _handleEncoderStats(EncoderStats stats) {
+    if (!_encoderEventIsCurrent()) return;
+    setState(() {
+      _stats = stats;
+      if (!_streaming) _lastFrameBytes = stats.lastBytes;
+    });
+  }
+
+  void _handleEncoderInfo(String message) {
+    if (message.isEmpty || !_encoderEventIsCurrent(allowCamera: true)) return;
+    setState(() => _diag = message);
+  }
+
+  void _handleEncoderPreview(bool encoded, int textureId, int w, int h) {
+    if (!_encoderEventIsCurrent(allowCamera: true)) return;
+    setState(() {
+      _encodedPreview = encoded;
+      _decodedTextureId = textureId;
+      _decodedW = w;
+      _decodedH = h;
+    });
+  }
+
+  void _handleEncoderError(String message) {
+    final generation = _encoderStartedGeneration;
+    if (generation == null) {
+      final attempt = _cameraAttempt;
+      if (attempt != null) _handleCameraError(attempt, message);
+      return;
+    }
+    if (!_encoderEventIsCurrent()) return;
+    _teardownSession(expectedSession: _encoderRunSession);
+    _stopInfoTimer();
+    _requestEncoderStop(generation, reportResult: false);
+    if (!mounted) return;
+    setState(() {
+      _error = message;
+      _encoding = false;
+      _streaming = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  void _retireEncoderRun({required bool stopped}) {
+    _encoderStopTimer?.cancel();
+    _encoderStopTimer = null;
+    final barrier = _encoderStopBarrier;
+    _encoderStopBarrier = null;
+    _encoderStartedGeneration = null;
+    _encoderStopRequestedGeneration = null;
+    _encoderRunSession = null;
+    _encoderRunWifi = false;
+    _encoderRunStreams = false;
+    _encoderStopReportsResult = true;
+    if (barrier != null && !barrier.isCompleted) barrier.complete(stopped);
+  }
+
+  void _startNativeEncoding(
+    int generation, {
+    StreamSession? session,
+    bool wifi = false,
+    required bool stream,
+  }) {
+    if (!_isProjectionCurrent(
+      generation,
+      session: session,
+      wifi: wifi,
+      requireSink: stream,
+    )) {
+      return;
+    }
+    if (_encoderStartedGeneration != null) return;
+    _encoderStartedGeneration = generation;
+    _encoderStopRequestedGeneration = null;
+    _encoderRunSession = session;
+    _encoderRunWifi = wifi;
+    _encoderRunStreams = stream;
+    unawaited(_encoder.startEncoding(_config, stream: stream).then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {
+        if (_encoderStartedGeneration != generation) return;
+        _teardownSession(expectedSession: session);
+        _stopInfoTimer();
+        _retireEncoderRun(stopped: true);
+        if (mounted) {
+          setState(() {
+            _encoding = false;
+            _streaming = false;
+            _error = '编码器启动失败';
+          });
+        }
+      },
+    ));
+  }
+
+  void _requestEncoderStop(
+    int generation, {
+    bool reportResult = true,
+  }) {
+    if (_encoderStartedGeneration != generation || _encoderStopping) return;
+    _encoderStopRequestedGeneration = generation;
+    _encoderStopReportsResult = reportResult;
+    final barrier = Completer<bool>();
+    _encoderStopBarrier = barrier;
+    _encoderStopTimer?.cancel();
+    _encoderStopTimer = Timer(widget.encoderStopTimeout, () {
+      _encoderStopTimer = null;
+      if (!barrier.isCompleted) barrier.complete(false);
+    });
+    unawaited(_encoder.stopEncoding().then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {
+        _encoderStopTimer?.cancel();
+        _encoderStopTimer = null;
+        if (!barrier.isCompleted) barrier.complete(false);
+      },
+    ));
+  }
+
+  Future<bool> _awaitEncoderStopped() {
+    if (_encoderStartedGeneration == null) return Future<bool>.value(true);
+    final barrier = _encoderStopBarrier;
+    if (!_encoderStopping || barrier == null) return Future<bool>.value(false);
+    return barrier.future;
+  }
+
+  void _stopProjection() {
+    final generation = _projectionGeneration;
+    final stopNative = _encoderStartedGeneration == generation;
+    _teardownSession();
+    _stopInfoTimer();
+    if (stopNative) _requestEncoderStop(generation);
+    if (mounted) {
+      setState(() {
+        _encoding = false;
+        _streaming = false;
+        _lastFrameBytes = 0;
+      });
+    }
+  }
+
+  void _handleTransportUnavailable(int generation, StreamSession session) {
+    if (!_isProjectionCurrent(generation, session: session)) return;
+    session.onDisconnect();
+    final stopNative = _encoderStartedGeneration == generation;
+    _teardownSession(expectedSession: session, closeSession: false);
+    _stopInfoTimer();
+    if (stopNative) {
+      _requestEncoderStop(generation, reportResult: false);
+    }
+    if (mounted) {
+      setState(() {
+        _encoding = false;
+        _streaming = false;
+        _lastFrameBytes = 0;
+        _error = '连接已断开';
+      });
+    }
   }
 
   /// Begin a WiFi projection over the TCP video link established by the WiFi
   /// setup page. Unlike BLE, there is no session handshake — frames are wrapped
   /// with the 6-byte WiFi header and written straight to the socket.
   Future<void> _startWifiProjection() async {
+    _teardownSession();
+    final generation = ++_projectionGeneration;
     final wifi = ref.read(wifiManagerProvider);
     if (!wifi.isConnected) {
       if (_config.recordToFile) {
         _flash('WiFi 未连接，仅本地录制');
         setState(() => _streaming = false);
-        _encoder.startEncoding(_config, stream: false);
+        _startNativeEncoding(generation, stream: false);
       } else {
         _flash('WiFi 未连接：请先在「WiFi 配网」页完成连接');
       }
       return;
     }
 
-    _teardownSession();
     _wifiMode = true;
     _wifiClient = wifi.client;
     _chunkSize = 0; // WiFi sends whole frames; no per-write chunk budget
 
     _sendQueue.clear();
-    _sending = false;
-    _sentFrames = 0;
-    _sentKeys = 0;
-    _sentBytes = 0;
-    _sentKeyBytes = 0;
-    _tickFrames = 0;
-    _tickMs = 0;
-    _lastKeyIndex = -1;
-    _lastKeyMs = 0;
-    _sendClock
-      ..reset()
-      ..start();
+    _resetSendStats();
     setState(() => _streaming = true);
     debugPrint('流/WiFi 投屏开始 ${_config.format.label} '
         '${_config.width}x${_config.height}@${_config.fps} → '
         '${_wifiClient?.host}:${_wifiClient?.port}');
-    _encoder.startEncoding(_config, stream: true);
+    _startNativeEncoding(generation, wifi: true, stream: true);
   }
 
   /// Whether the active transport sink can accept a frame right now.
-  bool get _sinkOpen => _wifiMode
-      ? (_wifiClient?.isConnected ?? false)
-      : (_session?.isOpen ?? false);
+  bool _sinkOpenFor(
+    int generation, {
+    StreamSession? session,
+    required bool wifi,
+  }) =>
+      _isProjectionCurrent(
+        generation,
+        session: session,
+        wifi: wifi,
+      ) &&
+      (wifi ? (_wifiClient?.isConnected ?? false) : (session?.isOpen ?? false));
 
   /// Send one frame over the active transport (BLE session or WiFi TCP client).
-  Future<bool> _sendOneFrame(Uint8List frame) {
-    if (_wifiMode) {
+  Future<bool> _sendOneFrame(
+    Uint8List frame, {
+    StreamSession? session,
+    required bool wifi,
+  }) {
+    if (wifi) {
       return _wifiClient?.sendFrame(frame) ?? Future<bool>.value(false);
     }
-    return _session?.sendFrame(frame) ?? Future<bool>.value(false);
+    return session?.sendFrame(frame) ?? Future<bool>.value(false);
   }
 
   /// Forward one encoded frame in order, dropping the backlog and re-syncing
   /// with a fresh key frame when the transport can't keep up.
-  void _onEncodedFrame(Uint8List data, bool key) {
-    if (!_sinkOpen) return;
+  void _onEncodedFrame(
+    Uint8List data,
+    bool key,
+    int generation, {
+    StreamSession? session,
+    required bool wifi,
+  }) {
+    if (!_sinkOpenFor(generation, session: session, wifi: wifi)) return;
     final chunks = _chunkSize > 0 ? (data.length / _chunkSize).ceil() : -1;
     debugPrint('流/编码帧 ${key ? "I" : "P"} ${data.length}B · $chunks片 '
         '· 队列=${_sendQueue.length} 信用=${_session?.credits}');
@@ -502,10 +923,10 @@ class _StreamPageState extends ConsumerState<StreamPage>
     if (_config.format != EncoderFormat.h264 &&
         _sendQueue.length >= _kMaxSendQueue) {
       _sendQueue.clear();
-      _encoder.requestKeyframe();
+      unawaited(_encoder.requestKeyframe().catchError((Object _) {}));
     }
     _sendQueue.add((data, key));
-    _pumpSend();
+    unawaited(_pumpSend(generation, session: session, wifi: wifi));
   }
 
   /// Refresh the info chip on a fixed cadence so the current frame size updates
@@ -534,16 +955,28 @@ class _StreamPageState extends ConsumerState<StreamPage>
     _infoTimer = null;
   }
 
-  Future<void> _pumpSend() async {
-    if (_sending) return;
-    _sending = true;
+  Future<void> _pumpSend(
+    int generation, {
+    StreamSession? session,
+    required bool wifi,
+  }) async {
+    if (_sendingGeneration == generation) return;
+    _sendingGeneration = generation;
     try {
-      while (_sendQueue.isNotEmpty && _sinkOpen) {
+      while (_sendQueue.isNotEmpty &&
+          _sinkOpenFor(generation, session: session, wifi: wifi)) {
         final (frame, isKey) = _sendQueue.removeAt(0);
         bool ok = false;
         try {
-          ok = await _sendOneFrame(frame);
+          ok = await _sendOneFrame(frame, session: session, wifi: wifi);
         } catch (_) {}
+        if (!_isProjectionCurrent(
+          generation,
+          session: session,
+          wifi: wifi,
+        )) {
+          return;
+        }
         if (ok) {
           _sentFrames++;
           _sentBytes += frame.length;
@@ -572,26 +1005,45 @@ class _StreamPageState extends ConsumerState<StreamPage>
         // timeout or write hiccup can't permanently starve the encoder feed.
         // The periodic IDR re-syncs the device after any gap.
         if (_config.format == EncoderFormat.h264) {
-          _encoder.requestEncoderFrame();
+          unawaited(_encoder.requestEncoderFrame().catchError((Object _) {}));
         }
       }
     } finally {
-      _sending = false;
+      if (_sendingGeneration == generation) {
+        _sendingGeneration = null;
+      }
     }
   }
 
-  void _teardownSession() {
-    _notifySub?.cancel();
-    _notifySub = null;
-    _sendQueue.clear();
-    _sending = false;
-    _sendClock.stop();
-    _session?.close();
+  void _teardownSession({
+    StreamSession? expectedSession,
+    bool closeSession = true,
+  }) {
+    if (expectedSession != null && !identical(_session, expectedSession)) {
+      return;
+    }
+    ++_projectionGeneration;
+    final session = _session;
     _session = null;
+    final availabilitySub = _availabilitySub;
+    _availabilitySub = null;
+    final notifySub = _notifySub;
+    _notifySub = null;
+    unawaited(_cancelQuietly(availabilitySub));
+    unawaited(_cancelQuietly(notifySub));
+    _sendQueue.clear();
+    _sendClock.stop();
+    if (closeSession) session?.close();
     // WiFi: the TCP client is owned by WifiManager and reused across runs — just
     // detach here (don't close the socket, so the next projection reuses it).
     _wifiMode = false;
     _wifiClient = null;
+  }
+
+  Future<void> _cancelQuietly(StreamSubscription<dynamic>? subscription) async {
+    try {
+      await subscription?.cancel();
+    } catch (_) {}
   }
 
   void _flash(String message) {
@@ -984,6 +1436,17 @@ class _StreamPageState extends ConsumerState<StreamPage>
     }
 
     final info = _camera;
+    if (_error != null && (info == null || info.textureId < 0)) {
+      return _centerInfo(
+        icon: Icons.videocam_off_outlined,
+        text: _error!,
+        action: TextButton.icon(
+          onPressed: _cameraStarting ? null : _retryCamera,
+          icon: const Icon(Icons.refresh, color: _kAccent),
+          label: const Text('重试', style: TextStyle(color: _kAccent)),
+        ),
+      );
+    }
     if (info == null || info.textureId < 0) {
       return _centerInfo(
         icon: Icons.videocam_outlined,
@@ -1277,6 +1740,7 @@ class _StreamPageState extends ConsumerState<StreamPage>
     final ready = _camera != null;
     final ring = ready ? Colors.white : Colors.white38;
     return GestureDetector(
+      key: const Key('stream-shutter'),
       onTap: ready ? _toggleProjection : null,
       onLongPress: ready ? _takePicture : null,
       child: Container(

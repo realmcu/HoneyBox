@@ -18,8 +18,31 @@ abstract final class JwScanPolicy {
   static bool matches(
       {required String query,
       required bool isDefaultWatchFilter,
-      required ScanDevice device}) {
+      required ScanDevice device,
+      bool onlyNamed = false,
+      bool onlyConnectable = false}) {
+    final name = device.name.trim().toLowerCase();
+    if (onlyConnectable && !device.connectable) return false;
+    if (onlyNamed && (name.isEmpty || name == 'n/a' || name == '未知设备')) {
+      return false;
+    }
     final q = query.trim().toLowerCase();
+    final hexQuery = q.replaceAll(RegExp(r'[:\-\s]'), '');
+    final isFullHexSequence = RegExp(r'^[0-9a-f]{12}$').hasMatch(hexQuery);
+    final matchesAdvertisement = isFullHexSequence &&
+        device.manufacturerData.values.any((bytes) {
+          final hex =
+              bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+          for (var i = 0; i + hexQuery.length <= hex.length; i += 2) {
+            if (hex.substring(i, i + hexQuery.length) == hexQuery) return true;
+          }
+          return false;
+        });
+    if (isFullHexSequence) {
+      return matchesAdvertisement ||
+          device.deviceId.toLowerCase().replaceAll(RegExp(r'[:\-\s]'), '') ==
+              hexQuery;
+    }
     return q.isEmpty ||
         (isDefaultWatchFilter && device.jwCandidate) ||
         device.name.toLowerCase().contains(q) ||

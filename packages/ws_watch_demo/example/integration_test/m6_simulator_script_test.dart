@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:ws_watch_demo/ws_watch_demo.dart';
 import 'package:ws_watch_demo_example/main.dart' as app;
 
 Future<void> until(WidgetTester tester, Finder finder) async {
@@ -19,20 +18,27 @@ void main() {
     app.main();
     await tester.pumpAndSettle();
     await tester.tap(find.text('M3 扫描与连接'));
-    await tester.pumpAndSettle();
+    await until(tester, find.text('连接 Simulator'));
     await tester.tap(find.text('连接 Simulator'));
     await until(tester, find.text('当前状态：ready'));
     await tester.tap(find.byKey(const Key('ws-debug-tools')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('raw-sheet-title')), findsOneWidget);
     await tester.tap(find.byKey(const Key('raw-send')));
-    await until(tester, find.textContaining('成功 · 回应操作数据：'));
+    await until(
+        tester,
+        find.byWidgetPredicate((w) =>
+            w is SelectableText &&
+            (w.data?.startsWith('成功 · 回应操作数据：') ?? false)));
     await tester.enterText(
         find.byKey(const Key('raw-l2-request')), '02 00 03 00 02 00 07');
     await tester.tap(find.byType(SwitchListTile));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('raw-send')));
-    await until(tester, find.textContaining('成功 · L1 ACK'));
+    await until(
+        tester,
+        find.byWidgetPredicate(
+            (w) => w is SelectableText && w.data == '成功 · L1 ACK'));
     await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.pageBack();

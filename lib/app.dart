@@ -12,11 +12,13 @@ import 'pages/wifi/wifi_page.dart';
 import 'pages/chip_config/chip_config_page.dart';
 import 'pages/settings/settings_page.dart';
 import 'pages/settings/cache_management_page.dart';
+import 'pages/qiniu/qiniu_config_page.dart';
+import 'pages/qiniu/qiniu_files_page.dart';
 import 'pages/ota/ota_page.dart';
 import 'pages/watch/pages/watch_face_page.dart';
 import 'pages/watch/pages/watch_notification_page.dart';
 import 'pages/watch/pages/watch_health_page.dart';
-import 'pages/watch/pages/watch_ota_page.dart';
+import 'pages/ota/ota_chip_page.dart';
 
 class HoneyBoxApp extends StatelessWidget {
   const HoneyBoxApp({super.key});
@@ -84,6 +86,12 @@ class HoneyBoxApp extends StatelessWidget {
           case '/settings':
             page = const SettingsPage();
             break;
+          case '/qiniu-config':
+            page = const QiniuConfigPage();
+            break;
+          case '/qiniu-files':
+            page = const QiniuFilesPage();
+            break;
           case '/cache':
             page = const CacheManagementPage();
             break;
@@ -104,7 +112,7 @@ class HoneyBoxApp extends StatelessWidget {
             );
             break;
           case '/watch-ota':
-            page = const WatchOtaPage();
+            page = const OtaChipPage();
             break;
           default:
             page = const EBadgeAppRoot();
