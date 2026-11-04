@@ -204,7 +204,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     needs: [analyze]
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v7
