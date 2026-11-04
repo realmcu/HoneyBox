@@ -476,6 +476,9 @@ HMW_TEST(media_foundation_source_pts_are_monotonic_and_complete) {
     HMW_EXPECT(frame.pts_100ns >= 0);
     HMW_EXPECT(frame.pts_100ns >= previous_pts);
     HMW_EXPECT(frame.duration_100ns > 0);
+    if (frame_count == 0) {
+      std::printf("fixture first_pts=%lld\n", static_cast<long long>(frame.pts_100ns));
+    }
     previous_pts = frame.pts_100ns;
     ++frame_count;
   }
