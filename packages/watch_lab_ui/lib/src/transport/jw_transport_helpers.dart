@@ -1,15 +1,10 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:watch_transport_ble/watch_transport_ble.dart';
-import 'package:watch_frame_channel/watch_frame_channel.dart';
 
-WatchBleProfile jwDiagnosticProfile() => WatchBleProfile(
-    service: '000001ff-3c17-d293-8e48-14fe2e4da212', tx: 'ff02', rx: 'ff03');
-bool isJwCandidate(WatchBleAdvertisement device) =>
-    device.services.map(normalizeBleUuid).any((s) =>
-        s == jwDiagnosticProfile().service || s == normalizeBleUuid('fd50')) ||
-    device.manufacturerData.entries.any(
-        (e) => (e.key == 0x07d0 || e.key == 0xfec5) && e.value.length >= 6);
+import 'package:watch_frame_channel/watch_frame_channel.dart';
+import 'package:watch_transport_ble/watch_transport_ble.dart';
+
+export 'jw_scan_filter.dart';
 
 /// Runs on an already connected diagnostic port. No login/bind or data mutation.
 Future<int> queryJwLanguage(WatchBleConnection connection) async {
@@ -19,7 +14,6 @@ Future<int> queryJwLanguage(WatchBleConnection connection) async {
           disconnected: connection.disconnected.map<void>((_) {}),
           maxWriteLength: () => connection.writeLimits.maxWriteLength,
           write: connection.write,
-          // Probe releases its subscriptions; caller owns connection for battery read.
           close: () async {}),
       profile: WatchFrameProfile.jw,
       config: const WatchFrameConfig(

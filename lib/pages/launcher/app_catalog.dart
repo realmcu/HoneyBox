@@ -56,11 +56,11 @@ const List<AppEntry> kAppCatalog = <AppEntry>[
   ),
   AppEntry(
     id: AppId.wsWatch,
-    title: 'WS Watch',
-    subtitle: 'WS 手表 SDK 演示与联调',
+    title: 'Watch Lab',
+    subtitle: 'JW / WS 独立实验室入口',
     icon: Icons.watch_later_outlined,
     accent: Color(0xFF5B4B9A),
-    deviceFilter: 'WS Watch',
+    deviceFilter: 'Watch Lab',
     implemented: true,
   ),
   AppEntry(

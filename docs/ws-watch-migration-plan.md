@@ -47,7 +47,9 @@ JW、WS 当前 L0/L1 按同一套机制收敛，提取时用两套现有测试/�
 | `ws_watch_sdk`（已有） | WS L2、业务请求/回应匹配、设置/同步、公开模型与存储；组合当前帧通道、BLE/simulation；不依赖 JW SDK |
 | `watch_ota`（后续新增） | 独立升级核心与芯片后端；按需要使用 BLE 能力/原生厂商 SDK，不被迫经过 JW/WS 的日常帧协议 |
 | `ws_watch_demo`（已有） | WS 专用示例和 Raw 联调；保持可独立运行，不强制引入 JW/七牛/采集 |
-| `watch_debug_demo`（后续新增） | 统一调试入口，引用两套 SDK/WS Demo 与 OTA，容纳 JW 页面、采集/七牛/文件和工具平台桥；可嵌入 HoneyBox，自带独立 example |
+| `watch_lab_ui` | 共享 Watch Lab UI：传输诊断、能力页组件、JW transport 探针；WS/JW demo 与 HoneyBox 共用 |
+| `jw_watch_demo` | JW Watch Lab 能力菜单；T4 前以 L0/L1 传输诊断为主 |
+| `watch_debug_demo`（可选后续） | 若需 OTA/采集/七牛统一入口，可再合并进 Watch Lab 或独立 Tab；当前由 `watch_lab_ui` + 两 demo 包承担 |
 
 初期只实现 BLE 与 simulation；UART/TCP 仅保留接口适配能力，不提前创建空包。SDK 默认组合由内部工厂提供，普通用户直接使用 JW 或 WS API；高级接入/测试可注入连接工厂。未来 WS 改 L0/L1 时新增独立帧机制实现，必要时调整 WS 内部 adapter，JW 继续使用当前实现，不把不兼容格式堆成一个大开关。
 
@@ -109,6 +111,18 @@ WS SDK → 主机帧通道 → simulation 主机端
 - Realtek Dart DFU 与 Android AAR/桥归独立 OTA；升级支持按芯片/固件/profile 判断。超时不等于原生工作结束，停止核实前保留占用，正常模式→DFU→重连身份在升级事务内管理。
 - 采集保活、文件导出、授权交互、窗口与应用壳归调试应用/工具插件；必要 BLE/OTA 原生注册跟随各自 package。不能笼统把“多平台”全部迁入 SDK。
 
+### 6.1 调试 UI 单一来源（Watch Lab）
+
+HoneyBox **Watch Lab** 为 **JW / WS 两个独立按钮**（非 Tab），分别 push 全屏 Lab；当前 **仅 JW Lab** 可用。共享 UI 在 **`watch_lab_ui`**。
+
+| 包 | 职责 |
+| --- | --- |
+| `watch_lab_ui` | JW 扫描过滤（`000001ff…` + `fd50`）、连接条、分组验收 UI、`JwConnectedToolsPage` |
+| `jw_watch_demo` | JW Lab：连接后展示分组占位验收项（`jw_lab_test_catalog.dart`） |
+| `ws_watch_demo` | WS SDK 能力页（待重构接入 Hub 第二按钮） |
+| HoneyBox `WatchLabHubPage` | 双按钮入口；`JWWatchLabAppRoot` 全屏 JW |
+
+各 package 的 `example/` 仍用于外部 path 依赖与 `integration_test`，**日常真机调试走 HoneyBox Watch Lab**，避免第二套完整 App UI。
 
 ## 7. 目标目录与依赖方向
 
@@ -429,7 +443,7 @@ T1 已按以下清单完成，T2 本轮已实施，后续进入 T3，随后以 T
 - HoneyBox 普通连接、Capture 及其配置扫描、OTA 版本/设备探测、Dart DFU、Android native OTA 接入同一协调器。DFU 事务保留正常态 ID 并追加 DFU/重启 ID；Android native OTA 使用全局排他，只有原生 close 确认成功才释放，不因超时或 busy 关闭失败而释放。
 - 扫描采用带 owner 的 token，连接主动撤销旧扫描，旧 token 重复清理不停止新 owner。平台 stop 失败保留预留，可显式重试。
 - WS scanner 的真实广播改为公共 scanner 适配，模拟设备合并与 DTO 保持在 WS；默认连接工厂增加 UART profile，BLE 错误映射回原有 WS connect/error 类型。
-- 独立 `watch_transport_ble/example`：JW/WS profile 选择、扫描、状态、原始 HEX 收发、断开，以及 JW 标准电量读取/语言查询。诊断命令只在 example 生成，不引入 HoneyBox/JW/WS SDK 或数据库。
+- **（T2  interim）** `watch_transport_ble/example` 内实现了完整「BLE 连接诊断」UI 与 JW smoke；用于 CI/外部接入与真机脚本，**尚未按 §6.1 迁入 HoneyBox 可挂载的 Demo 库**（与 `ws_watch_demo` 模式不一致，属已知遗留）。诊断字节/帧逻辑在 example 组织，不引入 HoneyBox/JW/WS SDK 或数据库。
 - Windows WinRT 调优工作线程、地址解析和 MethodChannel 已从媒体插件迁出，由 BLE 包自有插件自动注册；媒体插件不再注册 BLE 通道。地址解析有独立 CMake/CTest，Dart 通道绑定有测试。
 
 ### 18.2 实测结果
@@ -526,11 +540,12 @@ JW provider 的重复点击测试增加一次异步调度等待，等待初始�
 - 用户随后明确本轮目标应是 **2616_GHDBSC，MAC 69:2D:0C:AD:00:1D**。
   脚本增加名称/MAC/平台 ID 的精确筛选及可配置扫描时长，避免把 macOS UUID 当 MAC。
   本机先按名称+MAC、再仅按 MAC 延长到 25 秒扫描，均未发现该目标；没有连接其他候选替代。
-  **本轮指定目标的真机验收尚未完成**；前述其他设备的成功不计作本目标通过。
-  目标恢复可扫描后用 BLE example 脚本继续，见其 README。
+  后续在 Android 上对 **2616_GHDBSC / 69:2D:0C:AD:00:1D** 执行同一 `jw_ble_smoke_test.dart`（名称+MAC 筛选）已通过：MTU 247、语言 1、电量 48%、帧探针与重连通过（脚本仍在 example 壳，**日常 UI 应改经 HoneyBox 挂载统一 Demo，见 §6.1**）。
 
 ### 19.4 后续
 
 T3 不迁移健康模型、数据库或 OTA/采集/七牛，不新增 JW 模拟设备；这些边界未变。
 下一主线为 T4.0，再按专项计划逐步形成完整 `jw_watch_sdk` 和真实设备业务闭环。
 WS 固件和 Windows 环境验证仍单独跟踪，不把共享帧测试通过视为它们已经验收。
+
+**调试 UI 纠偏（§6.1）**：T4 启动后优先规划 `watch_debug_demo`（或等价 export）承接 T2/T3 的 BLE/帧诊断页与 smoke 入口，HoneyBox 挂载同一组件；避免 JW T4.6 再写第二套真机 Demo。Android **2616_GHDBSC** 集成脚本验收见 §19.3 更新记录。

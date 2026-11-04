@@ -1,7 +1,8 @@
-# BLE 独立诊断应用
+# BLE example 薄壳
 
-本应用引用 `watch_transport` / `watch_transport_ble` / `watch_frame_channel`，不引用 HoneyBox、JW SDK、WS SDK 或数据库。
-用于 T2 的 BLE 字节收发与 T3 的公共 L0/L1 真机验收。
+UI 与逻辑在 **`watch_lab_ui`**（`TransportDiagnosticsPage`）。日常联调请用 **HoneyBox → Watch Lab**（WS/JW Tab）；本 example 供 CI、`integration_test` 与外部 path 依赖。
+
+本应用引用 `watch_transport` / `watch_transport_ble` / `watch_frame_channel` / `watch_lab_ui`，不引用 HoneyBox 或完整 SDK/数据库。
 
 1. `flutter run -d macos` 或 `flutter run -d <android-id>`。Android 首次扫描由应用申请权限；macOS 由系统授权蓝牙。
 2. 选择 **JW Realtek FF** 或 **WS UART**，扫描并选择自己的设备；不会自动尝试不同协议。

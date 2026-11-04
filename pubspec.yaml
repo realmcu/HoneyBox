@@ -8,6 +8,9 @@ environment:
 
 workspace:
   - packages/watch_frame_channel
+  - packages/jw_watch_sdk
+  - packages/watch_lab_ui
+  - packages/jw_watch_demo
   - packages/watch_transport
   - packages/watch_transport_ble
   - packages/watch_transport_ble/example
@@ -40,6 +43,8 @@ dependencies:
   palette_generator: ^0.3.3+7
   watch_transport_ble:
     path: packages/watch_transport_ble
+  jw_watch_demo:
+    path: packages/jw_watch_demo
   ws_watch_demo:
     path: packages/ws_watch_demo
   archive: ^4.5.2

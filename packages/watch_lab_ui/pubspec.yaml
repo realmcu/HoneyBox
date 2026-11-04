@@ -1,0 +1,28 @@
+name: watch_lab_ui
+description: Shared Watch Lab UI for WS/JW SDK manual testing in HoneyBox and thin examples.
+version: 0.1.0
+publish_to: 'none'
+resolution: workspace
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+  flutter: '>=3.27.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  permission_handler: ^11.3.1
+  watch_frame_channel:
+    path: ../watch_frame_channel
+  watch_transport:
+    path: ../watch_transport
+  watch_transport_ble:
+    path: ../watch_transport_ble
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

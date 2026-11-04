@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:watch_transport/watch_transport.dart';
 import 'package:watch_transport_ble/watch_transport_ble.dart';
-import 'package:watch_transport_ble_example/jw_smoke.dart';
+import 'package:watch_lab_ui/watch_lab_ui.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();

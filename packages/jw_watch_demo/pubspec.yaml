@@ -1,0 +1,23 @@
+name: jw_watch_demo
+description: Public JW SDK Demo feature for HoneyBox and standalone examples.
+version: 0.1.0
+publish_to: 'none'
+resolution: workspace
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+  flutter: '>=3.27.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jw_watch_sdk:
+    path: ../jw_watch_sdk
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
