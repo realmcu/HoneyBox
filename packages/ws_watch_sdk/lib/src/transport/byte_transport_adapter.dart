@@ -25,7 +25,7 @@ class WSByteTransportAdapter implements WSTransportConnection {
       if (error.code == WatchTransportErrorCode.writeTooLarge) {
         throw ArgumentError('chunk exceeds transport write limit');
       }
-      throw WSDisconnectedException(error.message);
+      throw WSOperationException(error.message);
     }
   }
 

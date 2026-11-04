@@ -38,6 +38,12 @@ class WSNackException extends WSException {
   const WSNackException(super.message);
 }
 
+/// A single transport/frame operation failed while the physical link remains
+/// owned by the transport lifecycle.
+class WSOperationException extends WSException {
+  const WSOperationException(super.message);
+}
+
 /// 请求过程中链路断开。
 class WSDisconnectedException extends WSException {
   const WSDisconnectedException(super.message);

@@ -1,8 +1,11 @@
 import 'dart:typed_data';
 import 'package:watch_transport/watch_transport.dart';
 
-/// Byte operations on an already prepared connection. The channel owns close.
-/// Legacy SDK ports can adapt here without acquiring a second device lease.
+/// Byte operations on an already prepared connection.
+///
+/// [close] is used only for explicit owner shutdown or after the transport has
+/// reported a real disconnect; frame and business operation errors do not call
+/// it. Legacy SDK ports can adapt here without acquiring a second device lease.
 class WatchFramePort {
   const WatchFramePort(
       {required this.received,

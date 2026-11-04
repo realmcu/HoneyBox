@@ -88,7 +88,7 @@ void main() {
     await expectLater(host.connect(), fails(WatchTransportErrorCode.closed));
   });
 
-  test('unsubscribed buffer overflow terminates both ends', () async {
+  test('unsubscribed buffer overflow drops bytes without disconnecting', () async {
     final (host, peer) =
         WatchSimulationConnection.pair(target: target, maxBufferedBytes: 2);
     addTearDown(host.dispose);
@@ -97,9 +97,9 @@ void main() {
     await peer.connect();
     await host.write(bytes(1));
     await host.write(bytes(2));
-    await expectLater(
-        host.write(bytes(3)), fails(WatchTransportErrorCode.receiveOverflow));
-    expect(peer.state, WatchTransportState.disconnected);
+    await host.write(bytes(3));
+    expect(host.state, WatchTransportState.connected);
+    expect(peer.state, WatchTransportState.connected);
   });
 
   test('state listeners can close a connection without reentrant stream errors',

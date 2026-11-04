@@ -4,17 +4,8 @@ import 'dart:typed_data';
 import 'package:watch_frame_channel/watch_frame_channel.dart';
 import 'package:watch_transport/watch_transport.dart';
 
+import '../model/jw_error.dart';
 import 'jw_protocol.dart';
-
-final class JWLinkException implements Exception {
-  const JWLinkException(this.stage, this.message);
-
-  final String stage;
-  final String message;
-
-  @override
-  String toString() => 'JW $stage: $message';
-}
 
 final class _PendingRequest {
   _PendingRequest(this.request);
@@ -45,21 +36,21 @@ final class JWLink {
   final WatchTransportConnection connection;
   final WatchFrameChannel _channel;
   final _events = StreamController<JWProtocolMessage>.broadcast(sync: true);
-  final _failures = StreamController<JWLinkException>.broadcast(sync: true);
+  final _failures = StreamController<JWException>.broadcast(sync: true);
   StreamSubscription<WatchReceivedPayload>? _payloadSubscription;
   Future<void> _tail = Future.value();
   _PendingRequest? _pending;
-  JWLinkException? _failure;
+  JWException? _failure;
   bool _open = false;
   bool _disposed = false;
 
   Stream<JWProtocolMessage> get events => _events.stream;
-  Stream<JWLinkException> get failures => _failures.stream;
+  Stream<JWException> get failures => _failures.stream;
   bool get isOpen => _open && !_disposed && _failure == null;
 
   Future<void> open() async {
     if (_disposed) {
-      throw const JWLinkException('open', 'Link has been disposed');
+      throw const JWException(JWErrorCode.disposed, 'Link has been disposed');
     }
     if (_open) return;
     _payloadSubscription = _channel.payloads.listen(_onPayload);
@@ -88,8 +79,8 @@ final class JWLink {
   Future<T> _enqueue<T>(Future<T> Function() operation) {
     if (!isOpen) {
       return Future.error(_failure ??
-          const JWLinkException(
-              'connection', 'JW byte channel is unavailable'));
+          const JWException(
+              JWErrorCode.unavailable, 'JW byte channel is unavailable'));
     }
     final result = Completer<T>();
     _tail = _tail.then((_) async {
@@ -111,14 +102,19 @@ final class JWLink {
       pending.send = _channel.startSend(encodeJWRequest(request));
       await pending.send!.completed;
       if (!expectResponse) return JWProtocolMessage(0, 0, Uint8List(0));
-      return await pending.response.future.timeout(const Duration(seconds: 8));
+      return await pending.response.future.timeout(request.replyTimeout);
     } on TimeoutException {
-      const error = JWLinkException('reply', 'JW business reply timed out');
-      _fail(error);
+      // A business response is separate from the underlying frame ACK. A
+      // firmware version can accept a query but not implement its response.
+      // Treat that as one operation failure, never as a physical disconnect.
+      const error = JWException(
+          JWErrorCode.businessReplyTimeout, 'JW business reply timed out');
       throw error;
     } catch (error) {
       final mapped = _mapFrameError(error);
-      _fail(mapped);
+      // ACK/NACK, sequence, write and protocol errors belong to this request.
+      // They must never manufacture a transport disconnect. Real disconnects
+      // arrive through WatchFrameChannel.terminated from transport.disconnected.
       throw mapped;
     } finally {
       if (identical(_pending, pending)) _pending = null;
@@ -147,7 +143,7 @@ final class JWLink {
     }
   }
 
-  void _fail(JWLinkException error) {
+  void _fail(JWException error) {
     if (_failure != null) return;
     _failure = error;
     _open = false;
@@ -161,7 +157,8 @@ final class JWLink {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
-    _fail(const JWLinkException('disconnect', 'JW session disposed'));
+    _fail(const JWException(
+        JWErrorCode.transportDisconnected, 'JW session disposed'));
     await _payloadSubscription?.cancel();
     await _channel.close(_failure);
     await _events.close();
@@ -169,13 +166,25 @@ final class JWLink {
   }
 }
 
-JWLinkException _mapFrameError(Object error) {
-  if (error is JWLinkException) return error;
+JWException _mapFrameError(Object error) {
+  if (error is JWException) return error;
+  if (error is WatchFrameWriteException) {
+    return const JWException(JWErrorCode.writeFailed, 'JW frame write failed');
+  }
   if (error is WatchFrameException) {
-    return JWLinkException(error.kind.name, error.message);
+    final code = switch (error.kind) {
+      WatchFrameErrorKind.disconnected => JWErrorCode.transportDisconnected,
+      WatchFrameErrorKind.ackTimeout => JWErrorCode.ackTimeout,
+      WatchFrameErrorKind.writeTimeout => JWErrorCode.writeTimeout,
+      WatchFrameErrorKind.nack => JWErrorCode.nack,
+      WatchFrameErrorKind.receive => JWErrorCode.receiveFailed,
+      WatchFrameErrorKind.write => JWErrorCode.writeFailed,
+      WatchFrameErrorKind.queueFull => JWErrorCode.queueFull,
+    };
+    return JWException(code, error.message);
   }
   if (error is WatchTransportException) {
-    return JWLinkException(error.code.name, error.message);
+    return JWException(JWErrorCode.transport, error.message);
   }
-  return JWLinkException('protocol', 'JW request failed: $error');
+  return JWException(JWErrorCode.protocol, 'JW request failed: $error');
 }

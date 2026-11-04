@@ -167,6 +167,8 @@ void main() {
       await expectLater(c.send(Uint8List(1)),
           throwsA(frameError(WatchFrameErrorKind.ackTimeout)));
       expect(p.writes, hasLength(2));
+      expect(c.isClosed, isFalse);
+      expect(p.closes, 0);
     });
     test('non-idempotent retry zero and ERR exhaustion', () async {
       p.onWrite = (_) async {
@@ -175,6 +177,8 @@ void main() {
       await expectLater(c.send(Uint8List(1), maxRetries: 0),
           throwsA(frameError(WatchFrameErrorKind.nack)));
       expect(p.writes, hasLength(1));
+      expect(c.isClosed, isFalse);
+      expect(p.closes, 0);
     });
     test(
         'confirmation identifies active handle, not queued send or same generation',
@@ -244,33 +248,32 @@ void main() {
       expect(events.where((e) => e.kind == WatchFrameKind.sequenceConflict),
           hasLength(1));
     });
-    test('partial write failure aborts queued sends and preserves cause',
-        () async {
+    test('partial write failure preserves the transport connection', () async {
       p.limit = 10;
       final error = StateError('partial frame');
       p.onWrite = (_) async {
         if (p.writes.length == 2) throw error;
       };
-      final a = c.send(Uint8List(40)), b = c.send(Uint8List(1));
       final m = isA<WatchFrameWriteException>()
           .having((e) => e.cause, 'cause', same(error));
-      await Future.wait(
-          [expectLater(a, throwsA(m)), expectLater(b, throwsA(m))]);
-      await c.close();
+      await expectLater(c.send(Uint8List(40)), throwsA(m));
       expect(p.writes, hasLength(2));
-      expect(p.closes, 1);
+      expect(c.isClosed, isFalse);
+      expect(p.closes, 0);
+      p.onWrite = (_) async => p.ack(2);
+      await c.send(Uint8List(1));
     });
-    test('hanging write cannot append another frame after timeout', () async {
+    test('hanging write times out without closing the channel', () async {
       final gate = Completer<void>();
       p.onWrite = (_) => gate.future;
-      final a = c.send(Uint8List(40)), b = c.send(Uint8List(1));
-      await Future.wait([
-        expectLater(a, throwsA(frameError(WatchFrameErrorKind.writeTimeout))),
-        expectLater(b, throwsA(frameError(WatchFrameErrorKind.writeTimeout)))
-      ]);
+      await expectLater(c.send(Uint8List(40)),
+          throwsA(frameError(WatchFrameErrorKind.writeTimeout)));
+      expect(c.isClosed, isFalse);
+      expect(p.closes, 0);
       gate.complete();
       await turn();
-      expect(p.writes, hasLength(1));
+      p.onWrite = (_) async => p.ack(2);
+      await c.send(Uint8List(1));
     });
     test('disconnect clears active, queued and residual bytes', () async {
       final a = c.send(Uint8List(1)), b = c.send(Uint8List(1));
@@ -288,12 +291,14 @@ void main() {
       expect(p.writes, hasLength(1));
       expect(p.closes, 1);
     });
-    test('notification stream errors terminate sends', () async {
+    test('notification stream errors fail the send but retain the channel', () async {
       final a = c.send(Uint8List(1));
       final check =
           expectLater(a, throwsA(frameError(WatchFrameErrorKind.receive)));
       p.rx.addError(StateError('notify'));
       await check;
+      expect(c.isClosed, isFalse);
+      expect(p.closes, 0);
     });
     test('retry and ACK observations retain generation, seq and correlation',
         () async {
@@ -330,7 +335,7 @@ void main() {
     await t.dispose();
   });
   test(
-      'bounded control queue overflow terminates stream instead of dropping ACK',
+      'bounded control queue overflow does not terminate the connection',
       () async {
     final p = Port(), gate = Completer<void>();
     p.onWrite = (_) => gate.future;
@@ -339,11 +344,11 @@ void main() {
     for (var seq = 0; seq < 3; seq++) {
       p.rx.add(WatchFrame(seq: seq, payload: [1]).encode());
     }
-    expect((await c.terminated as WatchFrameException).kind,
-        WatchFrameErrorKind.queueFull);
+    expect(c.isClosed, isFalse);
+    expect(p.closes, 0);
     gate.complete();
     await c.close();
-    expect(p.writes, hasLength(1));
+    expect(p.writes, isNotEmpty);
     await p.dispose();
   });
   for (final profile in WatchFrameProfile.values) {

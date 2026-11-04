@@ -233,24 +233,26 @@ void main() {
       [1]
     ]);
   });
-  test('write failure terminates the byte connection and releases resource',
-      () async {
+  test('write failure does not manufacture a byte disconnect', () async {
     final d = backend.device('a');
     d.tx.writeHook = (_) async => throw StateError('write');
     final c = create();
     await c.connect();
     await expectLater(c.write(bytes(1)), fails(WatchTransportErrorCode.write));
+    expect(c.state, WatchTransportState.connected);
+    d.tx.writeHook = null;
+    await c.write(bytes(2));
     await c.dispose();
     expect(d.connected, isFalse);
   });
-  test('receive overflow terminates connection rather than dropping data',
+  test('receive overflow drops data without terminating connection',
       () async {
     final c =
         create(config: WatchBleConfig(profile: profile(), maxBufferedBytes: 1));
     await c.connect();
     backend.device('a').rx.data.add([1, 2]);
-    await expectLater(
-        c.write(bytes(1)), fails(WatchTransportErrorCode.receiveOverflow));
+    expect(c.state, WatchTransportState.connected);
+    await c.write(bytes(1));
     await c.dispose();
   });
   test(

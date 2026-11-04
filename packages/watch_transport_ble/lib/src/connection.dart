@@ -39,9 +39,7 @@ final class WatchBleConnection implements WatchTransportConnection {
   WatchBleConnection._(this.target, this._transport) {
     _received = StreamController<Uint8List>.broadcast(
         sync: true, onListen: () => scheduleMicrotask(_flush));
-    _writes = BleWriteQueue(
-        onFatalError: (e, _) => _end(
-            WatchDisconnectReason.failed, _error(e, BleConnectionStage.write)));
+    _writes = BleWriteQueue(onFatalError: (_, __) {});
   }
   @override
   final WatchDeviceTarget target;
@@ -179,13 +177,11 @@ final class WatchBleConnection implements WatchTransportConnection {
         _end(WatchDisconnectReason.remote);
       }
     },
-        onError: (Object error) =>
-            _end(WatchDisconnectReason.failed, _error(error, _stage))));
+        onError: (Object _) {}));
     _subscriptions.add(device.mtuChanges.listen((value) {
       if (!_closed) _mtu = resolveAttMtu(value);
     },
-        onError: (Object error) =>
-            _end(WatchDisconnectReason.failed, _error(error, _stage))));
+        onError: (Object _) {}));
     _ownsPhysical = true;
     await _track(device.connect(_config.connectTimeout))
         .timeout(_config.connectTimeout);
@@ -225,8 +221,7 @@ final class WatchBleConnection implements WatchTransportConnection {
     }
     _stage = BleConnectionStage.subscribing;
     _subscriptions.add(_rx!.received.listen(_receive,
-        onError: (Object error) =>
-            _end(WatchDisconnectReason.failed, _error(error, _stage))));
+        onError: (Object _) {}));
     _notifyEnabled = true;
     await _operation(_rx!.setNotify(true));
     _check();
@@ -273,7 +268,7 @@ final class WatchBleConnection implements WatchTransportConnection {
       } catch (error) {
         throw _error(error, BleConnectionStage.write);
       }
-    });
+    }, fatal: false);
   }
 
   Future<Uint8List> readGatt(
@@ -303,9 +298,6 @@ final class WatchBleConnection implements WatchTransportConnection {
         _check();
       } catch (error) {
         final failure = _error(error, BleConnectionStage.read);
-        if (error is TimeoutException) {
-          _end(WatchDisconnectReason.failed, failure);
-        }
         throw failure;
       }
     }, fatal: false).then((_) => value);
@@ -314,11 +306,11 @@ final class WatchBleConnection implements WatchTransportConnection {
   void _receive(List<int> data) {
     if (_closed || data.isEmpty) return;
     if (_bufferSize + data.length > _config.maxBufferedBytes) {
-      _end(
-          WatchDisconnectReason.failed,
-          WatchBleException(WatchTransportErrorCode.receiveOverflow,
-              'BLE receive buffer full',
-              stage: _stage));
+      // Overflow is a receive operation failure. It cannot establish that the
+      // platform disconnected the device, so discard the buffered bytes and
+      // retain the physical connection state.
+      _buffer.clear();
+      _bufferSize = 0;
       return;
     }
     _buffer.add(Uint8List.fromList(data).asUnmodifiableView());

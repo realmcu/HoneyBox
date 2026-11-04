@@ -78,10 +78,9 @@ Object _mapError(Object error) {
     WatchFrameErrorKind.writeTimeout =>
       WSTimeoutException(WSTimeoutKind.write, error.message),
     WatchFrameErrorKind.nack => WSNackException(error.message),
-    WatchFrameErrorKind.receive ||
-    WatchFrameErrorKind.disconnected =>
-      WSDisconnectedException(error.message),
-    WatchFrameErrorKind.write => WSDisconnectedException(error.message),
+    WatchFrameErrorKind.disconnected => WSDisconnectedException(error.message),
+    WatchFrameErrorKind.receive || WatchFrameErrorKind.write =>
+      WSOperationException(error.message),
     WatchFrameErrorKind.queueFull => const WSQueueFullException(64),
   };
 }

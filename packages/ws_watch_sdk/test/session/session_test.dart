@@ -157,8 +157,7 @@ void main() {
     expect(await second, 2);
     await f.dispose();
   });
-  test(
-      'query timeout closes old generation and fails queue; reconnect uses fresh generation',
+  test('query timeout keeps the live session available for later operations',
       () async {
     final h = await WSPreparedSimulation.open(config: config);
     h.device.suppressReplies = true;
@@ -167,18 +166,12 @@ void main() {
         throwsA(isA<WSTimeoutException>()
             .having((e) => e.kind, 'kind', WSTimeoutKind.reply)));
     final b = expectLater(h.session.query(WSSettingsProtocol.getLanguage, null),
-        throwsA(isA<WSSessionInvalidatedException>()));
+        throwsA(isA<WSTimeoutException>()));
     await Future.wait([a, b]);
-    expect(h.session.isClosed, isTrue);
-    await expectLater(h.session.query(WSSettingsProtocol.getLanguage, null),
-        throwsA(isA<WSSessionInvalidatedException>()));
-    final next = await WSPreparedSimulation.open(config: config);
-    expect(
-        next.session.link.generation, greaterThan(h.session.link.generation));
-    await h.device.notifyLanguage(99).catchError((Object _) {});
-    expect(await next.session.query(WSSettingsProtocol.getLanguage, null), 1);
+    expect(h.session.isClosed, isFalse);
+    h.device.suppressReplies = false;
+    expect(await h.session.query(WSSettingsProtocol.getLanguage, null), 1);
     await h.dispose();
-    await next.dispose();
   });
   test('matching malformed value fails immediately; other keys still routed',
       () async {
@@ -322,7 +315,7 @@ void main() {
     await h.dispose();
     await pending;
   });
-  test('ACK timeout invalidates queued queries as well as active query',
+  test('ACK timeout fails queued queries without invalidating the session',
       () async {
     final f = Fixture();
     final first = expectLater(
@@ -330,10 +323,10 @@ void main() {
         throwsA(isA<WSTimeoutException>()));
     final queued = expectLater(
         f.session.query(WSSettingsProtocol.getLanguage, null),
-        throwsA(isA<WSSessionInvalidatedException>()));
+        throwsA(isA<WSTimeoutException>()));
     await Future.wait([first, queued]);
-    expect(f.session.isClosed, isTrue);
-    expect(f.peer.commands, hasLength(1));
+    expect(f.session.isClosed, isFalse);
+    expect(f.peer.commands, hasLength(2));
     await f.dispose();
   });
 

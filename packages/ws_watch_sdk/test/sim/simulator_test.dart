@@ -41,17 +41,16 @@ void main() {
     faults.dispose();
     await h.dispose();
   });
-  test('late simulator response cannot complete subsequent query after timeout',
+  test('late simulator response does not close the live session after timeout',
       () async {
     final h = await WSPreparedSimulation.open(config: config);
     h.device.replyDelay = const Duration(milliseconds: 60);
     await expectLater(h.session.query(WSSettingsProtocol.getLanguage, null),
         throwsA(isA<WSTimeoutException>()));
-    await expectLater(h.session.query(WSSettingsProtocol.getLanguage, null),
-        throwsA(isA<WSSessionInvalidatedException>()));
-    final next = await WSPreparedSimulation.open(config: config);
-    expect(await next.session.query(WSSettingsProtocol.getLanguage, null), 1);
+    expect(h.session.isClosed, isFalse);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    h.device.replyDelay = Duration.zero;
+    expect(await h.session.query(WSSettingsProtocol.getLanguage, null), 1);
     await h.dispose();
-    await next.dispose();
   });
 }

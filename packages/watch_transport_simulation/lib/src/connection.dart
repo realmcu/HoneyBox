@@ -190,10 +190,10 @@ final class WatchSimulationConnection implements WatchTransportConnection {
   void _receive(Uint8List bytes) {
     if (bytes.isEmpty) return;
     if (_bufferedBytes + bytes.length > maxBufferedBytes) {
-      const error = WatchTransportException(
-          WatchTransportErrorCode.receiveOverflow, 'Receive buffer full');
-      _terminate(WatchDisconnectReason.failed, error);
-      _peer._terminate(WatchDisconnectReason.remote, error);
+      // Buffer pressure is a local receive failure, not a simulated radio
+      // disconnect. Drop the buffered bytes and leave both endpoints live.
+      _buffer.clear();
+      _bufferedBytes = 0;
       return;
     }
     _buffer.add(bytes);

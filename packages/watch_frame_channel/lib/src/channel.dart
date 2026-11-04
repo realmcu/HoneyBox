@@ -44,11 +44,15 @@ class WatchFrameChannel {
         });
     _rx = connection.received.listen(_assembler.add,
         onError: (Object error, StackTrace stack) {
-      unawaited(
-          close(_error(WatchFrameErrorKind.receive, 'receive failed: $error')));
+      // A receive error is not proof that the transport disconnected. The
+      // owning transport is the sole authority for physical link lifecycle.
+      _interruptActive(
+          _error(WatchFrameErrorKind.receive, 'receive failed: $error'));
     }, onDone: () {
-      unawaited(close(
-          _error(WatchFrameErrorKind.disconnected, 'receive stream ended')));
+      // Some adapters can end/recreate their notification stream before the
+      // platform emits its connection-state callback. Do not infer a disconnect.
+      _interruptActive(
+          _error(WatchFrameErrorKind.receive, 'receive stream ended'));
     });
     _disconnect = connection.disconnected.listen((_) {
       unawaited(close(
@@ -220,7 +224,6 @@ class WatchFrameChannel {
     if (isClosed) return Future.error(_failure!);
     if (priority && _acks.length >= config.controlQueueCapacity) {
       final error = _error(WatchFrameErrorKind.queueFull, 'control queue full');
-      unawaited(close(error));
       return Future.error(error);
     }
     final job = _WriteJob(raw, seq, requestId, traceId, priority);
@@ -254,13 +257,15 @@ class WatchFrameChannel {
           }
           job.done.complete();
         } catch (error, stack) {
-          // The peer may hold a partial frame. Never append a fresh frame to it.
+          // A failed write/ACK is an operation error, not a connection-state
+          // signal. The transport's disconnected callback alone closes this
+          // channel. Keeping the channel open also lets callers inspect and
+          // retry without manufacturing a physical disconnect.
           final failure = error is WatchFrameException ||
                   identical(error, _failure)
               ? error
               : mapError(
                   WatchFrameWriteException(error, isControl: job.isControl));
-          unawaited(close(failure));
           if (!job.done.isCompleted) job.done.completeError(failure, stack);
         } finally {
           _writes.remove(job);
@@ -335,6 +340,11 @@ class WatchFrameChannel {
           traceId: traceId,
           connectionGeneration: generation));
     }
+  }
+
+  void _interruptActive(Object error) {
+    final ack = _ack;
+    if (ack != null && !ack.isCompleted) ack.completeError(error);
   }
 
   void _checkOpen() {

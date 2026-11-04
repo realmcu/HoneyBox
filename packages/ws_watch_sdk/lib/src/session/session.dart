@@ -191,25 +191,10 @@ class WSSession {
       }
       final result = await reply.done.future;
       if (result.error != null) {
-        if (result.error is WSTimeoutException) {
-          const invalid = WSSessionInvalidatedException(
-              'query timed out; reconnect before further requests');
-          _invalidate(invalid, activeError: result.error);
-          unawaited(link.close(invalid));
-        }
         Error.throwWithStackTrace(
             result.error!, result.stack ?? StackTrace.current);
       }
       return result.value;
-    } on WSTimeoutException catch (error) {
-      // Exhausted ACK deadlines leave the same ambiguous late-reply risk.
-      if (!isClosed) {
-        const invalid = WSSessionInvalidatedException(
-            'query timed out; reconnect before further requests');
-        _invalidate(invalid, activeError: error);
-        unawaited(link.close(invalid));
-      }
-      rethrow;
     } finally {
       _replyTimer?.cancel();
       _replyTimer = null;
