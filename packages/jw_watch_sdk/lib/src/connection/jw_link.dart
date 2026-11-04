@@ -1,0 +1,181 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:watch_frame_channel/watch_frame_channel.dart';
+import 'package:watch_transport/watch_transport.dart';
+
+import 'jw_protocol.dart';
+
+final class JWLinkException implements Exception {
+  const JWLinkException(this.stage, this.message);
+
+  final String stage;
+  final String message;
+
+  @override
+  String toString() => 'JW $stage: $message';
+}
+
+final class _PendingRequest {
+  _PendingRequest(this.request);
+
+  final JWProtocolRequest request;
+  final response = Completer<JWProtocolMessage>();
+  WatchFrameSend? send;
+}
+
+/// JW L2 request/reply matching over the common T3 frame channel.
+///
+/// Exactly one L2 request is active at a time. That preserves the Android
+/// SDK's command serialization and prevents a late same-key response from
+/// completing a newer request.
+final class JWLink {
+  JWLink(this.connection)
+      : _channel = WatchFrameChannel(
+          WatchFramePort.fromConnection(connection),
+          profile: WatchFrameProfile.jw,
+          config: const WatchFrameConfig(
+            ackTimeout: Duration(seconds: 3),
+            maxRetries: 2,
+            maxPayloadLength: 236,
+          ),
+          mapError: _mapFrameError,
+        );
+
+  final WatchTransportConnection connection;
+  final WatchFrameChannel _channel;
+  final _events = StreamController<JWProtocolMessage>.broadcast(sync: true);
+  final _failures = StreamController<JWLinkException>.broadcast(sync: true);
+  StreamSubscription<WatchReceivedPayload>? _payloadSubscription;
+  Future<void> _tail = Future.value();
+  _PendingRequest? _pending;
+  JWLinkException? _failure;
+  bool _open = false;
+  bool _disposed = false;
+
+  Stream<JWProtocolMessage> get events => _events.stream;
+  Stream<JWLinkException> get failures => _failures.stream;
+  bool get isOpen => _open && !_disposed && _failure == null;
+
+  Future<void> open() async {
+    if (_disposed) {
+      throw const JWLinkException('open', 'Link has been disposed');
+    }
+    if (_open) return;
+    _payloadSubscription = _channel.payloads.listen(_onPayload);
+    unawaited(
+        _channel.terminated.then((error) => _fail(_mapFrameError(error))));
+    try {
+      await connection.connect();
+      _open = true;
+    } catch (error) {
+      _fail(_mapFrameError(error));
+      rethrow;
+    }
+  }
+
+  Future<JWProtocolMessage> request(JWProtocolRequest request) {
+    if (request.responseKey == null) {
+      return Future.error(
+          ArgumentError('JW request needs a response key; use send instead'));
+    }
+    return _enqueue(() => _execute(request));
+  }
+
+  Future<void> send(JWProtocolRequest request) =>
+      _enqueue(() async => _execute(request, expectResponse: false));
+
+  Future<T> _enqueue<T>(Future<T> Function() operation) {
+    if (!isOpen) {
+      return Future.error(_failure ??
+          const JWLinkException(
+              'connection', 'JW byte channel is unavailable'));
+    }
+    final result = Completer<T>();
+    _tail = _tail.then((_) async {
+      if (result.isCompleted) return;
+      try {
+        result.complete(await operation());
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    });
+    return result.future;
+  }
+
+  Future<JWProtocolMessage> _execute(JWProtocolRequest request,
+      {bool expectResponse = true}) async {
+    final pending = _PendingRequest(request);
+    _pending = pending;
+    try {
+      pending.send = _channel.startSend(encodeJWRequest(request));
+      await pending.send!.completed;
+      if (!expectResponse) return JWProtocolMessage(0, 0, Uint8List(0));
+      return await pending.response.future.timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      const error = JWLinkException('reply', 'JW business reply timed out');
+      _fail(error);
+      throw error;
+    } catch (error) {
+      final mapped = _mapFrameError(error);
+      _fail(mapped);
+      throw mapped;
+    } finally {
+      if (identical(_pending, pending)) _pending = null;
+    }
+  }
+
+  void _onPayload(WatchReceivedPayload payload) {
+    List<JWProtocolMessage> messages;
+    try {
+      messages = decodeJWMessages(payload.bytes);
+    } on FormatException {
+      return;
+    }
+    for (final message in messages) {
+      final pending = _pending;
+      if (pending != null &&
+          message.command ==
+              (pending.request.responseCommand ?? pending.request.command) &&
+          message.key == pending.request.responseKey &&
+          !pending.response.isCompleted) {
+        if (pending.send != null) _channel.confirmReceived(pending.send!);
+        pending.response.complete(message);
+      } else if (!_events.isClosed) {
+        _events.add(message);
+      }
+    }
+  }
+
+  void _fail(JWLinkException error) {
+    if (_failure != null) return;
+    _failure = error;
+    _open = false;
+    final pending = _pending;
+    if (pending != null && !pending.response.isCompleted) {
+      pending.response.completeError(error);
+    }
+    if (!_failures.isClosed) _failures.add(error);
+  }
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    _fail(const JWLinkException('disconnect', 'JW session disposed'));
+    await _payloadSubscription?.cancel();
+    await _channel.close(_failure);
+    await _events.close();
+    await _failures.close();
+  }
+}
+
+JWLinkException _mapFrameError(Object error) {
+  if (error is JWLinkException) return error;
+  if (error is WatchFrameException) {
+    return JWLinkException(error.kind.name, error.message);
+  }
+  if (error is WatchTransportException) {
+    return JWLinkException(error.code.name, error.message);
+  }
+  return JWLinkException('protocol', 'JW request failed: $error');
+}

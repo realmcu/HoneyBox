@@ -26,7 +26,77 @@ void main() {
     expect(find.byKey(const Key('jw.demo.feature.history')), findsOneWidget);
   });
 
-  testWidgets('opens API guidance in a bottom sheet', (tester) async {
+  testWidgets('connection sliver list lays out device row on narrow screen',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                sliver: SliverList.separated(
+                  itemCount: 1,
+                  separatorBuilder: (_, index) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    return Padding(
+                      key: const Key('jw.demo.device.59:17:01:1B:E7:B1'),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('PEARCE'),
+                                  Text('59:17:01:1B:E7:B1 · RSSI -62'),
+                                ],
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () {},
+                              child: const Text('连接'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('PEARCE'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('home guide actions layout without rendering exceptions',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(const MaterialApp(home: JWWatchLabHome()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('jw.demo.guide.initialize')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('jw.demo.page.home')), findsOneWidget);
+  });
+
+  testWidgets('opens API guidance in content sheet', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: JWWatchLabHome()));
 
     await tester.tap(find.byKey(const Key('jw.demo.tab.features')));

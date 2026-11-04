@@ -1,0 +1,78 @@
+import 'package:jw_watch_sdk/jw_watch_sdk.dart';
+
+/// Demo-only Chinese labels for [JWDeviceFunction]. SDK keeps English identifiers.
+String jwDeviceFunctionLabel(JWDeviceFunction function) {
+  return switch (function) {
+    JWDeviceFunction.musicControl => '音乐控制',
+    JWDeviceFunction.volumeControl => '音量控制',
+    JWDeviceFunction.alarm => '智能闹钟',
+    JWDeviceFunction.longSitReminder => '久坐提醒',
+    JWDeviceFunction.eventReminder => '事件提醒',
+    JWDeviceFunction.autoLock => '锁屏防触',
+    JWDeviceFunction.appSportRateDetect => 'App 运动心率检测',
+    JWDeviceFunction.baseSwitch => '基础开关',
+    JWDeviceFunction.multiSport => '多运动模式',
+    JWDeviceFunction.stepWatch => '秒表',
+    JWDeviceFunction.countDown => '倒计时',
+    JWDeviceFunction.rateReminder => '心率提醒',
+    JWDeviceFunction.cameraControl => '遥控拍照',
+    JWDeviceFunction.findPhone => '查找手机',
+    JWDeviceFunction.findDevice => '查找手环',
+    JWDeviceFunction.lightControl => '亮度控制',
+    JWDeviceFunction.notifyReminder => '消息提醒',
+    JWDeviceFunction.screenTheme => '主界面切换',
+    JWDeviceFunction.turnLight => '转腕亮屏',
+    JWDeviceFunction.multiLanguage => '多国语言',
+    JWDeviceFunction.hourSystem => '小时制',
+    JWDeviceFunction.unitSystem => '公英制',
+    JWDeviceFunction.ota => 'OTA 升级',
+    JWDeviceFunction.nfc => 'NFC',
+    JWDeviceFunction.earPhone => '通话耳机',
+    JWDeviceFunction.bpDetection => '血压手动测量',
+    JWDeviceFunction.rate => '心率',
+    JWDeviceFunction.disturb => '勿扰模式',
+    JWDeviceFunction.step => '计步',
+    JWDeviceFunction.sleep => '睡眠',
+    JWDeviceFunction.weChatRun => '微信运动',
+    JWDeviceFunction.lightDuration => '亮屏时长',
+    JWDeviceFunction.todayAdjust => '今日数据校准',
+    JWDeviceFunction.sleepAdjust => '睡眠数据校准',
+    JWDeviceFunction.temperature => '体温',
+    JWDeviceFunction.bp2 => '血压 2.0',
+    JWDeviceFunction.alarm2 => '闹钟 2.0',
+    JWDeviceFunction.customUi => '自定义主界面',
+    JWDeviceFunction.downloadUi => '下载主界面',
+    JWDeviceFunction.spo2Measure => '血氧测量',
+    JWDeviceFunction.modeUpgrade => '字库升级',
+    JWDeviceFunction.sleepQuality2 => '睡眠质量 2.0',
+    JWDeviceFunction.sportRate2 => 'App 运动心率 2.0',
+    JWDeviceFunction.rateTempPressure => '心率/体温/压力数据',
+    JWDeviceFunction.spo2Continuous => '连续血氧',
+    JWDeviceFunction.ecgFunction => '心电',
+    JWDeviceFunction.deviceStateSync => '同步设备状态',
+    JWDeviceFunction.addressBook => '通讯录',
+    JWDeviceFunction.rtkHrv => 'HRV',
+    JWDeviceFunction.rtkBp3 => '血压 3.0',
+    JWDeviceFunction.bloodSugar => '血糖',
+    JWDeviceFunction.hypoxia => '低氧提醒',
+    JWDeviceFunction.highHrv => '心率过高提醒',
+    JWDeviceFunction.sleepAll => '全天睡眠',
+    JWDeviceFunction.deviceDateFormat => '日期格式',
+    JWDeviceFunction.hideQTAndHrv => '隐藏 QT/HRV',
+    JWDeviceFunction.readiness => '准备度',
+    JWDeviceFunction.metab => 'METAB 日摘要',
+    JWDeviceFunction.controlDeviceSport => 'App 控制多运动',
+    JWDeviceFunction.heatStress => '热应激',
+    JWDeviceFunction.pressure => '压力',
+    JWDeviceFunction.hideHealthFunction => '隐藏健康功能',
+    JWDeviceFunction.ecgBelt => '心电带',
+  };
+}
+
+List<JWDeviceFunction> jwSupportedFunctionsSorted(JWDeviceFunctionInfo info) {
+  final supported = info.supported.toList();
+  supported.sort(
+    (a, b) => jwDeviceFunctionLabel(a).compareTo(jwDeviceFunctionLabel(b)),
+  );
+  return supported;
+}

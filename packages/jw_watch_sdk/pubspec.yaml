@@ -8,6 +8,14 @@ environment:
   sdk: '>=3.6.0 <4.0.0'
   flutter: '>=3.27.0'
 
+dependencies:
+  watch_frame_channel:
+    path: ../watch_frame_channel
+  watch_transport:
+    path: ../watch_transport
+  watch_transport_ble:
+    path: ../watch_transport_ble
+
 dev_dependencies:
   flutter_lints: ^4.0.0
   flutter_test:
