@@ -37,8 +37,8 @@ final support = watch.features.of(JWFeature.measurements);''',
     subtitle: '时间、语言、单位、显示与目标',
     icon: Icons.tune_outlined,
     features: [JWFeature.settings, JWFeature.reminders],
-    example: '''await watch.settings.setLanguage(DeviceLanguage.zhHans);
-await watch.settings.setUnitSystem(UnitSystem.metric);''',
+    example: '''await session.setLanguageVerified(JWLanguage.simplifiedChinese);
+await session.setUnitSystemVerified(JWUnitSystem.metric);''',
   ),
   JWFeatureCatalogEntry(
     id: 'measurements',

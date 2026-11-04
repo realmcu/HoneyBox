@@ -7,6 +7,27 @@ import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+/// Turns public SDK errors into short, actionable UI copy.
+///
+/// The SDK deliberately keeps [JWException.msg] in English for
+/// developers. The Demo owns localized end-user wording and must make it
+/// clear that command failures do not imply that the BLE session disconnected.
+String describeJWDemoError(Object error) {
+  if (error is JWException) {
+    return switch (error.code) {
+      JWErrorCode.businessReplyTimeout =>
+        '设备在 5 秒内未回应此设置查询；该功能可能不支持或设备暂时忙，当前连接仍保持。',
+      JWErrorCode.ackTimeout => '设备未确认本次发送；当前连接仍保持，可稍后重试。',
+      JWErrorCode.nack => '设备拒绝了本次命令；当前连接仍保持。',
+      JWErrorCode.writeTimeout || JWErrorCode.writeFailed =>
+        '本次蓝牙写入失败；当前连接仍保持，可重试。',
+      JWErrorCode.transportDisconnected => '设备连接已断开。',
+      _ => 'SDK error [${error.code.name}]: ${error.msg}',
+    };
+  }
+  return error.toString();
+}
+
 /// HoneyBox-side composition of public JW SDK objects.
 ///
 /// This controller never writes GATT bytes or imports transport packages; it
@@ -198,6 +219,84 @@ class JWDemoController extends ChangeNotifier {
   Future<void> readDeviceFeatures() =>
       _runSession((session) => session.readDeviceFeatures());
 
+  Future<JWLanguage> readLanguage() =>
+      _runSessionValue((session) => session.readLanguage());
+
+  Future<JWHourSystem> readHourSystem() =>
+      _runSessionValue((session) => session.readHourSystem());
+
+  Future<JWUnitSystem> readUnitSystem() =>
+      _runSessionValue((session) => session.readUnitSystem());
+
+  Future<JWVerifiedSetting<JWLanguage>> setLanguage(JWLanguage value) =>
+      _runSessionValue((session) => session.setLanguageVerified(value));
+
+  Future<JWVerifiedSetting<JWHourSystem>> setHourSystem(
+          JWHourSystem value) =>
+      _runSessionValue((session) => session.setHourSystemVerified(value));
+
+  Future<JWVerifiedSetting<JWUnitSystem>> setUnitSystem(JWUnitSystem value) =>
+      _runSessionValue((session) => session.setUnitSystemVerified(value));
+
+  Future<JWSettingSubmission> syncTime() =>
+      _runSessionValue((session) => session.setTime(DateTime.now()));
+
+  Future<JWSettingSubmission> setUserProfile(JWUserProfile profile) =>
+      _runSessionValue((session) => session.setUserProfile(profile));
+
+  Future<JWSettingSubmission> setGoals(JWGoals goals) =>
+      _runSessionValue((session) => session.setGoals(goals));
+
+  Future<JWDateFormat> readDateFormat() =>
+      _runSessionValue((session) => session.readDateFormat());
+
+  Future<JWSettingSubmission> setDateFormat(JWDateFormat value) =>
+      _runSessionValue((session) => session.setDateFormat(value));
+
+  Future<int> readScreenLightDuration() =>
+      _runSessionValue((session) => session.readScreenLightDuration());
+
+  Future<JWSettingSubmission> setScreenLightDuration(int value) =>
+      _runSessionValue((session) => session.setScreenLightDuration(value));
+
+  Future<int> readScreenBrightness() =>
+      _runSessionValue((session) => session.readScreenBrightness());
+
+  Future<JWSettingSubmission> setScreenBrightness(int value) =>
+      _runSessionValue((session) => session.setScreenBrightness(value));
+
+  Future<int> readHomePage() =>
+      _runSessionValue((session) => session.readHomePage());
+
+  Future<JWSettingSubmission> setHomePage(int value) =>
+      _runSessionValue((session) => session.setHomePage(value));
+
+  Future<bool> readTurnWristToWake() =>
+      _runSessionValue((session) => session.readTurnWristToWake());
+
+  Future<JWSettingSubmission> setTurnWristToWake(bool value) =>
+      _runSessionValue((session) => session.setTurnWristToWake(value));
+
+  Future<JWDoNotDisturb> readDoNotDisturb() =>
+      _runSessionValue((session) => session.readDoNotDisturb());
+
+  Future<JWVerifiedSetting<JWDoNotDisturb>> setDoNotDisturb(
+          JWDoNotDisturb value) =>
+      _runSessionValue((session) => session.setDoNotDisturbVerified(value));
+
+  Future<JWSedentaryReminder> readSedentaryReminder() =>
+      _runSessionValue((session) => session.readSedentaryReminder());
+
+  Future<JWVerifiedSetting<JWSedentaryReminder>> setSedentaryReminder(
+          JWSedentaryReminder value) =>
+      _runSessionValue((session) => session.setSedentaryReminderVerified(value));
+
+  Future<List<JWAlarm>> readAlarms() =>
+      _runSessionValue((session) => session.readAlarms());
+
+  Future<JWSettingSubmission> setAlarms(List<JWAlarm> values) =>
+      _runSessionValue((session) => session.setAlarms(values));
+
   Future<void> disconnect() async {
     final session = _session;
     _session = null;
@@ -243,6 +342,29 @@ class JWDemoController extends ChangeNotifier {
       _error = error;
       sheetError.value = error;
       _notifyUi();
+    }
+  }
+
+  Future<T> _runSessionValue<T>(
+      Future<T> Function(JWWatchSession session) operation) async {
+    final session = _session;
+    if (session == null) {
+      final error = StateError('JW device must be connected first');
+      _error = error;
+      sheetError.value = error;
+      _notifyUi();
+      throw error;
+    }
+    _error = null;
+    sheetError.value = null;
+    _notifyUi();
+    try {
+      return await operation(session);
+    } catch (error) {
+      _error = error;
+      sheetError.value = error;
+      _notifyUi();
+      rethrow;
     }
   }
 

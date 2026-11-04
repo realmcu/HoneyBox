@@ -7,6 +7,7 @@ import 'jw_demo_content_sheet.dart';
 import 'jw_demo_controller.dart';
 import 'jw_device_function_labels.dart';
 import 'jw_feature_catalog.dart';
+import 'jw_settings_pages.dart';
 
 /// T4.0 navigation shell. T4.1 injects one SDK-owned session into it.
 class JWWatchLabHome extends StatefulWidget {
@@ -33,6 +34,10 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
   }
 
   void _showFeature(JWFeatureCatalogEntry entry) {
+    if (entry.id == 'settings') {
+      openJwSettingsHub(context, _controller);
+      return;
+    }
     unawaited(
       JwDemoContentSheet.show(
         context,
@@ -716,7 +721,9 @@ class _DevicePage extends StatelessWidget {
               leading: const Icon(Icons.inbox_outlined),
               title: Text(state.error == null ? '暂无会话事件' : '最近会话错误'),
               subtitle:
-                  Text(state.error?.toString() ?? '连接、登录和设备信息读取的结果会显示在首页引导中。'),
+                  Text(state.error == null
+                      ? '连接、登录和设备信息读取的结果会显示在首页引导中。'
+                      : describeJWDemoError(state.error!)),
             ),
           ),
         ],
@@ -921,12 +928,13 @@ class _ConnectionScanHeader extends StatelessWidget {
           ],
           if (sheetError != null) ...[
             const SizedBox(height: 12),
-            Text(sheetError.toString(), style: TextStyle(color: errorColor)),
+            Text(describeJWDemoError(sheetError),
+                style: TextStyle(color: errorColor)),
           ] else if (controller.error != null &&
               controller.error != sheetError) ...[
             const SizedBox(height: 12),
             Text(
-              controller.error.toString(),
+              describeJWDemoError(controller.error!),
               style: TextStyle(color: errorColor),
             ),
           ],
