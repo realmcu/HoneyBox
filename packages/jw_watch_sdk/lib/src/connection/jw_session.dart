@@ -408,21 +408,77 @@ final class JWWatchSession {
 
   Future<List<JWAlarm>> readAlarms() async {
     _requireReadyForSettings();
-    return JWSettingsCodec
-        .decodeAlarms((await _link.request(JWProtocolCommands.readAlarms())).value);
+    if (_usesLabeledAlarmProtocol()) {
+      return readLabeledAlarms();
+    }
+    return readStandardAlarms();
   }
 
-  /// Replaces the legacy alarm table without a read-back equality guarantee.
+  Future<List<JWAlarm>> readStandardAlarms() async {
+    _requireReadyForSettings();
+    return JWSettingsCodec.decodeAlarms(
+        (await _link.request(JWProtocolCommands.readAlarms())).value);
+  }
+
+  Future<List<JWAlarm>> readLabeledAlarms() async {
+    _requireReadyForSettings();
+    final messages = await _link.collectSettingResponses(
+      trigger: JWProtocolCommands.requestAlarms2(),
+      responseCommand: 2,
+      responseKey: JWProtocolCommands.alarms2ResponseKey,
+      isComplete: (message) {
+        final chunk = JWSettingsCodec.decodeAlarm2ReadChunk(message.value);
+        return chunk.count == 0 || chunk.curIndex == chunk.count;
+      },
+    );
+    return JWSettingsCodec.decodeAlarm2List(
+        messages.map((message) => message.value).toList());
+  }
+
+  /// Replaces the device alarm table without a read-back equality guarantee.
   ///
-  /// The device can normalize alarm dates/slots when writing the table, so a
-  /// read-after-write equality check is not a valid success criterion.
-  Future<JWSettingSubmission> setAlarms(List<JWAlarm> alarms) async {
+  /// Uses labeled alarm2 when supported, otherwise the standard alarm table.
+  Future<JWSettingSubmission> setAlarms(
+    List<JWAlarm> alarms, {
+    Set<int>? previousIds,
+  }) async {
     _requireReadyForSettings();
     final requested = List<JWAlarm>.unmodifiable(alarms);
-    await _link.send(
-        JWProtocolCommands.setAlarms(JWSettingsCodec.encodeAlarms(requested)));
+    if (_usesLabeledAlarmProtocol()) {
+      await _replaceLabeledAlarms(requested, previousIds: previousIds);
+    } else {
+      await _link.send(
+          JWProtocolCommands.setAlarms(JWSettingsCodec.encodeAlarms(requested)));
+    }
     return const JWSettingSubmission('alarms');
   }
+
+  Future<void> _replaceLabeledAlarms(
+    List<JWAlarm> alarms, {
+    Set<int>? previousIds,
+  }) async {
+    final nextIds = alarms.map((alarm) => alarm.id).toSet();
+    final staleIds = {...?previousIds}..removeAll(nextIds);
+    for (final id in staleIds) {
+      await _link.send(JWProtocolCommands.setAlarm2(
+          JWSettingsCodec.encodeAlarm2(
+        JWAlarm(
+          id: id,
+          time: DateTime.now(),
+          repeatDays: 0,
+          enabled: false,
+        ),
+        delete: true,
+      )));
+    }
+    for (final alarm in alarms) {
+      await _link.send(JWProtocolCommands.setAlarm2(
+          JWSettingsCodec.encodeAlarm2(alarm)));
+    }
+  }
+
+  bool _usesLabeledAlarmProtocol() =>
+      _state.functionInfo?.supports(JWDeviceFunction.alarm2) ?? false;
 
   Future<int?> _readBattery() async {
     if (connection is! WatchBleConnection) return null;

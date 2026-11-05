@@ -72,7 +72,7 @@ void main() {
         Uint8List.fromList([0x9e, 0xae, 0x10, 0x40]));
   });
 
-  test('DND, sedentary reminder, and legacy alarms round trip', () {
+  test('DND, sedentary reminder, and standard alarms round trip', () {
     const dnd = JWDoNotDisturb(
       enabled: true,
       schedule: JWTimeRange(
@@ -91,9 +91,66 @@ void main() {
     expect(JWSettingsCodec.decodeSedentaryReminder(
         JWSettingsCodec.encodeSedentaryReminder(sedentary)), sedentary);
 
-    final alarms = [
-      JWAlarm(id: 2, time: DateTime(2026, 11, 4, 7, 30), repeatDays: 0x1f),
-    ];
-    expect(JWSettingsCodec.decodeAlarms(JWSettingsCodec.encodeAlarms(alarms)), alarms);
+    final single = JWAlarm(
+      id: 2,
+      time: DateTime(2026, 11, 4, 7, 30),
+      repeatDays: 0,
+    );
+    expect(
+      JWSettingsCodec.decodeAlarms(JWSettingsCodec.encodeAlarms([single])),
+      [single],
+    );
+
+    final repeating = JWAlarm(
+      id: 0,
+      time: DateTime(2026, 11, 6, 11, 17),
+      repeatDays: 0x04,
+    );
+    final decodedRepeating =
+        JWSettingsCodec.decodeAlarms(JWSettingsCodec.encodeAlarms([repeating])).single;
+    expect(decodedRepeating.id, repeating.id);
+    expect(decodedRepeating.repeatDays, repeating.repeatDays);
+    expect(decodedRepeating.time.hour, 11);
+    expect(decodedRepeating.time.minute, 17);
+    expect(decodedRepeating.time.year, DateTime.now().year);
+    expect(decodedRepeating.time.month, DateTime.now().month);
+    expect(decodedRepeating.time.day, DateTime.now().day);
+
+    final padded = Uint8List.fromList([
+      ...JWSettingsCodec.encodeAlarms([single]),
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]);
+    expect(JWSettingsCodec.decodeAlarms(padded), [single]);
+
+    final repeatHighBit = JWSettingsCodec.encodeAlarms([
+      JWAlarm(
+        id: 1,
+        time: DateTime(2026, 11, 6, 8, 0),
+        repeatDays: 0x04,
+      ),
+    ]);
+    final withBit7 = Uint8List.fromList([...repeatHighBit]);
+    withBit7[4] = withBit7[4] | 0x80;
+    expect(
+      JWSettingsCodec.decodeAlarms(withBit7).single.repeatDays,
+      0x04,
+    );
+
+    final labeled = JWAlarm(
+      id: 3,
+      time: DateTime(2026, 11, 6, 11, 17),
+      repeatDays: 0,
+      enabled: true,
+      label: '起床',
+    );
+    final labeledWrite = JWSettingsCodec.encodeAlarm2(labeled);
+    final labeledRead = JWSettingsCodec.decodeAlarm2ReadChunk(
+      Uint8List.fromList([...labeledWrite, 1, 1]),
+    );
+    expect(labeledRead.alarm, labeled);
   });
 }

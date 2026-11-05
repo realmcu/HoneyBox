@@ -76,6 +76,42 @@ final class JWLink {
   Future<void> send(JWProtocolRequest request) =>
       _enqueue(() async => _execute(request, expectResponse: false));
 
+  /// Sends [trigger] and collects unsolicited setting responses on [events].
+  Future<List<JWProtocolMessage>> collectSettingResponses({
+    required JWProtocolRequest trigger,
+    required int responseCommand,
+    required int responseKey,
+    required bool Function(JWProtocolMessage message) isComplete,
+    Duration timeout = const Duration(seconds: 8),
+  }) {
+    return _enqueue(() async {
+      final messages = <JWProtocolMessage>[];
+      late final StreamSubscription<JWProtocolMessage> subscription;
+      final done = Completer<void>();
+      subscription = events.listen((message) {
+        if (message.command != responseCommand || message.key != responseKey) {
+          return;
+        }
+        messages.add(message);
+        if (isComplete(message)) {
+          if (!done.isCompleted) done.complete();
+        }
+      });
+      try {
+        await _execute(trigger, expectResponse: false);
+        await done.future.timeout(timeout);
+      } on TimeoutException {
+        if (messages.isEmpty) {
+          throw const JWException(JWErrorCode.businessReplyTimeout,
+              'JW alarm2 read timed out');
+        }
+      } finally {
+        await subscription.cancel();
+      }
+      return messages;
+    });
+  }
+
   Future<T> _enqueue<T>(Future<T> Function() operation) {
     if (!isOpen) {
       return Future.error(_failure ??

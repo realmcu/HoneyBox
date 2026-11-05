@@ -198,26 +198,51 @@ final class JWSedentaryReminder {
       startHour, endHour, repeatDays);
 }
 
-/// One legacy alarm record. [repeatDays] uses Monday bit 0 through Sunday bit 6.
+/// One alarm record for JW standard (`0x02/0x03`) or labeled alarm2 (`0x65`–`0x67`).
+///
+/// [repeatDays] uses Monday bit 0 through Sunday bit 6. When zero, the date in
+/// [time] is the one-shot schedule; when non-zero, only [repeatDays] controls
+/// repetition (matching Android `ApplicationLayerAlarmPacket`).
 final class JWAlarm {
   const JWAlarm({
     required this.id,
     required this.time,
     required this.repeatDays,
-  })  : assert(id >= 0 && id <= 7),
-        assert(repeatDays >= 0 && repeatDays <= 0x7f);
+    this.enabled = true,
+    this.label = '',
+  })  : assert(id >= 0 && id <= 31),
+        assert(repeatDays >= 0 && repeatDays <= 0x7f),
+        assert(label.length <= 15);
 
   final int id;
   final DateTime time;
   final int repeatDays;
+  final bool enabled;
+  final String label;
 
   @override
   bool operator ==(Object other) =>
       other is JWAlarm &&
       other.id == id &&
       other.time == time &&
-      other.repeatDays == repeatDays;
+      other.repeatDays == repeatDays &&
+      other.enabled == enabled &&
+      other.label == label;
 
   @override
-  int get hashCode => Object.hash(id, time, repeatDays);
+  int get hashCode =>
+      Object.hash(id, time, repeatDays, enabled, label);
+}
+
+/// Parsed labeled-alarm2 read payload before the list is aggregated.
+final class JWAlarm2ReadChunk {
+  const JWAlarm2ReadChunk({
+    required this.alarm,
+    required this.curIndex,
+    required this.count,
+  });
+
+  final JWAlarm? alarm;
+  final int curIndex;
+  final int count;
 }

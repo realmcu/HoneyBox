@@ -276,7 +276,7 @@ await session.setDoNotDisturbVerified(dnd);''',
                 _SettingsNavTile(
                   keyName: 'jw.demo.settings.alarms',
                   title: '闹钟',
-                  subtitle: '旧版闹钟整表读取与写入',
+                  subtitle: '按设备能力读取/整表写入（标准或标签闹钟）',
                   apiCode:
                       'await session.setAlarms(alarms); // replaces full table',
                   onOpen: _openAlarms,
@@ -560,21 +560,55 @@ class JWAlarmsSettingsPage extends StatefulWidget {
 class _JWAlarmsSettingsPageState extends State<JWAlarmsSettingsPage>
     with _DemoAsyncMixin {
   List<JWAlarm> _alarms = const [];
+  Set<int> _deviceAlarmIds = const {};
+
+  bool get _labeledAlarms =>
+      widget.controller.state.functionInfo?.supports(JWDeviceFunction.alarm2) ??
+      false;
 
   Future<void> _read() => run(() async {
         final alarms = await widget.controller.readAlarms();
         if (!mounted) return;
         setState(() {
           _alarms = List<JWAlarm>.from(alarms);
-          resultMessage = '已读取 ${alarms.length} 个闹钟。';
+          _deviceAlarmIds = alarms.map((alarm) => alarm.id).toSet();
+          resultMessage = '已读取 ${alarms.length} 个闹钟'
+              '${_labeledAlarms ? '（标签闹钟协议）' : '（标准闹钟协议）'}。';
         });
       });
 
   Future<void> _save() => run(() async {
-        await widget.controller.setAlarms(_alarms);
+        await widget.controller.setAlarms(
+          _alarms,
+          previousAlarmIds: _deviceAlarmIds,
+        );
         if (!mounted) return;
-        setState(() => resultMessage = '闹钟表已整表下发。');
+        setState(() {
+          _deviceAlarmIds = _alarms.map((alarm) => alarm.id).toSet();
+          resultMessage = '闹钟表已整表下发。';
+        });
       });
+
+  JWAlarm _copyAlarm(
+    JWAlarm alarm, {
+    DateTime? time,
+    int? repeatDays,
+    bool? enabled,
+    String? label,
+  }) =>
+      JWAlarm(
+        id: alarm.id,
+        time: time ?? alarm.time,
+        repeatDays: repeatDays ?? alarm.repeatDays,
+        enabled: enabled ?? alarm.enabled,
+        label: label ?? alarm.label,
+      );
+
+  void _replaceAlarm(int index, JWAlarm alarm) {
+    setState(() {
+      _alarms = List<JWAlarm>.from(_alarms)..[index] = alarm;
+    });
+  }
 
   Future<void> _pickTime(int index) async {
     final alarm = _alarms[index];
@@ -591,28 +625,17 @@ class _JWAlarmsSettingsPageState extends State<JWAlarmsSettingsPage>
       picked.hour,
       picked.minute,
     );
-    setState(() {
-      _alarms = List<JWAlarm>.from(_alarms)
-        ..[index] = JWAlarm(
-          id: alarm.id,
-          time: updated,
-          repeatDays: alarm.repeatDays,
-        );
-    });
+    _replaceAlarm(index, _copyAlarm(alarm, time: updated));
   }
 
   void _toggleDay(int index, int bit) {
     final alarm = _alarms[index];
     final mask = 1 << bit;
-    final next = alarm.repeatDays ^ mask;
-    setState(() {
-      _alarms = List<JWAlarm>.from(_alarms)
-        ..[index] = JWAlarm(
-          id: alarm.id,
-          time: alarm.time,
-          repeatDays: next,
-        );
-    });
+    _replaceAlarm(index, _copyAlarm(alarm, repeatDays: alarm.repeatDays ^ mask));
+  }
+
+  void _toggleEnabled(int index, bool enabled) {
+    _replaceAlarm(index, _copyAlarm(_alarms[index], enabled: enabled));
   }
 
   void _removeAt(int index) {
@@ -638,7 +661,8 @@ class _JWAlarmsSettingsPageState extends State<JWAlarmsSettingsPage>
         JWAlarm(
           id: id,
           time: DateTime(now.year, now.month, now.day, 7, 0),
-          repeatDays: 0x7f,
+          repeatDays: 0,
+          enabled: true,
         ),
       ];
     });
@@ -670,15 +694,19 @@ class _JWAlarmsSettingsPageState extends State<JWAlarmsSettingsPage>
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: busy ? null : _addAlarm,
+        onPressed: _addAlarm,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
         icon: const Icon(Icons.add_alarm),
-        label: const Text('添加'),
+        label: const Text('添加闹钟'),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
         children: [
           const Text(
-            'JW 旧版闹钟需整表提交；设备可能会自行归一化日期或槽位。重复日：周一至周日对应协议 bit 0–6。',
+            '整表提交：修改后需点「保存闹钟表」才会下发到手表。重复日 bit 0–6 为周一至周日；'
+            '未勾选 repeat 为单次闹钟。标签闹钟协议需打开「启用」才会响铃；'
+            '重复闹钟下发时日期字段会使用当天日历（与 Android 一致）。',
           ),
           const SizedBox(height: 12),
           if (_alarms.isEmpty && !busy)
@@ -711,6 +739,18 @@ class _JWAlarmsSettingsPageState extends State<JWAlarmsSettingsPage>
                         ),
                       ],
                     ),
+                    if (_labeledAlarms)
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('启用'),
+                        subtitle: !_alarms[index].enabled
+                            ? const Text('关闭时手表不会响铃')
+                            : null,
+                        value: _alarms[index].enabled,
+                        onChanged: busy
+                            ? null
+                            : (value) => _toggleEnabled(index, value),
+                      ),
                     Wrap(
                       spacing: 4,
                       children: [
@@ -724,6 +764,11 @@ class _JWAlarmsSettingsPageState extends State<JWAlarmsSettingsPage>
                           ),
                       ],
                     ),
+                    if (_labeledAlarms && _alarms[index].label.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text('标签：${_alarms[index].label}'),
+                      ),
                   ],
                 ),
               ),

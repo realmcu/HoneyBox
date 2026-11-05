@@ -94,6 +94,11 @@ abstract final class JWProtocolCommands {
           replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setAlarms(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x02, responseKey: null, value: value);
+  static JWProtocolRequest requestAlarms2() =>
+      const JWProtocolRequest(command: 2, key: 0x66, responseKey: null);
+  static JWProtocolRequest setAlarm2(Uint8List value) =>
+      JWProtocolRequest(command: 2, key: 0x65, responseKey: null, value: value);
+  static const int alarms2ResponseKey = 0x67;
 
   static JWProtocolRequest _setting(int key, int value) => JWProtocolRequest(
       command: 2, key: key, responseKey: null, value: Uint8List.fromList([value]));

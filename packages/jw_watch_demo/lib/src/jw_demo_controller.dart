@@ -297,8 +297,12 @@ class JWDemoController extends ChangeNotifier {
   Future<List<JWAlarm>> readAlarms() =>
       _runSessionValue((session) => session.readAlarms());
 
-  Future<JWSettingSubmission> setAlarms(List<JWAlarm> values) =>
-      _runSessionValue((session) => session.setAlarms(values));
+  Future<JWSettingSubmission> setAlarms(
+    List<JWAlarm> values, {
+    Set<int>? previousAlarmIds,
+  }) =>
+      _runSessionValue(
+          (session) => session.setAlarms(values, previousIds: previousAlarmIds));
 
   Future<void> disconnect() async {
     final session = _session;

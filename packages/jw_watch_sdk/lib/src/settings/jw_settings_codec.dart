@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'jw_settings_models.dart';
@@ -119,23 +120,38 @@ abstract final class JWSettingsCodec {
     }
     final result = <int>[];
     for (final alarm in alarms) {
-      final time = alarm.time.toLocal();
-      final year = time.year - 2000;
-      _range(year, 0, 63, 'alarm year');
+      final wire = _alarmWireSchedule(alarm);
+      _range(wire.year, 0, 63, 'alarm year');
       _range(alarm.id, 0, 7, 'alarm id');
       _range(alarm.repeatDays, 0, 0x7f, 'alarm repeatDays');
       result.addAll([
-        (year << 2) | (time.month >> 2),
-        (time.month << 6) | (time.day << 1) | (time.hour >> 4),
-        (time.hour << 4) | (time.minute >> 2),
-        (time.minute << 6) | (alarm.id << 3),
+        (wire.year << 2) | (wire.month >> 2),
+        (wire.month << 6) | (wire.day << 1) | (wire.hour >> 4),
+        (wire.hour << 4) | (wire.minute >> 2),
+        (wire.minute << 6) | (alarm.id << 3),
         alarm.repeatDays,
       ]);
     }
     return Uint8List.fromList(result);
   }
 
+  /// Date fields written to the device for repeating alarms use today's
+  /// calendar date, matching Android `DateUtil.getTodayDate()` packing.
+  static ({int year, int month, int day, int hour, int minute})
+      _alarmWireSchedule(JWAlarm alarm) {
+    final time = alarm.time.toLocal();
+    final date = alarm.repeatDays == 0 ? time : DateTime.now();
+    return (
+      year: date.year - 2000,
+      month: date.month,
+      day: date.day,
+      hour: time.hour,
+      minute: time.minute,
+    );
+  }
+
   static List<JWAlarm> decodeAlarms(Uint8List value) {
+    if (value.isEmpty) return const [];
     if (value.length % 5 != 0) {
       throw const FormatException('Invalid JW alarm response length');
     }
@@ -145,28 +161,125 @@ abstract final class JWSettingsCodec {
       final b = value[offset + 1];
       final c = value[offset + 2];
       final d = value[offset + 3];
-      final repeatDays = value[offset + 4];
+      // Firmware may set bit 7; Android masks with 0x7f in parseData.
+      final repeatDays = value[offset + 4] & 0x7f;
+      if (a == 0 && b == 0 && c == 0 && d == 0 && repeatDays == 0) {
+        continue;
+      }
       final year = 2000 + (a >> 2);
       final month = ((a & 3) << 2) | (b >> 6);
       final day = (b >> 1) & 0x1f;
       final hour = ((b & 1) << 4) | (c >> 4);
-      final minute = ((c & 3) << 4) | (d >> 6);
+      final minute = ((c << 2) & 0x3f) | ((d >> 6) & 0x03);
       final id = (d >> 3) & 7;
-      if ((repeatDays & 0x80) != 0 ||
-          month < 1 || month > 12 || day < 1 || day > 31) {
-        throw const FormatException('Invalid JW alarm response value');
+      if (month < 1 || month > 12 || day < 1 || day > 31) {
+        continue;
       }
       _time(hour, minute, 'alarm');
       try {
         final time = DateTime(year, month, day, hour, minute);
         if (time.month != month || time.day != day) {
-          throw const FormatException('Invalid JW alarm date');
+          continue;
         }
-        alarms.add(JWAlarm(id: id, time: time, repeatDays: repeatDays));
+        alarms.add(JWAlarm(
+          id: id,
+          time: time,
+          repeatDays: repeatDays,
+          enabled: true,
+        ));
       } on ArgumentError {
-        throw const FormatException('Invalid JW alarm date');
+        continue;
       }
     }
+    return List.unmodifiable(alarms);
+  }
+
+  static Uint8List encodeAlarm2(JWAlarm alarm, {bool delete = false}) {
+    final wire = delete
+        ? (
+            year: alarm.time.toLocal().year - 2000,
+            month: 0,
+            day: 0,
+            hour: alarm.time.toLocal().hour,
+            minute: alarm.time.toLocal().minute,
+          )
+        : _alarmWireSchedule(alarm);
+    _range(wire.year, 0, 63, 'alarm2 year');
+    _range(alarm.id, 0, 31, 'alarm2 id');
+    _range(alarm.repeatDays, 0, 0x7f, 'alarm2 repeatDays');
+    final contentBytes = utf8.encode(alarm.label);
+    final contentLen = contentBytes.length > 15 ? 15 : contentBytes.length;
+    final data = Uint8List(5 + contentLen);
+    final repeat = delete ? 0 : alarm.repeatDays;
+    data[0] = (alarm.enabled ? 0x80 : 0x00) |
+        (alarm.id << 2) |
+        (wire.year >> 4);
+    data[1] = ((wire.year << 4) & 0xf0) | wire.month;
+    data[2] = (wire.day << 3) | (wire.hour >> 2);
+    data[3] = ((wire.hour << 6) & 0xc0) | wire.minute;
+    data[4] = repeat << 1;
+    if (contentLen > 0) {
+      data.setRange(5, 5 + contentLen, contentBytes, 0);
+    }
+    return data;
+  }
+
+  static JWAlarm2ReadChunk decodeAlarm2ReadChunk(Uint8List data) {
+    if (data.isEmpty) {
+      return const JWAlarm2ReadChunk(alarm: null, curIndex: 0, count: 0);
+    }
+    if (data.length < 7) {
+      throw const FormatException('Invalid JW alarm2 response length');
+    }
+    final enabled = (data[0] & 0x80) != 0;
+    final id = (data[0] >> 2) & 0x1f;
+    final year = 2000 + (((data[0] & 0x03) << 4) | ((data[1] & 0xf0) >> 4));
+    final month = data[1] & 0x0f;
+    final day = (data[2] >> 3) & 0x1f;
+    final hour = ((data[2] & 0x07) << 2) | ((data[3] >> 6) & 0x03);
+    final minute = data[3] & 0x3f;
+    final repeatDays = (data[4] >> 1) & 0x7f;
+    final contentEnd = data.length - 2;
+    final contentLength = contentEnd > 5 ? contentEnd - 5 : 0;
+    final label = contentLength > 0
+        ? utf8.decode(data.sublist(5, 5 + contentLength), allowMalformed: true)
+        : '';
+    final curIndex = data[data.length - 2];
+    final count = data[data.length - 1];
+    _time(hour, minute, 'alarm2');
+    JWAlarm? alarm;
+    if (count > 0) {
+      final schedule = repeatDays == 0
+          ? DateTime(year, month, day, hour, minute)
+          : DateTime(year, month, day, hour, minute);
+      if (schedule.month != month || schedule.day != day) {
+        throw const FormatException('Invalid JW alarm2 date');
+      }
+      alarm = JWAlarm(
+        id: id,
+        time: schedule,
+        repeatDays: repeatDays,
+        enabled: enabled,
+        label: label,
+      );
+    }
+    return JWAlarm2ReadChunk(alarm: alarm, curIndex: curIndex, count: count);
+  }
+
+  static List<JWAlarm> decodeAlarm2List(List<Uint8List> chunks) {
+    if (chunks.isEmpty) return const [];
+    final byId = <int, JWAlarm>{};
+    for (final chunkBytes in chunks) {
+      final chunk = decodeAlarm2ReadChunk(chunkBytes);
+      if (chunk.count == 0) return const [];
+      final alarm = chunk.alarm;
+      if (alarm != null) {
+        byId[alarm.id] = alarm;
+      }
+      if (chunk.curIndex == chunk.count) break;
+    }
+    final alarms = byId.values.toList()
+      ..sort((a, b) => a.id.compareTo(b.id));
     return List.unmodifiable(alarms);
   }
 
