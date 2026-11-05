@@ -4,6 +4,7 @@ import 'package:watch_transport/watch_transport.dart';
 import 'package:watch_transport_ble/watch_transport_ble.dart';
 
 import '../capability/jw_feature.dart';
+import '../history/jw_history_models.dart';
 import '../model/jw_device_info.dart';
 import '../model/jw_device_function_info.dart';
 import '../model/jw_error.dart';
@@ -26,10 +27,29 @@ final class JWWatchSession {
   JWSessionState _state;
   StreamSubscription<JWException>? _linkFailures;
   Future<void>? _opening;
+  String? _authenticatedUserId;
   bool _disposed = false;
 
   JWSessionState get state => _state;
   Stream<JWSessionState> get states => _states.stream;
+
+  /// The user ID authenticated by the current ready session.
+  ///
+  /// This is intentionally not included in [JWSessionState] or diagnostic
+  /// events, so UI logging cannot accidentally disclose it.
+  String? get authenticatedUserId => _authenticatedUserId;
+
+  /// The only history scope associated with the current authenticated session.
+  ///
+  /// It is available only after successful login or first-time binding. The
+  /// MAC comes from the connection target, so callers never need an invented
+  /// device ID or a separate device registry merely to read health history.
+  JWHistoryScope? get historyScope {
+    final userId = _authenticatedUserId;
+    if (userId == null || !_state.isReady) return null;
+    final deviceMac = _state.device?.deviceMac ?? connection.target.deviceId;
+    return JWHistoryScope(userId: userId, deviceMac: deviceMac);
+  }
 
   /// Opens the JW byte channel. This does not log in, bind, or query device
   /// characteristics; applications can present those as explicit steps.
@@ -68,7 +88,7 @@ final class JWWatchSession {
       _publish(_state.copyWith(
           phase: phase,
           device: JWDeviceInfo(
-            targetId: info.targetId,
+            deviceMac: info.deviceMac,
             name: info.name,
             serialNumber: info.serialNumber,
             firmware: info.firmware,
@@ -96,9 +116,9 @@ final class JWWatchSession {
     try {
       final level = await _readBattery();
       final current = _state.device;
-      final targetId = current?.targetId ?? connection.target.deviceId;
+      final deviceMac = current?.deviceMac ?? connection.target.deviceId;
       final device = JWDeviceInfo(
-        targetId: targetId,
+        deviceMac: deviceMac,
         name: current?.name,
         serialNumber: current?.serialNumber,
         firmware: current?.firmware,
@@ -132,7 +152,7 @@ final class JWWatchSession {
       _publish(_state.copyWith(
           phase: phase,
           device: JWDeviceInfo(
-            targetId: info.targetId,
+            deviceMac: info.deviceMac,
             name: info.name,
             serialNumber: info.serialNumber,
             firmware: info.firmware,
@@ -177,20 +197,29 @@ final class JWWatchSession {
     }
   }
 
-  Future<void> login(JWIdentity identity) async {
+  /// Logs in with the application-provided JW user ID.
+  ///
+  /// The SDK never generates a replacement identity: doing so could make a
+  /// previously bound watch reject its real owner. A successful login also
+  /// synchronizes the connected device clock before entering `ready`.
+  Future<void> login(String userId) async {
+    final identity = JWIdentity(userId);
     _requireConnected();
     _publish(
         _state.copyWith(phase: JWSessionPhase.loggingIn, clearError: true));
     final reply = await _link.request(JWProtocolCommands.login(identity.bytes));
     if (!_isSuccess(reply)) {
+      _authenticatedUserId = null;
       _publish(_state.copyWith(phase: JWSessionPhase.loginRejected));
       return;
     }
+    await _syncClockAfterAuthentication();
+    _authenticatedUserId = identity.value;
     _publish(_state.copyWith(phase: JWSessionPhase.ready));
   }
 
-  Future<void> bindFirstTime(JWIdentity identity,
-      {required bool confirmed}) async {
+  Future<void> bindFirstTime(String userId, {required bool confirmed}) async {
+    final identity = JWIdentity(userId);
     if (!confirmed) {
       throw StateError('First JW bind requires explicit user confirmation');
     }
@@ -203,9 +232,12 @@ final class JWWatchSession {
         _state.copyWith(phase: JWSessionPhase.loggingIn, clearError: true));
     final reply = await _link.request(JWProtocolCommands.bind(identity.bytes));
     if (!_isSuccess(reply)) {
+      _authenticatedUserId = null;
       _publish(_state.copyWith(phase: JWSessionPhase.loginRejected));
       return;
     }
+    await _syncClockAfterAuthentication();
+    _authenticatedUserId = identity.value;
     _publish(_state.copyWith(phase: JWSessionPhase.ready));
   }
 
@@ -219,8 +251,12 @@ final class JWWatchSession {
       throw StateError('JW unbind is not available in ${_state.phase.name}');
     }
     await _link.send(JWProtocolCommands.unbind());
+    _authenticatedUserId = null;
     _publish(_state.copyWith(phase: JWSessionPhase.readOnly));
   }
+
+  Future<void> _syncClockAfterAuthentication() => _link.send(
+      JWProtocolCommands.setTime(JWSettingsCodec.encodeTime(DateTime.now())));
 
   /// Reads the language currently reported by the device.
   Future<JWLanguage> readLanguage() async {
@@ -282,15 +318,16 @@ final class JWWatchSession {
   /// confirms transport submission only, not that firmware applied the clock.
   Future<JWSettingSubmission> setTime(DateTime time) async {
     _requireReadyForSettings();
-    await _link.send(JWProtocolCommands.setTime(JWSettingsCodec.encodeTime(time)));
+    await _link
+        .send(JWProtocolCommands.setTime(JWSettingsCodec.encodeTime(time)));
     return const JWSettingSubmission('time');
   }
 
   /// Submits user profile data. JW V2 does not expose a read-back command.
   Future<JWSettingSubmission> setUserProfile(JWUserProfile profile) async {
     _requireReadyForSettings();
-    await _link.send(
-        JWProtocolCommands.setUserProfile(JWSettingsCodec.encodeUserProfile(profile)));
+    await _link.send(JWProtocolCommands.setUserProfile(
+        JWSettingsCodec.encodeUserProfile(profile)));
     return const JWSettingSubmission('user profile');
   }
 
@@ -308,8 +345,10 @@ final class JWWatchSession {
 
   Future<JWDateFormat> readDateFormat() async {
     _requireReadyForSettings();
-    return _oneByteSetting(await _link.request(JWProtocolCommands.readDateFormat()),
-        'date format', JWDateFormat.fromCode);
+    return _oneByteSetting(
+        await _link.request(JWProtocolCommands.readDateFormat()),
+        'date format',
+        JWDateFormat.fromCode);
   }
 
   /// Submits the date format. Firmware does not consistently expose a
@@ -320,9 +359,9 @@ final class JWWatchSession {
     return const JWSettingSubmission('date format');
   }
 
-  Future<int> readScreenLightDuration() =>
-      _readDisplayScalar(JWProtocolCommands.readScreenLightDuration(),
-          'screen light duration', min: 3, max: 30);
+  Future<int> readScreenLightDuration() => _readDisplayScalar(
+      JWProtocolCommands.readScreenLightDuration(), 'screen light duration',
+      min: 3, max: 30);
 
   /// Submits screen light duration without a read-back value.
   Future<JWSettingSubmission> setScreenLightDuration(int seconds) async {
@@ -344,8 +383,9 @@ final class JWWatchSession {
     return const JWSettingSubmission('screen brightness');
   }
 
-  Future<int> readHomePage() => _readDisplayScalar(
-      JWProtocolCommands.readHomePage(), 'home page', min: 0, max: 255);
+  Future<int> readHomePage() =>
+      _readDisplayScalar(JWProtocolCommands.readHomePage(), 'home page',
+          min: 0, max: 255);
 
   /// Submits the home page index without a read-back value.
   Future<JWSettingSubmission> setHomePage(int index) async {
@@ -393,11 +433,12 @@ final class JWWatchSession {
   Future<JWSedentaryReminder> readSedentaryReminder() async {
     _requireReadyForSettings();
     return JWSettingsCodec.decodeSedentaryReminder(
-        (await _link.request(JWProtocolCommands.readSedentaryReminder())).value);
+        (await _link.request(JWProtocolCommands.readSedentaryReminder()))
+            .value);
   }
 
-  Future<JWVerifiedSetting<JWSedentaryReminder>>
-      setSedentaryReminderVerified(JWSedentaryReminder value) async {
+  Future<JWVerifiedSetting<JWSedentaryReminder>> setSedentaryReminderVerified(
+      JWSedentaryReminder value) async {
     final previous = await readSedentaryReminder();
     await _link.send(JWProtocolCommands.setSedentaryReminder(
         JWSettingsCodec.encodeSedentaryReminder(value)));
@@ -447,8 +488,8 @@ final class JWWatchSession {
     if (_usesLabeledAlarmProtocol()) {
       await _replaceLabeledAlarms(requested, previousIds: previousIds);
     } else {
-      await _link.send(
-          JWProtocolCommands.setAlarms(JWSettingsCodec.encodeAlarms(requested)));
+      await _link.send(JWProtocolCommands.setAlarms(
+          JWSettingsCodec.encodeAlarms(requested)));
     }
     return const JWSettingSubmission('alarms');
   }
@@ -460,8 +501,8 @@ final class JWWatchSession {
     final nextIds = alarms.map((alarm) => alarm.id).toSet();
     final staleIds = {...?previousIds}..removeAll(nextIds);
     for (final id in staleIds) {
-      await _link.send(JWProtocolCommands.setAlarm2(
-          JWSettingsCodec.encodeAlarm2(
+      await _link
+          .send(JWProtocolCommands.setAlarm2(JWSettingsCodec.encodeAlarm2(
         JWAlarm(
           id: id,
           time: DateTime.now(),
@@ -472,8 +513,8 @@ final class JWWatchSession {
       )));
     }
     for (final alarm in alarms) {
-      await _link.send(JWProtocolCommands.setAlarm2(
-          JWSettingsCodec.encodeAlarm2(alarm)));
+      await _link.send(
+          JWProtocolCommands.setAlarm2(JWSettingsCodec.encodeAlarm2(alarm)));
     }
   }
 
@@ -493,7 +534,7 @@ final class JWWatchSession {
 
   Future<JWDeviceInfo> _readDeviceInfo() async {
     if (connection is! WatchBleConnection) {
-      return JWDeviceInfo(targetId: connection.target.deviceId);
+      return JWDeviceInfo(deviceMac: connection.target.deviceId);
     }
     final ble = connection as WatchBleConnection;
     Future<String?> text(String service, String characteristic) async {
@@ -511,7 +552,7 @@ final class JWWatchSession {
     }
 
     return JWDeviceInfo(
-      targetId: connection.target.deviceId,
+      deviceMac: connection.target.deviceId,
       name: await text('1800', '2a00'),
       serialNumber: await text('180a', '2a25'),
       firmware: await text('180a', '2a26'),
@@ -561,8 +602,8 @@ final class JWWatchSession {
   bool _isSuccess(JWProtocolMessage reply) =>
       reply.value.length == 1 && reply.value.single == 0;
 
-  T _oneByteSetting<T>(JWProtocolMessage reply, String name,
-      T Function(int code) decode) {
+  T _oneByteSetting<T>(
+      JWProtocolMessage reply, String name, T Function(int code) decode) {
     if (reply.value.length != 1) {
       throw FormatException('Invalid JW $name response length');
     }
@@ -578,7 +619,8 @@ final class JWWatchSession {
   Future<int> _readDisplayScalar(JWProtocolRequest request, String name,
       {required int min, required int max}) async {
     _requireReadyForSettings();
-    final value = _oneByteSetting(await _link.request(request), name, (value) => value);
+    final value =
+        _oneByteSetting(await _link.request(request), name, (value) => value);
     if (value < min || value > max) {
       throw FormatException('Unsupported JW $name value: $value');
     }
@@ -614,6 +656,7 @@ final class JWWatchSession {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    _authenticatedUserId = null;
     await _linkFailures?.cancel();
     await _link.dispose();
     _state = _state.copyWith(phase: JWSessionPhase.disposed);

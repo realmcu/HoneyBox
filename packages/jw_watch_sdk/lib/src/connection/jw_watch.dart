@@ -63,13 +63,14 @@ final class JWWatch {
 
   Future<void> stopScan() => _scanner.stop();
 
-  JWWatchSession createSession(JWScanDevice device) {
+  /// Creates a single-use session for the scanned JW MAC address.
+  JWWatchSession createSession(String deviceMac) {
     _checkNotDisposed();
     if (!_initialized) {
       throw StateError('JW SDK must be initialized before connecting.');
     }
     return JWWatchSession(_transport.createConnection(
-        WatchDeviceTarget(transportId: 'ble', deviceId: device.id)));
+        WatchDeviceTarget(transportId: 'ble', deviceId: deviceMac)));
   }
 
   Future<void> dispose() async {

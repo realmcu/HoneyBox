@@ -94,7 +94,8 @@ final class JWDeviceFunctionInfo {
     }
     bool bit(int byte, int index) => (value[byte] & (1 << index)) != 0;
     return JWDeviceFunctionInfo._(value, {
-      for (final entry in _bits.entries) entry.key: bit(entry.value.$1, entry.value.$2),
+      for (final entry in _bits.entries)
+        entry.key: bit(entry.value.$1, entry.value.$2),
     });
   }
 

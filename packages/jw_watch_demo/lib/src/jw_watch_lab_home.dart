@@ -279,7 +279,7 @@ class _HomePage extends StatelessWidget {
                   },
             completed: controller.state.isConnected,
             code: '''await watch.startScan();
-final session = watch.createSession(device);
+final session = watch.createSession(device.deviceMac);
 await session.connect();''',
           ),
           _GuideTile(
@@ -290,9 +290,9 @@ await session.connect();''',
             actionLabel: _authenticationActionLabel(controller.state),
             onAction: _authenticationAction(context, controller),
             completed: controller.state.isReady,
-            code: '''await session.login(identity);
+            code: '''await session.login(userId);
 // If login is rejected:
-await session.bindFirstTime(identity, confirmed: true);
+await session.bindFirstTime(userId, confirmed: true);
 // After login succeeds:
 await session.unbind(confirmed: true);''',
             detailPanel: controller.sessionLog.isEmpty
@@ -308,9 +308,8 @@ await session.unbind(confirmed: true);''',
                 : '已读取当前设备的基础信息。',
             keyName: 'jw.demo.guide.device_info',
             actionLabel: '读取',
-            onAction: controller.state.isConnected
-                ? controller.readDeviceInfo
-                : null,
+            onAction:
+                controller.state.isConnected ? controller.readDeviceInfo : null,
             completed: controller.state.device != null,
             code: 'await session.readDeviceInfo();',
             detailPanel: controller.state.device != null
@@ -385,7 +384,11 @@ Future<void> Function()? _authenticationAction(
         ),
       );
       if (confirmed == true) {
-        await controller.bindFirstTime(confirmed: true);
+        if (!context.mounted) return;
+        final userId = await _requestUserId(context, controller);
+        if (userId != null) {
+          await controller.bindFirstTime(userId, confirmed: true);
+        }
       }
     };
   }
@@ -415,7 +418,49 @@ Future<void> Function()? _authenticationAction(
       }
     };
   }
-  return controller.state.isConnected ? controller.login : null;
+  return controller.state.isConnected
+      ? () async {
+          final userId = await _requestUserId(context, controller);
+          if (userId != null) await controller.login(userId);
+        }
+      : null;
+}
+
+Future<String?> _requestUserId(
+    BuildContext context, JWDemoController controller) async {
+  final text = TextEditingController(text: controller.userId);
+  final result = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('输入 JW userID'),
+      content: TextField(
+        key: const Key('jw.demo.user_id_input'),
+        controller: text,
+        autofocus: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        textCapitalization: TextCapitalization.characters,
+        decoration: const InputDecoration(
+          labelText: 'userID',
+          helperText: '32 位十六进制；设备使用它验证登录和绑定。',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(dialogContext, text.text.trim()),
+          child: const Text('继续'),
+        ),
+      ],
+    ),
+  );
+  text.dispose();
+  if (result == null || result.isEmpty) return null;
+  controller.rememberUserId(result);
+  return result;
 }
 
 class _GuideTile extends StatelessWidget {
@@ -493,9 +538,8 @@ class _GuideTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     CircleAvatar(
-                      backgroundColor: completed
-                          ? colors.primary
-                          : colors.primaryContainer,
+                      backgroundColor:
+                          completed ? colors.primary : colors.primaryContainer,
                       foregroundColor: completed
                           ? colors.onPrimary
                           : colors.onPrimaryContainer,
@@ -696,10 +740,9 @@ class _DevicePage extends StatelessWidget {
             child: ListTile(
               leading: const Icon(Icons.inbox_outlined),
               title: Text(state.error == null ? '暂无会话事件' : '最近会话错误'),
-              subtitle:
-                  Text(state.error == null
-                      ? '连接、登录和设备信息读取的结果会显示在首页引导中。'
-                      : describeJWDemoError(state.error!)),
+              subtitle: Text(state.error == null
+                  ? '连接、登录和设备信息读取的结果会显示在首页引导中。'
+                  : describeJWDemoError(state.error!)),
             ),
           ),
         ],
@@ -818,7 +861,7 @@ class _ConnectionInProgressView extends StatelessWidget {
     final theme = Theme.of(context);
     final name = device?.name;
     final label = name == null || name.isEmpty ? 'JW 设备' : name;
-    final id = device?.id;
+    final id = device?.deviceMac;
     return Center(
       key: const Key('jw.demo.connection_in_progress'),
       child: Padding(
@@ -937,7 +980,7 @@ class _ScanDeviceTile extends StatelessWidget {
     final title = device.name.isEmpty ? '未命名 JW 设备' : device.name;
     final theme = Theme.of(context);
     return Padding(
-      key: Key('jw.demo.device.${device.id}'),
+      key: Key('jw.demo.device.${device.deviceMac}'),
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: SizedBox(
         width: double.infinity,
@@ -951,7 +994,7 @@ class _ScanDeviceTile extends StatelessWidget {
                   Text(title, style: theme.textTheme.bodyLarge),
                   const SizedBox(height: 2),
                   Text(
-                    '${device.id} · RSSI ${device.rssi}',
+                    '${device.deviceMac} · RSSI ${device.rssi}',
                     style: theme.textTheme.bodyMedium,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

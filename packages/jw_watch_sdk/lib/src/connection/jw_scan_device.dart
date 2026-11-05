@@ -3,18 +3,19 @@ import 'package:watch_transport_ble/watch_transport_ble.dart';
 /// A scan result filtered as a potential JW watch.
 final class JWScanDevice {
   const JWScanDevice({
-    required this.id,
+    required this.deviceMac,
     required this.name,
     required this.rssi,
   });
 
-  final String id;
+  /// Public JW connection and persistence identifier.
+  final String deviceMac;
   final String name;
   final int rssi;
 
   factory JWScanDevice.fromAdvertisement(WatchBleAdvertisement value) =>
       JWScanDevice(
-        id: value.deviceId,
+        deviceMac: value.deviceId,
         name: value.name,
         rssi: value.rssi,
       );

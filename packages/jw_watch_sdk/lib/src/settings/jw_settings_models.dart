@@ -21,9 +21,9 @@ enum JWLanguage {
   const JWLanguage(this.code);
   final int code;
 
-  static JWLanguage fromCode(int code) =>
-      JWLanguage.values.firstWhere((value) => value.code == code,
-          orElse: () => throw FormatException('Unsupported JW language: $code'));
+  static JWLanguage fromCode(int code) => JWLanguage.values.firstWhere(
+      (value) => value.code == code,
+      orElse: () => throw FormatException('Unsupported JW language: $code'));
 }
 
 enum JWHourSystem {
@@ -194,8 +194,8 @@ final class JWSedentaryReminder {
       other.repeatDays == repeatDays;
 
   @override
-  int get hashCode => Object.hash(enabled, thresholdMinutes, notifyHour,
-      startHour, endHour, repeatDays);
+  int get hashCode => Object.hash(
+      enabled, thresholdMinutes, notifyHour, startHour, endHour, repeatDays);
 }
 
 /// One alarm record for JW standard (`0x02/0x03`) or labeled alarm2 (`0x65`–`0x67`).
@@ -230,8 +230,7 @@ final class JWAlarm {
       other.label == label;
 
   @override
-  int get hashCode =>
-      Object.hash(id, time, repeatDays, enabled, label);
+  int get hashCode => Object.hash(id, time, repeatDays, enabled, label);
 }
 
 /// Parsed labeled-alarm2 read payload before the list is aggregated.

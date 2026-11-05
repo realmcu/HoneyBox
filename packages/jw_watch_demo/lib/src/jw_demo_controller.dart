@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 /// Turns public SDK errors into short, actionable UI copy.
@@ -19,7 +18,8 @@ String describeJWDemoError(Object error) {
         '设备在 5 秒内未回应此设置查询；该功能可能不支持或设备暂时忙，当前连接仍保持。',
       JWErrorCode.ackTimeout => '设备未确认本次发送；当前连接仍保持，可稍后重试。',
       JWErrorCode.nack => '设备拒绝了本次命令；当前连接仍保持。',
-      JWErrorCode.writeTimeout || JWErrorCode.writeFailed =>
+      JWErrorCode.writeTimeout ||
+      JWErrorCode.writeFailed =>
         '本次蓝牙写入失败；当前连接仍保持，可重试。',
       JWErrorCode.transportDisconnected => '设备连接已断开。',
       _ => 'SDK error [${error.code.name}]: ${error.msg}',
@@ -31,7 +31,7 @@ String describeJWDemoError(Object error) {
 /// HoneyBox-side composition of public JW SDK objects.
 ///
 /// This controller never writes GATT bytes or imports transport packages; it
-/// only coordinates the public scanner, session, and identity APIs.
+/// only coordinates the public scanner, session, and login APIs.
 ///
 /// Scan result updates use [scanDevices] so high-frequency BLE advertisements
 /// coalesce to at most one UI refresh per frame.
@@ -57,7 +57,7 @@ class JWDemoController extends ChangeNotifier {
 
   List<JWScanDevice> _devices = const [];
   JWWatchSession? _session;
-  JWIdentityStore? _identityStore;
+  String _userId = '';
   JWSessionState _state = const JWSessionState();
   Object? _error;
   bool _disposed = false;
@@ -70,6 +70,7 @@ class JWDemoController extends ChangeNotifier {
   bool get isInitialized => _watch.isInitialized;
   bool get isConnecting => _connecting;
   List<String> get sessionLog => List.unmodifiable(_sessionLog);
+  String get userId => _userId;
   bool _connecting = false;
   JWScanDevice? _connectingDevice;
 
@@ -174,7 +175,7 @@ class JWDemoController extends ChangeNotifier {
     await stopScan();
     await _session?.dispose();
     _sessionLog.clear();
-    _session = _watch.createSession(device);
+    _session = _watch.createSession(device.deviceMac);
     _subscriptions.add(_session!.states.listen((state) {
       _state = state;
       _recordState(state);
@@ -198,13 +199,13 @@ class JWDemoController extends ChangeNotifier {
     }
   }
 
-  Future<void> login() => _runSession((session) async {
-        await session.login(await _identity());
+  Future<void> login(String userId) => _runSession((session) async {
+        await session.login(userId);
       });
 
-  Future<void> bindFirstTime({required bool confirmed}) =>
+  Future<void> bindFirstTime(String userId, {required bool confirmed}) =>
       _runSession((session) async {
-        await session.bindFirstTime(await _identity(), confirmed: confirmed);
+        await session.bindFirstTime(userId, confirmed: confirmed);
       });
 
   Future<void> unbind({required bool confirmed}) =>
@@ -234,8 +235,7 @@ class JWDemoController extends ChangeNotifier {
   Future<JWVerifiedSetting<JWLanguage>> setLanguage(JWLanguage value) =>
       _runSessionValue((session) => session.setLanguageVerified(value));
 
-  Future<JWVerifiedSetting<JWHourSystem>> setHourSystem(
-          JWHourSystem value) =>
+  Future<JWVerifiedSetting<JWHourSystem>> setHourSystem(JWHourSystem value) =>
       _runSessionValue((session) => session.setHourSystemVerified(value));
 
   Future<JWVerifiedSetting<JWUnitSystem>> setUnitSystem(JWUnitSystem value) =>
@@ -292,7 +292,8 @@ class JWDemoController extends ChangeNotifier {
 
   Future<JWVerifiedSetting<JWSedentaryReminder>> setSedentaryReminder(
           JWSedentaryReminder value) =>
-      _runSessionValue((session) => session.setSedentaryReminderVerified(value));
+      _runSessionValue(
+          (session) => session.setSedentaryReminderVerified(value));
 
   Future<List<JWAlarm>> readAlarms() =>
       _runSessionValue((session) => session.readAlarms());
@@ -301,8 +302,8 @@ class JWDemoController extends ChangeNotifier {
     List<JWAlarm> values, {
     Set<int>? previousAlarmIds,
   }) =>
-      _runSessionValue(
-          (session) => session.setAlarms(values, previousIds: previousAlarmIds));
+      _runSessionValue((session) =>
+          session.setAlarms(values, previousIds: previousAlarmIds));
 
   Future<void> disconnect() async {
     final session = _session;
@@ -345,14 +346,7 @@ class JWDemoController extends ChangeNotifier {
     await startScan();
   }
 
-  Future<JWIdentity> _identity() async {
-    if (_identityStore == null) {
-      final directory = await getApplicationSupportDirectory();
-      _identityStore = JWIdentityStore(File(
-          '${directory.path}${Platform.pathSeparator}jw_identity_v1.json'));
-    }
-    return _identityStore!.loadOrCreate();
-  }
+  void rememberUserId(String value) => _userId = value.trim();
 
   Future<void> _runSession(
       Future<void> Function(JWWatchSession session) operation) async {

@@ -116,7 +116,8 @@ abstract final class JWSettingsCodec {
 
   static Uint8List encodeAlarms(List<JWAlarm> alarms) {
     if (alarms.length > 46) {
-      throw ArgumentError.value(alarms, 'alarms', 'JW supports at most 46 alarms per request');
+      throw ArgumentError.value(
+          alarms, 'alarms', 'JW supports at most 46 alarms per request');
     }
     final result = <int>[];
     for (final alarm in alarms) {
@@ -211,9 +212,8 @@ abstract final class JWSettingsCodec {
     final contentLen = contentBytes.length > 15 ? 15 : contentBytes.length;
     final data = Uint8List(5 + contentLen);
     final repeat = delete ? 0 : alarm.repeatDays;
-    data[0] = (alarm.enabled ? 0x80 : 0x00) |
-        (alarm.id << 2) |
-        (wire.year >> 4);
+    data[0] =
+        (alarm.enabled ? 0x80 : 0x00) | (alarm.id << 2) | (wire.year >> 4);
     data[1] = ((wire.year << 4) & 0xf0) | wire.month;
     data[2] = (wire.day << 3) | (wire.hour >> 2);
     data[3] = ((wire.hour << 6) & 0xc0) | wire.minute;
@@ -278,8 +278,7 @@ abstract final class JWSettingsCodec {
       }
       if (chunk.curIndex == chunk.count) break;
     }
-    final alarms = byId.values.toList()
-      ..sort((a, b) => a.id.compareTo(b.id));
+    final alarms = byId.values.toList()..sort((a, b) => a.id.compareTo(b.id));
     return List.unmodifiable(alarms);
   }
 

@@ -331,7 +331,7 @@ BLE profile 通过配置明确服务 UUID、收/发特征、属性与写入模�
 | **T4.0 能力基线与 API** | [IKSKR0](https://e.gitee.com/priodigit/dashboard?issue=IKSKR0) | 建立 Android/Flutter/固件功能覆盖表；设计 `JWWatch` 门面、JW 公开类型、能力/错误及 SDK 配置 | 连接、设置、数据、功能、通知全部入表；缺失功能进入任务，不以“搬完已有目录”替代完整性 |
 | **T4.1 真机连接与包闭环** | [IKSKR2](https://e.gitee.com/priodigit/dashboard?issue=IKSKR2) | `jw_watch_sdk` 组合 T1–T3；独立扫描/连接、登录/绑定/初始化、设备信息、身份、断连重连；薄真机验收页同步提供 | 离开 HoneyBox 能操作现有真机；真实收发经过公共 BLE 与帧通道，不能暗中走旧 Session/ACK 实现 |
 | **T4.2 设置与设备配置** | [IKSKR4](https://e.gitee.com/priodigit/dashboard?issue=IKSKR4) | 用户资料、时间、单位/语言、显示、闹钟/提醒、自动测量等；迁现有配置准入并补 Android 对照缺口 | 支持读取的写入项做真机读回；发送、ACK、已验证变更区分；未知能力/不支持状态准确 |
-| **T4.3 JW 模型与数据库** | [IKSKR5](https://e.gitee.com/priodigit/dashboard?issue=IKSKR5) | JW 独立类型与 drift/SQLite `jw_watch.db`；设备/身份关联、原始数据、类型化历史、同步日志/隔离记录；旧 Flutter journal 导入 | 持久化/重启查询、时间/单位/无效值、去重、事务与 schema 升级；不使用 WS 模型或表，不改 WS 库 |
+| **T4.3 JW 模型与数据库** | [IKSKR5](https://e.gitee.com/priodigit/dashboard?issue=IKSKR5) | 全新 JW 独立类型与 drift/SQLite `jw_watch.db`；以 `user_id + device_mac + time` 关联十类类型化历史 | 持久化/重启查询、UTC 时间、无效值、去重、事务与 schema 升级；不使用或迁移 WS、旧 Flutter journal 的模型、表或库 |
 | **T4.4 历史同步闭环** | [IKSKR7](https://e.gitee.com/priodigit/dashboard?issue=IKSKR7) | 协议识别/解析→类型化数据→事务提交→按 JW 协议确认→离线查询；覆盖数据清单各类型与进度/取消/恢复 | 真机重复同步、取消/断链、数据库失败不误确认、ACK 不确定、重启后查询；验证完整公共链路与 JW 存储 |
 | **T4.5 测量、控制与通知补齐** | [IKSKR9](https://e.gitee.com/priodigit/dashboard?issue=IKSKR9) | 实时测量/主动上报、运动状态机、控制与通知发送；对照 Android 扩展功能逐项补齐 | 命令与上报分流、开始/停止/取消、断链清理；不支持型号返回明确结果；不将手机通知采集服务当作协议发送接口 |
 | **T4.6 JW Demo 与独立接入** | [IKSKRA](https://e.gitee.com/priodigit/dashboard?issue=IKSKRA) | 真机功能页、数据库/同步查看、Raw/帧诊断、独立 example、接入文档和 CI | 页面只调用 SDK 公开 API，离开 HoneyBox 可安装验收；只接 JW、只接 WS、同时接两者的工程依赖和数据隔离通过 |
@@ -342,8 +342,8 @@ BLE profile 通过配置明确服务 UUID、收/发特征、属性与写入模�
 ### 12.2 范围与数据库决定
 
 - 目标覆盖现有 Android JW SDK 的有效能力，不限于当前 Flutter 已实现的子集。历史/废弃功能是否排除必须在覆盖表说明依据；待确认项保持未完成，不静默缩小范围。
-- JW 对外返回自己的类型，如 `JWHeartRate` / `JWBloodPressure`；数据库采用 JW 自己的 drift/SQLite schema，初始名 `jw_watch.db`。复用的是 SQLite/drift 技术，不是 WS 的模型、表、实体或 migration。
-- 旧 `jw_history/v1` journal 作为兼容读取/导入源；T4.1 过渡阶段可继续使用，T4.3/4.4 完成后生产主路径必须走 JW 数据库。保留批次/确认/隔离记录，不把文件搬迁当数据库完成。
+- JW 对外返回自己的类型，如 `JWHeartRate` / `JWBloodPressure`；数据库采用 JW 自己的 drift/SQLite schema，初始名 `jw_watch.db`。复用的是 SQLite/drift 技术，不是 WS 的模型、表、实体或 migration。T4.3 的最终保留类型、联合主键和表字段见 [JW Watch SDK 数据库存储设计](jw-watch-database-design.md)。
+- `jw_watch.db` 是全新数据库，不读取、迁移或兼容旧 `jw_history/v1` journal、旧数据库或 WS 数据库。T4.4 完成后生产主路径必须走 JW 数据库。JW 数据库不保存 raw 帧、批次/确认/隔离/上传日志。
 - WS M2–M6 只做受影响回归，不为等待固件新建一整套模拟开发主线。T4 的 JW 真机会检验底层 BLE、队列、ACK、seq、重传与真实持久化；WS 固件到位后再验证自身协议差异。
 
 ### 12.3 并列业务：不占用 JW 主线里程碑
@@ -361,7 +361,7 @@ BLE profile 通过配置明确服务 UUID、收/发特征、属性与写入模�
 | 现有资产 | 本轮约束 |
 | --- | --- |
 | WS `ws_watch.db`、schema v2、默认用户 ID | 保持文件路径、schema 与 SDK 语义；基础通信提取不触发重建数据库或换身份 |
-| JW identity 文件、`jw_history/v1` | 身份不变；T4.3 提供兼容读取/可重试导入到独立 JW SQLite，保留 quarantine、批次 commit/ACK/failure 状态；验收前不删除源文件 |
+| JW identity 文件、`jw_history/v1` | 不作为新 SDK 的运行时依赖或迁移源；新 SDK 仅使用宿主登录传入的 userID 与当前连接 MAC |
 | `capture_profiles.json`、`capture_scan_settings.json`、`captures/*/raw.jsonl`、`device.json` / `upload.json` | 工具迁移保留格式读取与续录行为；独立 App 沙箱通过显式导出/导入，不假设能直接读取 HoneyBox 私有目录 |
 | `ota_history/*.json`、`active.json` | 保留升级记录与脱敏；启动时先核对原生是否仍在运行，不自动重放升级命令 |
 | SecureStorage `honeybox.qiniu.config.v1` | 同 App 可兼容旧 key；新 App/不同安全存储空间支持重新配置或显式导入，不能默认为可跨应用读取 |

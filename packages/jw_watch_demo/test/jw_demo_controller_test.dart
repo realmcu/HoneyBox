@@ -8,7 +8,7 @@ void main() {
     addTearDown(controller.dispose);
 
     controller.scanDevices.value = const [
-      JWScanDevice(id: 'aa:bb', name: 'PEARCE', rssi: -50),
+      JWScanDevice(deviceMac: 'aa:bb', name: 'PEARCE', rssi: -50),
     ];
     controller.resetConnectionScanUi();
 

@@ -102,8 +102,8 @@ final class JWLink {
         await done.future.timeout(timeout);
       } on TimeoutException {
         if (messages.isEmpty) {
-          throw const JWException(JWErrorCode.businessReplyTimeout,
-              'JW alarm2 read timed out');
+          throw const JWException(
+              JWErrorCode.businessReplyTimeout, 'JW alarm2 read timed out');
         }
       } finally {
         await subscription.cancel();

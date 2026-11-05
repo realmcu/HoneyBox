@@ -34,17 +34,26 @@ abstract final class JWProtocolCommands {
   static JWProtocolRequest readLanguage() =>
       const JWProtocolRequest(command: 2, key: 0x4f, responseKey: 0x50);
   static JWProtocolRequest setLanguage(int value) => JWProtocolRequest(
-      command: 2, key: 0x4e, responseKey: null, value: Uint8List.fromList([value]));
+      command: 2,
+      key: 0x4e,
+      responseKey: null,
+      value: Uint8List.fromList([value]));
 
   static JWProtocolRequest readHourSystem() =>
       const JWProtocolRequest(command: 2, key: 0x42, responseKey: 0x43);
   static JWProtocolRequest setHourSystem(int value) => JWProtocolRequest(
-      command: 2, key: 0x41, responseKey: null, value: Uint8List.fromList([value]));
+      command: 2,
+      key: 0x41,
+      responseKey: null,
+      value: Uint8List.fromList([value]));
 
   static JWProtocolRequest readUnitSystem() =>
       const JWProtocolRequest(command: 2, key: 0x45, responseKey: 0x46);
   static JWProtocolRequest setUnitSystem(int value) => JWProtocolRequest(
-      command: 2, key: 0x44, responseKey: null, value: Uint8List.fromList([value]));
+      command: 2,
+      key: 0x44,
+      responseKey: null,
+      value: Uint8List.fromList([value]));
 
   static JWProtocolRequest setTime(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x01, responseKey: null, value: value);
@@ -58,40 +67,59 @@ abstract final class JWProtocolCommands {
   static JWProtocolRequest setCalorieGoal(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x07, responseKey: null, value: value);
 
-  static JWProtocolRequest readDateFormat() =>
-      const JWProtocolRequest(command: 2, key: 0x79, responseKey: 0x7a,
-          replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest readDateFormat() => const JWProtocolRequest(
+      command: 2,
+      key: 0x79,
+      responseKey: 0x7a,
+      replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setDateFormat(int value) => _setting(0x78, value);
-  static JWProtocolRequest readScreenLightDuration() =>
-      const JWProtocolRequest(command: 2, key: 0x4b, responseKey: 0x4c,
-          replyTimeout: _settingsProbeTimeout);
-  static JWProtocolRequest setScreenLightDuration(int value) => _setting(0x4a, value);
-  static JWProtocolRequest readScreenBrightness() =>
-      const JWProtocolRequest(command: 2, key: 0x54, responseKey: 0x55,
-          replyTimeout: _settingsProbeTimeout);
-  static JWProtocolRequest setScreenBrightness(int value) => _setting(0x53, value);
-  static JWProtocolRequest readHomePage() =>
-      const JWProtocolRequest(command: 2, key: 0x39, responseKey: 0x3a,
-          replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest readScreenLightDuration() => const JWProtocolRequest(
+      command: 2,
+      key: 0x4b,
+      responseKey: 0x4c,
+      replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest setScreenLightDuration(int value) =>
+      _setting(0x4a, value);
+  static JWProtocolRequest readScreenBrightness() => const JWProtocolRequest(
+      command: 2,
+      key: 0x54,
+      responseKey: 0x55,
+      replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest setScreenBrightness(int value) =>
+      _setting(0x53, value);
+  static JWProtocolRequest readHomePage() => const JWProtocolRequest(
+      command: 2,
+      key: 0x39,
+      responseKey: 0x3a,
+      replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setHomePage(int value) => _setting(0x38, value);
-  static JWProtocolRequest readTurnWristToWake() =>
-      const JWProtocolRequest(command: 2, key: 0x2b, responseKey: 0x2c,
-          replyTimeout: _settingsProbeTimeout);
-  static JWProtocolRequest setTurnWristToWake(bool value) => _setting(0x2a, value ? 1 : 0);
+  static JWProtocolRequest readTurnWristToWake() => const JWProtocolRequest(
+      command: 2,
+      key: 0x2b,
+      responseKey: 0x2c,
+      replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest setTurnWristToWake(bool value) =>
+      _setting(0x2a, value ? 1 : 0);
 
-  static JWProtocolRequest readDoNotDisturb() =>
-      const JWProtocolRequest(command: 2, key: 0x48, responseKey: 0x49,
-          replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest readDoNotDisturb() => const JWProtocolRequest(
+      command: 2,
+      key: 0x48,
+      responseKey: 0x49,
+      replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setDoNotDisturb(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x47, responseKey: null, value: value);
-  static JWProtocolRequest readSedentaryReminder() =>
-      const JWProtocolRequest(command: 2, key: 0x26, responseKey: 0x27,
-          replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest readSedentaryReminder() => const JWProtocolRequest(
+      command: 2,
+      key: 0x26,
+      responseKey: 0x27,
+      replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setSedentaryReminder(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x21, responseKey: null, value: value);
-  static JWProtocolRequest readAlarms() =>
-      const JWProtocolRequest(command: 2, key: 0x03, responseKey: 0x04,
-          replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest readAlarms() => const JWProtocolRequest(
+      command: 2,
+      key: 0x03,
+      responseKey: 0x04,
+      replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setAlarms(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x02, responseKey: null, value: value);
   static JWProtocolRequest requestAlarms2() =>
@@ -101,7 +129,10 @@ abstract final class JWProtocolCommands {
   static const int alarms2ResponseKey = 0x67;
 
   static JWProtocolRequest _setting(int key, int value) => JWProtocolRequest(
-      command: 2, key: key, responseKey: null, value: Uint8List.fromList([value]));
+      command: 2,
+      key: key,
+      responseKey: null,
+      value: Uint8List.fromList([value]));
 }
 
 Uint8List encodeJWRequest(JWProtocolRequest request) {
