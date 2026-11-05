@@ -1,4 +1,4 @@
-/// Public Flutter SDK contract for JW devices.
+/// Public Flutter SDK contract for JW devices (HL private protocol / Android V2).
 library;
 
 export 'src/capability/jw_feature.dart';
@@ -6,6 +6,7 @@ export 'src/connection/jw_scan_device.dart';
 export 'src/connection/jw_session.dart';
 export 'src/connection/jw_watch.dart';
 export 'src/history/jw_history_models.dart';
+export 'src/history/jw_history_sync_frame.dart';
 export 'src/history/jw_history_sync_listener.dart';
 export 'src/model/jw_device_info.dart';
 export 'src/model/jw_device_function_info.dart';

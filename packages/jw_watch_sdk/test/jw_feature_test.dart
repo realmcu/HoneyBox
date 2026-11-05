@@ -43,8 +43,9 @@ void main() {
   });
 
   test('identity is validated before bytes are parsed', () {
-    expect(() => JWIdentity('not-a-jw-identity'), throwsArgumentError);
+    expect(() => JWIdentity('mnop'), throwsArgumentError);
     expect(JWIdentity('A' * 32).bytes, hasLength(32));
+    expect(JWIdentity('123456').value.length, 32);
   });
 
   test('device-function report follows Android JWDeviceFunctionInfo bits', () {

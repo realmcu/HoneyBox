@@ -55,10 +55,8 @@ final sample = await watch.measurements.heartRateResults.first;''',
     subtitle: '同步进度、批次、本地查询与历史记录',
     icon: Icons.sync_outlined,
     features: [JWFeature.history],
-    example: '''final run = watch.history.sync();
-await for (final progress in run.progress) {
-  // Update the UI.
-}''',
+    example: '''await session.syncHealthData(listener);
+// onSyncStart / onSyncProgress / onXxxReceived / onSyncFinished''',
   ),
   JWFeatureCatalogEntry(
     id: 'notifications',

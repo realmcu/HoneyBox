@@ -7,6 +7,7 @@ import 'jw_demo_content_sheet.dart';
 import 'jw_demo_controller.dart';
 import 'jw_device_pages.dart';
 import 'jw_feature_catalog.dart';
+import 'jw_history_pages.dart';
 import 'jw_settings_pages.dart';
 
 /// T4.0 navigation shell. T4.1 injects one SDK-owned session into it.
@@ -40,6 +41,10 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
     }
     if (entry.id == 'device') {
       openJwDeviceHub(context, _controller);
+      return;
+    }
+    if (entry.id == 'history') {
+      openJwHistoryHub(context, _controller);
       return;
     }
     unawaited(
@@ -229,10 +234,42 @@ class _SessionStatusStrip extends StatelessWidget {
   }
 }
 
-class _HomePage extends StatelessWidget {
+class _HomePage extends StatefulWidget {
   const _HomePage({required this.controller, required this.onConnect});
   final JWDemoController controller;
   final VoidCallback onConnect;
+
+  @override
+  State<_HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<_HomePage> {
+  late final TextEditingController _userIdController;
+
+  JWDemoController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    if (controller.userId.isEmpty) {
+      controller.rememberUserId('123456');
+    }
+    _userIdController = TextEditingController(text: controller.userId);
+  }
+
+  @override
+  void dispose() {
+    _userIdController.dispose();
+    super.dispose();
+  }
+
+  String _readUserId() {
+    final value = _userIdController.text.trim();
+    if (value.isNotEmpty) {
+      controller.rememberUserId(value);
+    }
+    return value;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -275,7 +312,7 @@ class _HomePage extends StatelessWidget {
             onAction: controller.state.isConnected
                 ? null
                 : () async {
-                    onConnect();
+                    widget.onConnect();
                   },
             completed: controller.state.isConnected,
             code: '''await watch.startScan();
@@ -288,16 +325,20 @@ await session.connect();''',
             _authenticationDetail(controller.state),
             keyName: 'jw.demo.guide.authenticate',
             actionLabel: _authenticationActionLabel(controller.state),
-            onAction: _authenticationAction(context, controller),
+            onAction: _authenticationAction(controller, _readUserId),
             completed: controller.state.isReady,
             code: '''await session.login(userId);
 // If login is rejected:
 await session.bindFirstTime(userId, confirmed: true);
 // After login succeeds:
 await session.unbind(confirmed: true);''',
-            detailPanel: controller.sessionLog.isEmpty
-                ? null
-                : _SessionLogPanel(entries: controller.sessionLog),
+            detailPanel: _AuthenticationDetailPanel(
+              userIdController: _userIdController,
+              enabled: controller.state.isConnected,
+              onUserIdChanged: controller.rememberUserId,
+              error: controller.error,
+              sessionLog: controller.sessionLog,
+            ),
             loading: controller.state.phase == JWSessionPhase.loggingIn,
           ),
           _GuideTile(
@@ -342,6 +383,57 @@ final supportsHeartRate = functions?.supports(JWDeviceFunction.rate);''',
   }
 }
 
+class _AuthenticationDetailPanel extends StatelessWidget {
+  const _AuthenticationDetailPanel({
+    required this.userIdController,
+    required this.enabled,
+    required this.onUserIdChanged,
+    required this.error,
+    required this.sessionLog,
+  });
+
+  final TextEditingController userIdController;
+  final bool enabled;
+  final ValueChanged<String> onUserIdChanged;
+  final Object? error;
+  final List<String> sessionLog;
+
+  @override
+  Widget build(BuildContext context) {
+    final errorColor = Theme.of(context).colorScheme.error;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          key: const Key('jw.demo.user_id_input'),
+          controller: userIdController,
+          autocorrect: false,
+          enableSuggestions: false,
+          textCapitalization: TextCapitalization.characters,
+          onChanged: onUserIdChanged,
+          decoration: const InputDecoration(
+            labelText: 'userID',
+            helperText: '默认 123456；可改成其他 userID 测试登录失败或首次绑定。',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        if (error != null && enabled) ...[
+          const SizedBox(height: 8),
+          Text(
+            describeJWDemoError(error!),
+            style: TextStyle(color: errorColor),
+          ),
+        ],
+        if (sessionLog.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _SessionLogPanel(entries: sessionLog),
+        ],
+      ],
+    );
+  }
+}
+
 String _authenticationDetail(JWSessionState state) => switch (state.phase) {
       JWSessionPhase.ready =>
         '已登录，可使用需要认证的 SDK 功能。如需更换绑定，可在此解绑（设备会断开连接并清空设备数据）。',
@@ -362,105 +454,29 @@ String _authenticationActionLabel(JWSessionState state) =>
     };
 
 Future<void> Function()? _authenticationAction(
-    BuildContext context, JWDemoController controller) {
+  JWDemoController controller,
+  String Function() readUserId,
+) {
   if (controller.state.phase == JWSessionPhase.loggingIn) return null;
   if (controller.state.phase == JWSessionPhase.loginRejected) {
     return () async {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('确认首次绑定'),
-          content: const Text('首次绑定会将当前安装身份写入设备。此操作不可恢复。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('确认'),
-            ),
-          ],
-        ),
-      );
-      if (confirmed == true) {
-        if (!context.mounted) return;
-        final userId = await _requestUserId(context, controller);
-        if (userId != null) {
-          await controller.bindFirstTime(userId, confirmed: true);
-        }
-      }
+      final userId = readUserId();
+      if (userId.isEmpty) return;
+      await controller.bindFirstTime(userId, confirmed: true);
     };
   }
   if (controller.state.phase == JWSessionPhase.ready) {
     return () async {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('确认解绑'),
-          content: const Text(
-            '解绑后设备会断开连接，并清空设备上的绑定与相关数据。此操作不可恢复。',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('确认解绑'),
-            ),
-          ],
-        ),
-      );
-      if (confirmed == true) {
-        await controller.unbind(confirmed: true);
-      }
+      await controller.unbind(confirmed: true);
     };
   }
   return controller.state.isConnected
       ? () async {
-          final userId = await _requestUserId(context, controller);
-          if (userId != null) await controller.login(userId);
+          final userId = readUserId();
+          if (userId.isEmpty) return;
+          await controller.login(userId);
         }
       : null;
-}
-
-Future<String?> _requestUserId(
-    BuildContext context, JWDemoController controller) async {
-  final text = TextEditingController(text: controller.userId);
-  final result = await showDialog<String>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('输入 JW userID'),
-      content: TextField(
-        key: const Key('jw.demo.user_id_input'),
-        controller: text,
-        autofocus: true,
-        autocorrect: false,
-        enableSuggestions: false,
-        textCapitalization: TextCapitalization.characters,
-        decoration: const InputDecoration(
-          labelText: 'userID',
-          helperText: '32 位十六进制；设备使用它验证登录和绑定。',
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(dialogContext, text.text.trim()),
-          child: const Text('继续'),
-        ),
-      ],
-    ),
-  );
-  text.dispose();
-  if (result == null || result.isEmpty) return null;
-  controller.rememberUserId(result);
-  return result;
 }
 
 class _GuideTile extends StatelessWidget {
@@ -644,7 +660,7 @@ class _FeatureAvailability extends StatelessWidget {
   final JWFeatureCatalogEntry entry;
   final List<JWFeatureSupport?> supports;
 
-  static const _demoReadyIds = {'device', 'settings'};
+  static const _demoReadyIds = {'device', 'settings', 'history'};
 
   @override
   Widget build(BuildContext context) {

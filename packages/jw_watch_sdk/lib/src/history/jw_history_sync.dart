@@ -6,19 +6,26 @@ import '../connection/jw_protocol.dart';
 import '../model/jw_error.dart';
 import '../storage/jw_history_store.dart';
 import 'jw_history_models.dart';
+import 'jw_history_sync_frame.dart';
 import 'jw_history_sync_listener.dart';
 
-/// Internal 0x05 health-history engine; use [JWWatchSession.syncHealthData].
+/// Internal HL private-protocol (`cmd 0x05`) health-history engine.
+///
+/// Flow matches [HL_Private_Protocol.md] §5.1 → §5.7 → payload keys → §5.8,
+/// then phone `key 0x1c` ack (Android V2). HoneyProtocol `05 10` / `0x40` sync
+/// control is **not** used on JW devices.
 final class JWHealthHistorySync {
   JWHealthHistorySync({
     required JWLink link,
     required JWHistoryStore store,
     required JWHistoryScope scope,
     required JWHistorySyncListener listener,
+    void Function(JWHistorySyncFrame frame)? onHistoryFrame,
   })  : _link = link,
         _store = store,
         _scope = scope,
-        _listener = listener;
+        _listener = listener,
+        _onHistoryFrame = onHistoryFrame;
 
   static const idleTimeout = Duration(seconds: 10);
 
@@ -26,6 +33,7 @@ final class JWHealthHistorySync {
   final JWHistoryStore _store;
   final JWHistoryScope _scope;
   final JWHistorySyncListener _listener;
+  final void Function(JWHistorySyncFrame frame)? _onHistoryFrame;
   StreamSubscription<JWProtocolMessage>? _events;
   StreamSubscription<JWException>? _failures;
   Completer<void>? _done;
@@ -33,7 +41,7 @@ final class JWHealthHistorySync {
   Future<void> _tail = Future.value();
   final _declared = <int, int>{};
   final _received = <int, int>{};
-  final _modernEnded = <int>{};
+  final _markerStreamsEnded = <int>{};
   bool _started = false;
   bool _traditionalEnd = false;
   bool _finished = false;
@@ -48,6 +56,7 @@ final class JWHealthHistorySync {
     _failures = _link.failures.listen(_onLinkFailure);
     _armIdleTimer();
     try {
+      // HL private protocol §5.1: cmd 0x05, key 0x01, empty value.
       await _link.send(JWProtocolCommands.startHistorySync());
     } catch (error, stackTrace) {
       _fail(error, stackTrace);
@@ -76,6 +85,7 @@ final class JWHealthHistorySync {
 
   Future<void> _process(JWProtocolMessage message) async {
     if (_finished) return;
+    _trace(message.key, message.value);
     if (message.key == 7) {
       _readStart(message.value);
     } else if (message.key == 8) {
@@ -83,6 +93,8 @@ final class JWHealthHistorySync {
         throw const FormatException('Invalid JW history END');
       }
       _traditionalEnd = true;
+    } else if (_ignoredHistoryKeys.contains(message.key)) {
+      return;
     } else if (_keyType.containsKey(message.key)) {
       await _readRecords(message.key, message.value);
     }
@@ -90,8 +102,12 @@ final class JWHealthHistorySync {
     await _completeIfReady();
   }
 
+  void _trace(int key, Uint8List value) {
+    _onHistoryFrame?.call(JWHistorySyncFrame(key: key, value: value));
+  }
+
   void _readStart(Uint8List bytes) {
-    if (_started || bytes.isEmpty || bytes.length % 3 != 0) {
+    if (_started || bytes.length % 3 != 0) {
       throw const FormatException('Invalid JW history START');
     }
     for (var offset = 0; offset < bytes.length; offset += 3) {
@@ -126,14 +142,15 @@ final class JWHealthHistorySync {
       throw FormatException('Undeclared JW history key $key');
     }
     if (_isMarker(value)) {
-      if (!_modernTypes.contains(type) || !_modernEnded.add(type)) {
+      if (!_markerStreamTypes.contains(type) ||
+          !_markerStreamsEnded.add(type)) {
         throw FormatException('Unexpected JW history stream marker $key');
       }
       _emitProgress();
       return;
     }
-    if (_modernEnded.contains(type) ||
-        (!_modernTypes.contains(type) && _traditionalEnd)) {
+    if (_markerStreamsEnded.contains(type) ||
+        (!_markerStreamTypes.contains(type) && _traditionalEnd)) {
       throw FormatException('Late JW history record $key');
     }
     final decoded = _decode(key, value);
@@ -154,8 +171,8 @@ final class JWHealthHistorySync {
   Future<void> _completeIfReady() async {
     if (!_started || !_traditionalEnd || _finished) return;
     for (final entry in _declared.entries) {
-      if (_modernTypes.contains(entry.key) &&
-          !_modernEnded.contains(entry.key)) {
+      if (_markerStreamTypes.contains(entry.key) &&
+          !_markerStreamsEnded.contains(entry.key)) {
         return;
       }
       if (_received[entry.key] != entry.value) {
@@ -329,7 +346,12 @@ const _keyType = <int, int>{
   0x60: 0x0f,
   0x64: 0x10,
 };
-const _modernTypes = {0x0e, 0x0f, 0x10};
+/// Payload keys that may appear mid-sync but are not HL history batch data
+/// (same skip list as HoneyBox `JwHistoryCoordinator`).
+const _ignoredHistoryKeys = {0x0f, 0x28, 0x1a};
+
+/// START types that end with an `overover` stream marker before END (0x5b/0x60/0x64).
+const _markerStreamTypes = {0x0e, 0x0f, 0x10};
 
 bool _isMarker(Uint8List bytes) =>
     bytes.length == 8 && String.fromCharCodes(bytes) == 'overover';

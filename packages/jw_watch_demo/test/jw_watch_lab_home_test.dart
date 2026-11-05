@@ -26,6 +26,18 @@ void main() {
     expect(find.byKey(const Key('jw.demo.feature.history')), findsOneWidget);
   });
 
+  testWidgets('history feature opens sync flow page', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: JWWatchLabHome()));
+
+    await tester.tap(find.byKey(const Key('jw.demo.tab.features')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('jw.demo.feature.history')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('jw.demo.history.sync.flow')), findsOneWidget);
+    expect(find.text('开始同步'), findsOneWidget);
+  });
+
   testWidgets('connection sliver list lays out device row on narrow screen',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(360, 640));
@@ -78,6 +90,14 @@ void main() {
 
     expect(find.text('PEARCE'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('home shows inline user id field defaulting to 123456', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: JWWatchLabHome()));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('jw.demo.user_id_input')), findsOneWidget);
+    expect(find.text('123456'), findsOneWidget);
   });
 
   testWidgets('home guide actions layout without rendering exceptions',

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
@@ -22,6 +23,8 @@ String describeJWDemoError(Object error) {
       JWErrorCode.writeFailed =>
         '本次蓝牙写入失败；当前连接仍保持，可重试。',
       JWErrorCode.transportDisconnected => '设备连接已断开。',
+      JWErrorCode.historySyncIdleTimeout =>
+        '同步超过 10 秒未收到设备数据；本轮已结束，连接可能仍保持。',
       _ => 'SDK error [${error.code.name}]: ${error.msg}',
     };
   }
@@ -57,13 +60,14 @@ class JWDemoController extends ChangeNotifier {
 
   List<JWScanDevice> _devices = const [];
   JWWatchSession? _session;
-  String _userId = '';
+  String _userId = '123456';
   JWSessionState _state = const JWSessionState();
   Object? _error;
   bool _disposed = false;
   final _sessionLog = <String>[];
 
   List<JWScanDevice> get devices => scanDevices.value;
+  JWWatchSession? get session => _session;
   JWSessionState get state => _state;
   Object? get error => _error ?? sheetError.value;
   bool get isScanning => scanActive.value;
@@ -243,6 +247,9 @@ class JWDemoController extends ChangeNotifier {
 
   Future<JWSettingSubmission> syncTime() =>
       _runSessionValue((session) => session.setTime(DateTime.now()));
+
+  Future<Uint8List> resetHistorySyncMarkers() =>
+      _runSessionValue((session) => session.resetHistorySyncMarkers());
 
   Future<JWSettingSubmission> setUserProfile(JWUserProfile profile) =>
       _runSessionValue((session) => session.setUserProfile(profile));

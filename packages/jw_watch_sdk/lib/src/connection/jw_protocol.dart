@@ -8,6 +8,7 @@ final class JWProtocolRequest {
     this.responseCommand,
     this.value,
     this.replyTimeout = const Duration(seconds: 8),
+    this.l2Version = 0,
   });
 
   final int command;
@@ -16,6 +17,8 @@ final class JWProtocolRequest {
   final int? responseCommand;
   final Uint8List? value;
   final Duration replyTimeout;
+  /// L2 header version byte; HL private protocol uses `0`.
+  final int l2Version;
 }
 
 abstract final class JWProtocolCommands {
@@ -24,6 +27,11 @@ abstract final class JWProtocolCommands {
       const JWProtocolRequest(command: 2, key: 0x36, responseKey: 0x37);
   static JWProtocolRequest factorySwitch() =>
       const JWProtocolRequest(command: 6, key: 0x3d, responseKey: 0x3e);
+
+  /// Factory-test command: reset device-side history sync index / markers
+  /// (Android `WristbandManager.sendHistoryIndexRequest`, `FACCmdRequestHistoryIndex`).
+  static JWProtocolRequest resetHistorySyncMarkers() =>
+      const JWProtocolRequest(command: 6, key: 0xf7, responseKey: 0xf8);
   static JWProtocolRequest login(Uint8List identity) =>
       JWProtocolRequest(command: 3, key: 3, responseKey: 4, value: identity);
   static JWProtocolRequest bind(Uint8List identity) =>
@@ -31,15 +39,12 @@ abstract final class JWProtocolCommands {
   static JWProtocolRequest unbind() =>
       const JWProtocolRequest(command: 3, key: 5, responseKey: null);
 
-  /// Starts the asynchronous 0x05 health-history stream.  START (key 0x07),
-  /// records and END (key 0x08) are unsolicited events, not this request's
-  /// response, so this deliberately has no [responseKey].
+  /// HL §5.1 request data: cmd `0x05`, key `0x01`, empty value. Device replies
+  /// with §5.7 START (`0x07`), payload keys, then §5.8 END (`0x08`).
   static JWProtocolRequest startHistorySync() =>
       const JWProtocolRequest(command: 5, key: 1, responseKey: null);
 
-  /// Confirms a fully persisted 0x05 history round.  Firmware has no
-  /// business response for this command; successful frame delivery is thus
-  /// recorded as an uncertain device-side confirmation, never as a read-back.
+  /// Confirms a persisted 0x05 history round (key `0x1c`, Android V2).
   static JWProtocolRequest confirmHistorySync() =>
       const JWProtocolRequest(command: 5, key: 0x1c, responseKey: null);
 
@@ -150,9 +155,12 @@ abstract final class JWProtocolCommands {
 Uint8List encodeJWRequest(JWProtocolRequest request) {
   final value = request.value ?? Uint8List(0);
   if (value.length > 231) throw ArgumentError('JW value exceeds L2 limit');
+  if (request.l2Version != 0) {
+    throw ArgumentError('JW HL L2 version must be 0');
+  }
   return Uint8List.fromList([
     request.command,
-    0,
+    request.l2Version,
     request.key,
     value.length >> 8,
     value.length & 0xff,
@@ -168,7 +176,11 @@ final class JWProtocolMessage {
 }
 
 List<JWProtocolMessage> decodeJWMessages(Uint8List bytes) {
-  if (bytes.length < 2 || bytes[1] != 0) {
+  if (bytes.length < 2) {
+    throw const FormatException('Invalid JW L2 header');
+  }
+  final version = bytes[1];
+  if (version != 0) {
     throw const FormatException('Invalid JW L2 header');
   }
   final result = <JWProtocolMessage>[];

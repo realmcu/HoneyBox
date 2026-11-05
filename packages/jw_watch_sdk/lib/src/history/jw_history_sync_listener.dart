@@ -1,11 +1,13 @@
 import '../model/jw_error.dart';
 import 'jw_history_models.dart';
 
-/// START `05/07` wire type bucket exposed to applications.
+/// HL §5.7 START payload type (`HISTORY_DATA_*`), not the message key `0x07`.
 enum JWHistorySyncCategory {
   activity,
   sleep,
   heartRate,
+  /// Parsed from heart-rate wire payloads; not a separate START wire bucket.
+  temperature,
   bloodPressure,
   sport,
   bloodOxygen,

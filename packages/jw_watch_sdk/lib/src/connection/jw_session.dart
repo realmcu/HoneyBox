@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:watch_transport/watch_transport.dart';
 import 'package:watch_transport_ble/watch_transport_ble.dart';
 
 import '../capability/jw_feature.dart';
 import '../history/jw_history_models.dart';
 import '../history/jw_history_sync.dart';
+import '../history/jw_history_sync_frame.dart';
 import '../history/jw_history_sync_listener.dart';
 import '../storage/jw_history_store.dart';
 import '../model/jw_device_info.dart';
@@ -68,7 +70,10 @@ final class JWWatchSession {
   /// Delivers decoded batches through [listener], persists each batch to
   /// [historyStore], and confirms the device only after a full successful round.
   /// There is no cancel API; link loss fails through [JWHistorySyncListener.onSyncFailed].
-  Future<void> syncHealthData(JWHistorySyncListener listener) {
+  Future<void> syncHealthData(
+    JWHistorySyncListener listener, {
+    void Function(JWHistorySyncFrame frame)? onHistoryFrame,
+  }) {
     _requireReadyForSettings();
     final scope = historyScope;
     if (scope == null) {
@@ -82,9 +87,29 @@ final class JWWatchSession {
       store: _historyStore,
       scope: scope,
       listener: listener,
+      onHistoryFrame: onHistoryFrame,
     ).run();
     _healthSync = run;
     return run.whenComplete(() => _healthSync = null);
+  }
+
+  /// Clears device-side history sync markers so a later [syncHealthData] can
+  /// transfer records again (Android `sendHistoryIndexRequest`).
+  ///
+  /// Returns the opaque device payload from key `0xf8` when present.
+  Future<Uint8List> resetHistorySyncMarkers() async {
+    _requireReadyForSettings();
+    if (_healthSync != null) {
+      throw StateError('JW health sync is already active');
+    }
+    final reply =
+        await _link.request(JWProtocolCommands.resetHistorySyncMarkers());
+    if (reply.command != 6 || reply.key != 0xf8) {
+      throw FormatException(
+          'Unexpected JW history marker reset reply '
+          '0x${reply.command.toRadixString(16)}/0x${reply.key.toRadixString(16)}');
+    }
+    return reply.value;
   }
 
   /// Opens the JW byte channel. This does not log in, bind, or query device

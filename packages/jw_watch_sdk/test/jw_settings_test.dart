@@ -34,6 +34,10 @@ void main() {
         Uint8List.fromList([2, 0, 0x41, 0, 1, 1]));
     expect(encodeJWRequest(JWProtocolCommands.setUnitSystem(0)),
         Uint8List.fromList([2, 0, 0x44, 0, 1, 0]));
+    expect(
+      encodeJWRequest(JWProtocolCommands.resetHistorySyncMarkers()),
+      Uint8List.fromList([6, 0, 0xf7, 0, 0]),
+    );
     expect(JWProtocolCommands.readScreenBrightness().replyTimeout,
         const Duration(seconds: 5));
   });
