@@ -22,6 +22,10 @@ final class JWHistoryStore {
   static final Map<String, _SharedDatabase> _shared = {};
 
   /// Opens the default `jw_watch.db`, or an explicitly supplied JW database.
+  ///
+  /// Applications should not call this directly: [JWWatch.initialize] opens
+  /// storage once for the SDK lifetime. This remains public for tests and for
+  /// optional [JWWatch.historyDatabasePath] overrides.
   static Future<JWHistoryStore> open({String? databasePath}) async {
     final directory = databasePath == null
         ? await getApplicationSupportDirectory()
@@ -215,6 +219,157 @@ final class JWHistoryStore {
                   heartRateMin: Value(row.heartRateMin)));
         }
       });
+
+  /// Persists one decoded wire batch before the synchronizer admits the next
+  /// one.  Each call is transactional; a failed transaction prevents the JW
+  /// device confirmation for the whole round.
+  Future<void> writeRecords(
+      JWHistoryScope scope, Iterable<JWHistoryRecord> records) async {
+    final activities = <JWActivity>[];
+    final sleeps = <JWSleep>[];
+    final rates = <JWHeartRate>[];
+    final pressures = <JWBloodPressure>[];
+    final oxygens = <JWBloodOxygen>[];
+    final hrvs = <JWHrv>[];
+    final stress = <JWPressure>[];
+    final temperatures = <JWTemperature>[];
+    final glucoses = <JWBloodGlucose>[];
+    final sports = <JWSport>[];
+    for (final record in records) {
+      switch (record) {
+        case JWActivity():
+          activities.add(record);
+        case JWSleep():
+          sleeps.add(record);
+        case JWHeartRate():
+          rates.add(record);
+        case JWBloodPressure():
+          pressures.add(record);
+        case JWBloodOxygen():
+          oxygens.add(record);
+        case JWHrv():
+          hrvs.add(record);
+        case JWPressure():
+          stress.add(record);
+        case JWTemperature():
+          temperatures.add(record);
+        case JWSport():
+          sports.add(record);
+        case JWBloodGlucose():
+          glucoses.add(record);
+      }
+    }
+    await _database.transaction(() async {
+      // Keeping all public record types from one incoming field in one Drift
+      // transaction avoids a half-persisted decoded payload.
+      for (final row in activities) {
+        await _database.into(_database.jwActivities).insertOnConflictUpdate(
+            JwActivitiesCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                steps: row.steps,
+                distance: row.distance,
+                energy: row.energy,
+                activeTime: row.activeTime,
+                mode: row.mode));
+      }
+      for (final row in sleeps) {
+        await _database.into(_database.jwSleeps).insertOnConflictUpdate(
+            JwSleepsCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                mode: row.mode));
+      }
+      for (final row in rates) {
+        _positive(row.heartRate, 'heartRate');
+        await _database.into(_database.jwHeartRates).insertOnConflictUpdate(
+            JwHeartRatesCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                heartRate: row.heartRate));
+      }
+      for (final row in pressures) {
+        _positive(row.systolic, 'systolic');
+        _positive(row.diastolic, 'diastolic');
+        await _database.into(_database.jwBloodPressures).insertOnConflictUpdate(
+            JwBloodPressuresCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                systolic: row.systolic,
+                diastolic: row.diastolic));
+      }
+      for (final row in oxygens) {
+        _positive(row.value, 'blood oxygen');
+        await _database.into(_database.jwBloodOxygens).insertOnConflictUpdate(
+            JwBloodOxygensCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                value: row.value,
+                high: Value(row.high),
+                low: Value(row.low)));
+      }
+      for (final row in hrvs) {
+        _positive(row.sdnn, 'sdnn');
+        await _database.into(_database.jwHrvs).insertOnConflictUpdate(
+            JwHrvsCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                sdnn: row.sdnn));
+      }
+      for (final row in stress) {
+        _positive(row.value, 'pressure');
+        await _database.into(_database.jwPressures).insertOnConflictUpdate(
+            JwPressuresCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                value: row.value));
+      }
+      for (final row in temperatures) {
+        await _database.into(_database.jwTemperatures).insertOnConflictUpdate(
+            JwTemperaturesCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                skinTemperature: row.skinTemperature,
+                heatStress: row.heatStress,
+                worn: row.worn,
+                compensated: row.compensated));
+      }
+      for (final row in glucoses) {
+        _positive(row.value, 'blood glucose');
+        await _database.into(_database.jwBloodGlucoses).insertOnConflictUpdate(
+            JwBloodGlucosesCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                value: row.value));
+      }
+      for (final row in sports) {
+        await _database.into(_database.jwSports).insertOnConflictUpdate(
+            JwSportsCompanion.insert(
+                userId: scope.userId,
+                deviceMac: scope.deviceMac,
+                time: _time(row.time),
+                mode: row.mode,
+                duration: row.duration,
+                pauseCount: row.pauseCount,
+                pauseDuration: row.pauseDuration,
+                steps: row.steps,
+                distance: row.distance,
+                energy: row.energy,
+                heartRateMax: Value(row.heartRateMax),
+                heartRateAverage: Value(row.heartRateAverage),
+                heartRateMin: Value(row.heartRateMin)));
+      }
+    });
+  }
 
   Future<List<JWActivity>> queryActivities(JWHistoryQuery query) async {
     final rows = await _ordered(_database.select(_database.jwActivities), query,

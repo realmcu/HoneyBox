@@ -31,6 +31,18 @@ abstract final class JWProtocolCommands {
   static JWProtocolRequest unbind() =>
       const JWProtocolRequest(command: 3, key: 5, responseKey: null);
 
+  /// Starts the asynchronous 0x05 health-history stream.  START (key 0x07),
+  /// records and END (key 0x08) are unsolicited events, not this request's
+  /// response, so this deliberately has no [responseKey].
+  static JWProtocolRequest startHistorySync() =>
+      const JWProtocolRequest(command: 5, key: 1, responseKey: null);
+
+  /// Confirms a fully persisted 0x05 history round.  Firmware has no
+  /// business response for this command; successful frame delivery is thus
+  /// recorded as an uncertain device-side confirmation, never as a read-back.
+  static JWProtocolRequest confirmHistorySync() =>
+      const JWProtocolRequest(command: 5, key: 0x1c, responseKey: null);
+
   static JWProtocolRequest readLanguage() =>
       const JWProtocolRequest(command: 2, key: 0x4f, responseKey: 0x50);
   static JWProtocolRequest setLanguage(int value) => JWProtocolRequest(

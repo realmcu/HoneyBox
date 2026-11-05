@@ -56,6 +56,27 @@ void main() {
     await store.dispose();
   });
 
+  test('incoming decoded field is committed atomically', () async {
+    final store = memoryStore();
+    final time = DateTime.utc(2026, 11, 5, 10);
+    await expectLater(
+        store.writeRecords(scope, [
+          JWActivity(
+              time: time,
+              steps: 12,
+              distance: 3,
+              energy: 4,
+              activeTime: 1,
+              mode: 0),
+          // This makes the field transaction fail after the activity insert
+          // would otherwise have been issued.
+          JWHeartRate(time: time, heartRate: 0),
+        ]),
+        throwsArgumentError);
+    expect(await store.queryActivities(JWHistoryQuery(scope: scope)), isEmpty);
+    await store.dispose();
+  });
+
   test('disk database remains queryable after reopening', () async {
     final root = await Directory.systemTemp.createTemp('jw-history-db-');
     addTearDown(() => root.delete(recursive: true));

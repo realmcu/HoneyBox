@@ -10,6 +10,7 @@ enum JWErrorCode {
   receiveFailed,
   writeFailed,
   queueFull,
+  cancelled,
   transport,
   protocol,
 }

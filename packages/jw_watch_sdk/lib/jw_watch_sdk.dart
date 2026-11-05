@@ -6,6 +6,7 @@ export 'src/connection/jw_scan_device.dart';
 export 'src/connection/jw_session.dart';
 export 'src/connection/jw_watch.dart';
 export 'src/history/jw_history_models.dart';
+export 'src/history/jw_history_sync.dart';
 export 'src/model/jw_device_info.dart';
 export 'src/model/jw_device_function_info.dart';
 export 'src/model/jw_error.dart';

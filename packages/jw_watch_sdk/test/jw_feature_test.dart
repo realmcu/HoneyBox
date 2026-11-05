@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
+import 'package:jw_watch_sdk/src/storage/jw_database.dart';
 import 'package:watch_transport_ble/watch_transport_ble.dart';
 
 void main() {
@@ -72,12 +74,16 @@ void main() {
   });
 
   test('SDK initialization is explicit and cannot run twice', () async {
-    final watch = JWWatch();
+    final store =
+        JWHistoryStore.forDatabase(JWDatabase(NativeDatabase.memory()));
+    addTearDown(store.dispose);
+    final watch = JWWatch(historyStore: store);
     addTearDown(watch.dispose);
 
     expect(watch.isInitialized, isFalse);
     await watch.initialize();
     expect(watch.isInitialized, isTrue);
+    expect(watch.historyStore, same(store));
     await expectLater(watch.initialize(), throwsA(isA<StateError>()));
   });
 

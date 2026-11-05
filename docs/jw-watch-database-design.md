@@ -34,6 +34,9 @@ PRIMARY KEY (user_id, device_mac, time)
 - `user_id`：JW 登录和首次绑定使用的 userID。SDK 不生成、不替换该值；登录
   成功的 session 通过 `JWWatchSession.historyScope` 将它带入历史写入和查询范围。
   不得在普通日志中打印它。
+- 数据库文件由 `JWWatch.initialize()` 打开（默认应用支持目录下的
+  `jw_watch.db`）。历史同步写入该库；宿主只需 `watch.historyStore` 或
+  `session.historyStore` 配合 `historyScope` 查询，不必自行 `open()`。
 - `device_mac`：当前 JW 对外连接使用的 MAC 地址，也是持久化设备标识；不另建
   deviceId 或设备表。
 - `time`：UTC Unix 毫秒。连接、登录成功后 SDK 自动将终端时间同步给手表；

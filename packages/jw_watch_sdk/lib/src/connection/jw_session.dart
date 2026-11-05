@@ -5,6 +5,8 @@ import 'package:watch_transport_ble/watch_transport_ble.dart';
 
 import '../capability/jw_feature.dart';
 import '../history/jw_history_models.dart';
+import '../history/jw_history_sync.dart';
+import '../storage/jw_history_store.dart';
 import '../model/jw_device_info.dart';
 import '../model/jw_device_function_info.dart';
 import '../model/jw_error.dart';
@@ -17,11 +19,13 @@ import 'jw_protocol.dart';
 
 /// One owned connection/session. Reconnection creates a new instance.
 final class JWWatchSession {
-  JWWatchSession(this.connection)
-      : _link = JWLink(connection),
+  JWWatchSession(this.connection, {required JWHistoryStore historyStore})
+      : _historyStore = historyStore,
+        _link = JWLink(connection),
         _state = const JWSessionState();
 
   final WatchTransportConnection connection;
+  final JWHistoryStore _historyStore;
   final JWLink _link;
   final _states = StreamController<JWSessionState>.broadcast(sync: true);
   JWSessionState _state;
@@ -49,6 +53,25 @@ final class JWWatchSession {
     if (userId == null || !_state.isReady) return null;
     final deviceMac = _state.device?.deviceMac ?? connection.target.deviceId;
     return JWHistoryScope(userId: userId, deviceMac: deviceMac);
+  }
+
+  /// The same [JWHistoryStore] opened by [JWWatch.initialize].
+  ///
+  /// Use with [historyScope] for offline queries after synchronization.
+  JWHistoryStore get historyStore => _historyStore;
+
+  /// Creates the single-use history synchronizer for this authenticated
+  /// connection.  Records are written to [historyStore] as they arrive.  A
+  /// reconnect must create a new session and synchronizer so late packets from
+  /// an old link can never enter a resumed round.
+  JWHistorySynchronizer createHistorySynchronizer() {
+    _requireReadyForSettings();
+    final scope = historyScope;
+    if (scope == null) {
+      throw StateError('JW history requires an authenticated session');
+    }
+    return JWHistorySynchronizer(
+        link: _link, store: _historyStore, scope: scope);
   }
 
   /// Opens the JW byte channel. This does not log in, bind, or query device
