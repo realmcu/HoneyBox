@@ -260,7 +260,8 @@ Result<int64_t> MediaTimeline::AcceptTimestamp(int64_t raw_pts_100ns) {
                             "video timestamp moved backwards");
   }
   if (!rebase_origin_100ns_.has_value()) {
-    rebase_origin_100ns_ = std::min<int64_t>(raw_pts_100ns, 0);
+    // The decoder can report a nonzero first PTS for a zero-based video.
+    rebase_origin_100ns_ = raw_pts_100ns;
   }
   if (*rebase_origin_100ns_ < 0 &&
       raw_pts_100ns >
@@ -281,7 +282,7 @@ Result<int64_t> MediaTimeline::RawSeekTarget(
                             "video seek timestamp must not be negative");
   }
   const int64_t origin = rebase_origin_100ns_.value_or(0);
-  if (origin > 0) {
+  if (origin > std::numeric_limits<int64_t>::max() - public_pts_100ns) {
     return Failure<int64_t>(Status::kInvalidArgument,
                             "video seek timestamp is outside the timeline");
   }
