@@ -6,6 +6,7 @@ import 'package:watch_transport_ble/watch_transport_ble.dart';
 import '../capability/jw_feature.dart';
 import '../history/jw_history_models.dart';
 import '../history/jw_history_sync.dart';
+import '../history/jw_history_sync_listener.dart';
 import '../storage/jw_history_store.dart';
 import '../model/jw_device_info.dart';
 import '../model/jw_device_function_info.dart';
@@ -60,18 +61,30 @@ final class JWWatchSession {
   /// Use with [historyScope] for offline queries after synchronization.
   JWHistoryStore get historyStore => _historyStore;
 
-  /// Creates the single-use history synchronizer for this authenticated
-  /// connection.  Records are written to [historyStore] as they arrive.  A
-  /// reconnect must create a new session and synchronizer so late packets from
-  /// an old link can never enter a resumed round.
-  JWHistorySynchronizer createHistorySynchronizer() {
+  Future<void>? _healthSync;
+
+  /// Synchronizes JW health history for the authenticated session.
+  ///
+  /// Delivers decoded batches through [listener], persists each batch to
+  /// [historyStore], and confirms the device only after a full successful round.
+  /// There is no cancel API; link loss fails through [JWHistorySyncListener.onSyncFailed].
+  Future<void> syncHealthData(JWHistorySyncListener listener) {
     _requireReadyForSettings();
     final scope = historyScope;
     if (scope == null) {
-      throw StateError('JW history requires an authenticated session');
+      throw StateError('JW health sync requires an authenticated session');
     }
-    return JWHistorySynchronizer(
-        link: _link, store: _historyStore, scope: scope);
+    if (_healthSync != null) {
+      throw StateError('JW health sync is already active on this session');
+    }
+    final run = JWHealthHistorySync(
+      link: _link,
+      store: _historyStore,
+      scope: scope,
+      listener: listener,
+    ).run();
+    _healthSync = run;
+    return run.whenComplete(() => _healthSync = null);
   }
 
   /// Opens the JW byte channel. This does not log in, bind, or query device

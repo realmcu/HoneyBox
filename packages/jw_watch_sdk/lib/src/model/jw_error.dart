@@ -11,6 +11,7 @@ enum JWErrorCode {
   writeFailed,
   queueFull,
   cancelled,
+  historySyncIdleTimeout,
   transport,
   protocol,
 }

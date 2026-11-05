@@ -6,67 +6,47 @@ import '../connection/jw_protocol.dart';
 import '../model/jw_error.dart';
 import '../storage/jw_history_store.dart';
 import 'jw_history_models.dart';
+import 'jw_history_sync_listener.dart';
 
-/// The only callback emitted during a history round.  It contains the device's
-/// complete announced count; callers can derive their own UI progress without
-/// making the protocol path wait for UI listeners.
-final class JWHistorySyncStart {
-  const JWHistorySyncStart({required this.totalCount, required this.counts});
-  final int totalCount;
-  final Map<int, int> counts;
-}
-
-enum JWHistoryConfirmation { notAttempted, transportDelivered, unknown }
-
-final class JWHistorySyncResult {
-  const JWHistorySyncResult({
-    required this.totalCount,
-    required this.receivedCount,
-    required this.persistedCount,
-    required this.declaredCounts,
-    required this.receivedCounts,
-    required this.confirmation,
-  });
-  final int totalCount, receivedCount, persistedCount;
-  final Map<int, int> declaredCounts, receivedCounts;
-  final JWHistoryConfirmation confirmation;
-}
-
-/// Serializes one JW 0x05 history transaction.  Record packets are committed
-/// as they arrive, which avoids a large end-of-sync disk burst, but 0x1c is
-/// sent only after every declared stream has ended and all writes succeeded.
-final class JWHistorySynchronizer {
-  JWHistorySynchronizer({
+/// Internal 0x05 health-history engine; use [JWWatchSession.syncHealthData].
+final class JWHealthHistorySync {
+  JWHealthHistorySync({
     required JWLink link,
     required JWHistoryStore store,
     required JWHistoryScope scope,
+    required JWHistorySyncListener listener,
   })  : _link = link,
         _store = store,
-        _scope = scope;
+        _scope = scope,
+        _listener = listener;
+
+  static const idleTimeout = Duration(seconds: 10);
 
   final JWLink _link;
   final JWHistoryStore _store;
   final JWHistoryScope _scope;
-  final _starts = StreamController<JWHistorySyncStart>.broadcast(sync: true);
+  final JWHistorySyncListener _listener;
   StreamSubscription<JWProtocolMessage>? _events;
   StreamSubscription<JWException>? _failures;
-  Completer<JWHistorySyncResult>? _done;
+  Completer<void>? _done;
+  Timer? _idleTimer;
   Future<void> _tail = Future.value();
   final _declared = <int, int>{};
   final _received = <int, int>{};
   final _modernEnded = <int>{};
   bool _started = false;
   bool _traditionalEnd = false;
-  bool _cancelled = false;
-  int _persisted = 0;
+  bool _finished = false;
+  int _totalWire = 0;
 
-  Stream<JWHistorySyncStart> get starts => _starts.stream;
-
-  Future<JWHistorySyncResult> synchronize() async {
-    if (_done != null) throw StateError('JW history synchronization is active');
-    _done = Completer<JWHistorySyncResult>();
+  Future<void> run() async {
+    if (_done != null) {
+      throw StateError('JW health sync is already active on this engine');
+    }
+    _done = Completer<void>();
     _events = _link.events.listen(_onMessage);
-    _failures = _link.failures.listen(_fail);
+    _failures = _link.failures.listen(_onLinkFailure);
+    _armIdleTimer();
     try {
       await _link.send(JWProtocolCommands.startHistorySync());
     } catch (error, stackTrace) {
@@ -75,31 +55,38 @@ final class JWHistorySynchronizer {
     return _done!.future.whenComplete(_cleanup);
   }
 
-  Future<void> cancel() async {
-    if (_done == null || _done!.isCompleted) return;
-    _cancelled = true;
-    _fail(
-        const JWException(JWErrorCode.cancelled, 'JW history sync cancelled'));
-  }
-
   void _onMessage(JWProtocolMessage message) {
-    if (_done!.isCompleted || message.command != 5) return;
+    if (_finished || _done == null || _done!.isCompleted) return;
+    if (message.command != 5) return;
+    _armIdleTimer();
     _tail = _tail.then((_) => _process(message)).catchError(_fail);
   }
 
+  void _onLinkFailure(JWException error) => _fail(error);
+
+  void _armIdleTimer() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(idleTimeout, () {
+      _failSync(const JWHistorySyncFailure(
+        code: JWErrorCode.historySyncIdleTimeout,
+        message: 'JW health sync idle timeout (10s without 0x05 progress)',
+      ));
+    });
+  }
+
   Future<void> _process(JWProtocolMessage message) async {
-    for (final field in [message]) {
-      if (field.key == 7) {
-        _readStart(field.value);
-      } else if (field.key == 8) {
-        if (!_started || _traditionalEnd || field.value.isNotEmpty) {
-          throw const FormatException('Invalid JW history END');
-        }
-        _traditionalEnd = true;
-      } else if (_keyType.containsKey(field.key)) {
-        await _readRecords(field.key, field.value);
+    if (_finished) return;
+    if (message.key == 7) {
+      _readStart(message.value);
+    } else if (message.key == 8) {
+      if (!_started || _traditionalEnd || message.value.isNotEmpty) {
+        throw const FormatException('Invalid JW history END');
       }
+      _traditionalEnd = true;
+    } else if (_keyType.containsKey(message.key)) {
+      await _readRecords(message.key, message.value);
     }
+    if (_finished) return;
     await _completeIfReady();
   }
 
@@ -116,9 +103,20 @@ final class JWHistorySynchronizer {
       _received[type] = 0;
     }
     _started = true;
-    final total = _declared.values.fold(0, (a, b) => a + b);
-    _starts.add(JWHistorySyncStart(
-        totalCount: total, counts: Map.unmodifiable(_declared)));
+    _totalWire = _declared.values.fold(0, (a, b) => a + b);
+    final byCategory = <JWHistorySyncCategory, int>{};
+    for (final entry in _declared.entries) {
+      final category = _categoryForStartType(entry.key);
+      if (category == null) continue;
+      byCategory[category] = (byCategory[category] ?? 0) + entry.value;
+    }
+    _invoke(() {
+      _listener.onSyncStart(JWHistorySyncPlan(
+        totalWireRecords: _totalWire,
+        wireCountsByCategory: Map.unmodifiable(byCategory),
+      ));
+      _listener.onSyncProgress(0, _totalWire);
+    });
   }
 
   Future<void> _readRecords(int key, Uint8List value) async {
@@ -131,6 +129,7 @@ final class JWHistorySynchronizer {
       if (!_modernTypes.contains(type) || !_modernEnded.add(type)) {
         throw FormatException('Unexpected JW history stream marker $key');
       }
+      _emitProgress();
       return;
     }
     if (_modernEnded.contains(type) ||
@@ -139,16 +138,21 @@ final class JWHistorySynchronizer {
     }
     final decoded = _decode(key, value);
     _received[type] = _received[type]! + decoded.wireCount;
-    // METAB/readiness are intentionally not public models yet. They remain
-    // decoded enough to count their fixed-size records and gate confirmation.
     if (decoded.records.isNotEmpty) {
       await _store.writeRecords(_scope, decoded.records);
-      _persisted += decoded.records.length;
+      _invoke(() => _deliverRecords(decoded.records));
     }
+    _emitProgress();
+  }
+
+  void _emitProgress() {
+    if (_totalWire == 0) return;
+    final received = _received.values.fold(0, (a, b) => a + b);
+    _invoke(() => _listener.onSyncProgress(received, _totalWire));
   }
 
   Future<void> _completeIfReady() async {
-    if (!_started || !_traditionalEnd || _done!.isCompleted) return;
+    if (!_started || !_traditionalEnd || _finished) return;
     for (final entry in _declared.entries) {
       if (_modernTypes.contains(entry.key) &&
           !_modernEnded.contains(entry.key)) {
@@ -159,37 +163,144 @@ final class JWHistorySynchronizer {
             'JW history count mismatch for type ${entry.key}: ${_received[entry.key]}/${entry.value}');
       }
     }
-    if (_cancelled) return;
-    // The frame channel confirms delivery, not firmware persistence.  Record
-    // that ambiguity explicitly so a later sync can safely be repeated.
     await _link.send(JWProtocolCommands.confirmHistorySync());
-    _done!.complete(JWHistorySyncResult(
-      totalCount: _declared.values.fold(0, (a, b) => a + b),
-      receivedCount: _received.values.fold(0, (a, b) => a + b),
-      persistedCount: _persisted,
-      declaredCounts: Map.unmodifiable(_declared),
-      receivedCounts: Map.unmodifiable(_received),
-      confirmation: JWHistoryConfirmation.unknown,
-    ));
+    _finished = true;
+    _idleTimer?.cancel();
+    _invoke(_listener.onSyncFinished);
+    _done!.complete();
+  }
+
+  void _deliverRecords(List<JWHistoryRecord> records) {
+    final activities = <JWActivity>[];
+    final sleeps = <JWSleep>[];
+    final rates = <JWHeartRate>[];
+    final temperatures = <JWTemperature>[];
+    final pressures = <JWBloodPressure>[];
+    final oxygens = <JWBloodOxygen>[];
+    final hrvs = <JWHrv>[];
+    final stress = <JWPressure>[];
+    final sports = <JWSport>[];
+    for (final record in records) {
+      switch (record) {
+        case JWActivity():
+          activities.add(record);
+        case JWSleep():
+          sleeps.add(record);
+        case JWHeartRate():
+          rates.add(record);
+        case JWTemperature():
+          temperatures.add(record);
+        case JWBloodPressure():
+          pressures.add(record);
+        case JWBloodOxygen():
+          oxygens.add(record);
+        case JWHrv():
+          hrvs.add(record);
+        case JWPressure():
+          stress.add(record);
+        case JWSport():
+          sports.add(record);
+        case JWBloodGlucose():
+          break;
+      }
+    }
+    if (activities.isNotEmpty) {
+      _listener.onActivityReceived(List.unmodifiable(activities));
+    }
+    if (sleeps.isNotEmpty) {
+      _listener.onSleepReceived(List.unmodifiable(sleeps));
+    }
+    if (rates.isNotEmpty) {
+      _listener.onHeartRateReceived(List.unmodifiable(rates));
+    }
+    if (temperatures.isNotEmpty) {
+      _listener.onTemperatureReceived(List.unmodifiable(temperatures));
+    }
+    if (pressures.isNotEmpty) {
+      _listener.onBloodPressureReceived(List.unmodifiable(pressures));
+    }
+    if (oxygens.isNotEmpty) {
+      _listener.onBloodOxygenReceived(List.unmodifiable(oxygens));
+    }
+    if (hrvs.isNotEmpty) {
+      _listener.onHrvReceived(List.unmodifiable(hrvs));
+    }
+    if (stress.isNotEmpty) {
+      _listener.onPressureReceived(List.unmodifiable(stress));
+    }
+    if (sports.isNotEmpty) {
+      _listener.onSportReceived(List.unmodifiable(sports));
+    }
+  }
+
+  void _invoke(void Function() callback) {
+    try {
+      callback();
+    } catch (error) {
+      _failSync(JWHistorySyncFailure(
+        code: JWErrorCode.protocol,
+        message: 'JW history sync listener failed: $error',
+      ));
+    }
+  }
+
+  void _failSync(JWHistorySyncFailure failure) {
+    if (_finished || _done == null || _done!.isCompleted) return;
+    _finished = true;
+    _idleTimer?.cancel();
+    try {
+      _listener.onSyncFailed(failure);
+    } catch (error, stackTrace) {
+      _done!.completeError(error, stackTrace);
+      return;
+    }
+    _done!.completeError(
+        JWException(failure.code, failure.message), StackTrace.current);
   }
 
   void _fail(Object error, [StackTrace? stackTrace]) {
-    if (_done == null || _done!.isCompleted) return;
-    _done!.completeError(error, stackTrace);
+    if (_finished || _done == null || _done!.isCompleted) return;
+    _failSync(_failureFrom(error));
+  }
+
+  JWHistorySyncFailure _failureFrom(Object error) {
+    if (error is JWHistorySyncFailure) return error;
+    if (error is JWException) {
+      return JWHistorySyncFailure(code: error.code, message: error.msg);
+    }
+    if (error is FormatException) {
+      return JWHistorySyncFailure(
+          code: JWErrorCode.protocol, message: error.message);
+    }
+    return JWHistorySyncFailure(
+        code: JWErrorCode.protocol, message: error.toString());
   }
 
   Future<void> _cleanup() async {
+    _idleTimer?.cancel();
     await _events?.cancel();
     await _failures?.cancel();
     _events = null;
     _failures = null;
     _done = null;
   }
+}
 
-  Future<void> dispose() async {
-    await cancel();
-    await _starts.close();
-  }
+JWHistorySyncCategory? _categoryForStartType(int type) {
+  return switch (type) {
+    0 => JWHistorySyncCategory.activity,
+    1 => JWHistorySyncCategory.sleep,
+    2 => JWHistorySyncCategory.heartRate,
+    3 => JWHistorySyncCategory.bloodPressure,
+    4 => JWHistorySyncCategory.sport,
+    5 => JWHistorySyncCategory.bloodOxygen,
+    6 => JWHistorySyncCategory.hrv,
+    0x0e => JWHistorySyncCategory.pressure,
+    0x0f => JWHistorySyncCategory.metabDaily,
+    0x10 => JWHistorySyncCategory.readinessHistory,
+    >= 7 && <= 13 => JWHistorySyncCategory.legacyInternal,
+    _ => null,
+  };
 }
 
 final class _DecodedField {
@@ -207,10 +318,6 @@ const _keyType = <int, int>{
   0x16: 4,
   0x2c: 5,
   0x3c: 6,
-  // These legacy streams remain deliberately internal after the new public
-  // model reduction. Their record width is still known from Android V2, so
-  // they participate in receipt validation and never prevent 0x1c merely
-  // because the SDK no longer exposes their records.
   0x40: 7,
   0x49: 8,
   0x4a: 9,
