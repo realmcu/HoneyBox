@@ -213,6 +213,9 @@ class JWDemoController extends ChangeNotifier {
   Future<void> readDeviceInfo() =>
       _runSession((session) => session.readDeviceInfo());
 
+  Future<int?> readBattery() =>
+      _runSessionValue((session) => session.readBattery());
+
   Future<void> readDeviceDetails() =>
       _runSession((session) => session.readDeviceDetails());
 
@@ -313,6 +316,29 @@ class JWDemoController extends ChangeNotifier {
     if (!(await Permission.locationWhenInUse.request()).isGranted) {
       throw StateError('请授予蓝牙/定位权限以扫描 JW 设备');
     }
+  }
+
+  /// Whether scan can start without showing a permission dialog (Android).
+  Future<bool> scanPermissionsGranted() async {
+    if (!Platform.isAndroid) return true;
+    if (await Permission.bluetoothScan.isGranted &&
+        await Permission.bluetoothConnect.isGranted) {
+      return true;
+    }
+    return Permission.locationWhenInUse.isGranted;
+  }
+
+  /// Called when the connection page opens: scan only if permissions are already granted.
+  Future<void> autoStartScanOnConnectionPage() async {
+    if (_disposed ||
+        !isInitialized ||
+        _state.isConnected ||
+        _connecting ||
+        isScanning) {
+      return;
+    }
+    if (!await scanPermissionsGranted()) return;
+    await startScan();
   }
 
   Future<JWIdentity> _identity() async {

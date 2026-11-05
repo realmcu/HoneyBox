@@ -60,11 +60,54 @@ final class JWWatchSession {
   Future<void> readDeviceInfo() async {
     _requireConnected();
     final wasReady = _state.isReady;
+    final previousBattery = _state.device?.battery;
     _publish(_state.copyWith(clearError: true));
     try {
       final info = await _readDeviceInfo();
       final phase = wasReady ? JWSessionPhase.ready : JWSessionPhase.connected;
-      _publish(_state.copyWith(phase: phase, device: info));
+      _publish(_state.copyWith(
+          phase: phase,
+          device: JWDeviceInfo(
+            targetId: info.targetId,
+            name: info.name,
+            serialNumber: info.serialNumber,
+            firmware: info.firmware,
+            hardware: info.hardware,
+            battery: previousBattery,
+          )));
+    } catch (error) {
+      if (!_disposed) {
+        final phase =
+            wasReady ? JWSessionPhase.ready : JWSessionPhase.connected;
+        _publish(_state.copyWith(phase: phase, error: error));
+      }
+      rethrow;
+    }
+  }
+
+  /// Reads the standard GATT battery level (service `180f`, characteristic `2a19`).
+  ///
+  /// This is independent from [readDeviceInfo], matching the legacy Android
+  /// battery read entry point.
+  Future<int?> readBattery() async {
+    _requireConnected();
+    final wasReady = _state.isReady;
+    _publish(_state.copyWith(clearError: true));
+    try {
+      final level = await _readBattery();
+      final current = _state.device;
+      final targetId = current?.targetId ?? connection.target.deviceId;
+      final device = JWDeviceInfo(
+        targetId: targetId,
+        name: current?.name,
+        serialNumber: current?.serialNumber,
+        firmware: current?.firmware,
+        hardware: current?.hardware,
+        battery: level,
+      );
+      final phase = wasReady ? JWSessionPhase.ready : JWSessionPhase.connected;
+      _publish(_state.copyWith(phase: phase, device: device));
+      return level;
     } catch (error) {
       if (!_disposed) {
         final phase =
@@ -80,12 +123,23 @@ final class JWWatchSession {
   Future<void> readDeviceDetails() async {
     _requireConnected();
     final wasReady = _state.isReady;
+    final previousBattery = _state.device?.battery;
     _publish(_state.copyWith(clearError: true));
     try {
       final info = await _readDeviceInfo();
       final features = await _readFeatures();
       final phase = wasReady ? JWSessionPhase.ready : JWSessionPhase.connected;
-      _publish(_state.copyWith(phase: phase, device: info, features: features));
+      _publish(_state.copyWith(
+          phase: phase,
+          device: JWDeviceInfo(
+            targetId: info.targetId,
+            name: info.name,
+            serialNumber: info.serialNumber,
+            firmware: info.firmware,
+            hardware: info.hardware,
+            battery: previousBattery,
+          ),
+          features: features));
     } catch (error) {
       if (!_disposed) {
         final phase =
@@ -370,6 +424,17 @@ final class JWWatchSession {
     return const JWSettingSubmission('alarms');
   }
 
+  Future<int?> _readBattery() async {
+    if (connection is! WatchBleConnection) return null;
+    final ble = connection as WatchBleConnection;
+    try {
+      final bytes = await ble.readGatt(service: '180f', characteristic: '2a19');
+      return bytes.length == 1 && bytes.single <= 100 ? bytes.single : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<JWDeviceInfo> _readDeviceInfo() async {
     if (connection is! WatchBleConnection) {
       return JWDeviceInfo(targetId: connection.target.deviceId);
@@ -389,18 +454,12 @@ final class JWWatchSession {
       }
     }
 
-    int? battery;
-    try {
-      final bytes = await ble.readGatt(service: '180f', characteristic: '2a19');
-      battery = bytes.length == 1 && bytes.single <= 100 ? bytes.single : null;
-    } catch (_) {}
     return JWDeviceInfo(
       targetId: connection.target.deviceId,
       name: await text('1800', '2a00'),
       serialNumber: await text('180a', '2a25'),
       firmware: await text('180a', '2a26'),
       hardware: await text('180a', '2a27'),
-      battery: battery,
     );
   }
 

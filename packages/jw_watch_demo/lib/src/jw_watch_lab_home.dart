@@ -5,7 +5,7 @@ import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
 import 'jw_demo_content_sheet.dart';
 import 'jw_demo_controller.dart';
-import 'jw_device_function_labels.dart';
+import 'jw_device_pages.dart';
 import 'jw_feature_catalog.dart';
 import 'jw_settings_pages.dart';
 
@@ -36,6 +36,10 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
   void _showFeature(JWFeatureCatalogEntry entry) {
     if (entry.id == 'settings') {
       openJwSettingsHub(context, _controller);
+      return;
+    }
+    if (entry.id == 'device') {
+      openJwDeviceHub(context, _controller);
       return;
     }
     unawaited(
@@ -300,7 +304,7 @@ await session.unbind(confirmed: true);''',
             '4',
             '读取设备信息',
             controller.state.device == null
-                ? '可选：读取名称、序列号、固件、硬件与电量。'
+                ? '可选：读取名称、序列号、固件与硬件（电量单独读取）。'
                 : '已读取当前设备的基础信息。',
             keyName: 'jw.demo.guide.device_info',
             actionLabel: '读取',
@@ -310,7 +314,7 @@ await session.unbind(confirmed: true);''',
             completed: controller.state.device != null,
             code: 'await session.readDeviceInfo();',
             detailPanel: controller.state.device != null
-                ? _DeviceInfoPanel(state: controller.state)
+                ? JwDeviceInfoPanel(state: controller.state)
                 : null,
           ),
           _GuideTile(
@@ -330,7 +334,7 @@ final functions = session.state.functionInfo;
 final supportsHeartRate = functions?.supports(JWDeviceFunction.rate);''',
             detailPanel: controller.state.functionInfo == null
                 ? null
-                : _DeviceFunctionPanel(
+                : JwDeviceFunctionPanel(
                     functions: controller.state.functionInfo!),
           ),
         ],
@@ -547,51 +551,6 @@ class _SessionLogPanel extends StatelessWidget {
       );
 }
 
-class _DeviceInfoPanel extends StatelessWidget {
-  const _DeviceInfoPanel({required this.state});
-  final JWSessionState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final device = state.device;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('名称：${device?.name ?? '未提供'}'),
-        Text('序列号：${device?.serialNumber ?? '未提供'}'),
-        Text('固件：${device?.firmware ?? '未提供'}'),
-        Text('硬件：${device?.hardware ?? '未提供'}'),
-        Text('电量：${device?.battery == null ? '未提供' : '${device!.battery}%'}'),
-      ],
-    );
-  }
-}
-
-class _DeviceFunctionPanel extends StatelessWidget {
-  const _DeviceFunctionPanel({required this.functions});
-  final JWDeviceFunctionInfo functions;
-
-  @override
-  Widget build(BuildContext context) {
-    final supported = jwSupportedFunctionsSorted(functions);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('共 ${supported.length} 项'),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final function in supported)
-              Chip(label: Text(jwDeviceFunctionLabel(function))),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
 class _FeaturesPage extends StatelessWidget {
   const _FeaturesPage({required this.state, required this.onFeatureTap});
   final JWSessionState state;
@@ -618,6 +577,7 @@ class _FeaturesPage extends StatelessWidget {
                   title: Text(entry.title),
                   subtitle: Text(entry.subtitle),
                   trailing: _FeatureAvailability(
+                    entry: entry,
                     supports: [
                       for (final feature in entry.features)
                         state.features[feature],
@@ -632,11 +592,27 @@ class _FeaturesPage extends StatelessWidget {
 }
 
 class _FeatureAvailability extends StatelessWidget {
-  const _FeatureAvailability({required this.supports});
+  const _FeatureAvailability({
+    required this.entry,
+    required this.supports,
+  });
+
+  final JWFeatureCatalogEntry entry;
   final List<JWFeatureSupport?> supports;
+
+  static const _demoReadyIds = {'device', 'settings'};
 
   @override
   Widget build(BuildContext context) {
+    if (_demoReadyIds.contains(entry.id)) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('可用', style: Theme.of(context).textTheme.labelSmall),
+          const Icon(Icons.chevron_right),
+        ],
+      );
+    }
     final values = supports.whereType<JWFeatureSupport>().toList();
     final label = values.isEmpty
         ? '连接后识别'
@@ -750,6 +726,9 @@ class _ConnectionPageState extends State<_ConnectionPage> {
   void initState() {
     super.initState();
     controller.resetConnectionScanUi();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(controller.autoStartScanOnConnectionPage());
+    });
   }
 
   @override
@@ -801,7 +780,7 @@ class _ConnectionPageState extends State<_ConnectionPage> {
                     child: Text(
                       controller.isScanning
                           ? '正在扫描附近的 JW 设备…'
-                          : '点击扫描以发现 JW 设备',
+                          : '已具备权限时将自动扫描；否则请点击下方「扫描」并授权',
                     ),
                   ),
                 )
