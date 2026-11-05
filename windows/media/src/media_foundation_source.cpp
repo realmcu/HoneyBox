@@ -14,6 +14,7 @@
 #include <propvarutil.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -281,7 +282,10 @@ class MediaFoundationFrameSource final : public FrameSource {
     }
     ScopedPropVariant position;
     position.get()->vt = VT_I8;
-    position.get()->hVal.QuadPart = *raw_target.value;
+    // The reader bounds seeks by the presentation duration, even when sample
+    // timestamps extend beyond it. Keep the raw target for preroll filtering.
+    position.get()->hVal.QuadPart =
+        std::min(*raw_target.value, info_.duration_100ns);
     result = reader_->SetCurrentPosition(GUID_NULL, *position.get());
     if (FAILED(result)) {
       return Outcome{MediaFoundationFailure<bool>(

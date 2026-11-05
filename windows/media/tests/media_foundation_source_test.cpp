@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -309,6 +310,26 @@ HMW_TEST(media_foundation_source_timeline_rebases_and_rejects_regression) {
   HMW_EXPECT(sought.ok() && *sought.value == 50);
 }
 
+HMW_TEST(media_foundation_source_timeline_rebases_positive_origin_for_seek) {
+  hmw::internal::MediaTimeline timeline;
+  constexpr int64_t kRawOrigin = 2666666;
+  const auto first = timeline.AcceptTimestamp(kRawOrigin);
+  HMW_EXPECT(first.ok() && *first.value == 0);
+
+  constexpr int64_t kTarget = 60000000;
+  const auto raw_target = timeline.RawSeekTarget(kTarget);
+  HMW_EXPECT(raw_target.ok() && *raw_target.value == kRawOrigin + kTarget);
+  if (!raw_target.ok()) {
+    return;
+  }
+  timeline.BeginSeek(*raw_target.value);
+  HMW_EXPECT(timeline.IsPreroll(kRawOrigin + kTarget - 1));
+  HMW_EXPECT(!timeline.IsPreroll(kRawOrigin + kTarget));
+  const auto sought = timeline.AcceptTimestamp(kRawOrigin + kTarget);
+  HMW_EXPECT(sought.ok() && *sought.value == kTarget);
+  HMW_EXPECT(!timeline.RawSeekTarget(std::numeric_limits<int64_t>::max()).ok());
+}
+
 HMW_TEST(media_foundation_source_allows_missing_and_zero_nominal_fps) {
   Microsoft::WRL::ComPtr<IMFMediaType> media_type = MakeVideoMediaType(4, 4);
   HMW_EXPECT(hmw::internal::ReadNominalFrameRate(media_type.Get()) == 0.0);
@@ -476,6 +497,9 @@ HMW_TEST(media_foundation_source_pts_are_monotonic_and_complete) {
     HMW_EXPECT(frame.pts_100ns >= 0);
     HMW_EXPECT(frame.pts_100ns >= previous_pts);
     HMW_EXPECT(frame.duration_100ns > 0);
+    if (frame_count == 0) {
+      HMW_EXPECT(frame.pts_100ns == 0);
+    }
     previous_pts = frame.pts_100ns;
     ++frame_count;
   }
@@ -508,7 +532,22 @@ HMW_TEST(media_foundation_source_seek_returns_target_and_handles_overrun) {
                 static_cast<long long>(frame.pts_100ns));
     HMW_EXPECT(frame.pts_100ns >= target);
   }
+
+  constexpr int64_t kLastFramePts = 119333333;
+  const hmw::Outcome final_frame_seek = source->Seek(kLastFramePts);
+  PrintError(final_frame_seek);
+  HMW_EXPECT(final_frame_seek.ok());
+  if (final_frame_seek.ok()) {
+    const hmw::Result<bool> final_frame = source->ReadNext(&frame);
+    PrintError(final_frame);
+    HMW_EXPECT(final_frame.ok() && *final_frame.value);
+    if (final_frame.ok() && *final_frame.value) {
+      HMW_EXPECT(frame.pts_100ns == kLastFramePts);
+    }
+  }
+
   hmw::Outcome total_seek = source->Seek(source->info().duration_100ns);
+  PrintError(total_seek);
   HMW_EXPECT(total_seek.ok());
   hmw::Result<bool> at_total = source->ReadNext(&frame);
   HMW_EXPECT(at_total.ok() && !*at_total.value);
