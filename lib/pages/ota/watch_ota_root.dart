@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/ble_provider.dart';
 import '../../providers/rtl8762_ota_provider.dart';
+import '../../services/ota/ota_target.dart';
 import '../scan/scan_page.dart';
 import 'realtek_ota_page.dart';
 
-/// Scan for a candidate before opening the RTL8762D upgrade page.
+/// Scan for a candidate before opening the Realtek upgrade page.
 class WatchOtaRoot extends ConsumerStatefulWidget {
-  const WatchOtaRoot({super.key});
+  final OtaTarget target;
+  const WatchOtaRoot({super.key, this.target = OtaTarget.rtl8762d});
 
   @override
   ConsumerState<WatchOtaRoot> createState() => _WatchOtaRootState();
@@ -22,12 +24,8 @@ class _WatchOtaRootState extends ConsumerState<WatchOtaRoot> {
     final upgrading = ref.watch(rtl8762OtaInProgressProvider);
     return PopScope(
       canPop: !upgrading,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) return;
-        ref.read(bleNotifierProvider.notifier).disconnect();
-      },
       child: _selected != null
-          ? RealtekOtaPage(device: _selected!)
+          ? RealtekOtaPage(device: _selected!, target: widget.target)
           : ScanPage(
               defaultDeviceFilter: '',
               appTitle: 'OTA',
@@ -35,6 +33,7 @@ class _WatchOtaRootState extends ConsumerState<WatchOtaRoot> {
               defaultOnlyNamed: true,
               defaultOnlyConnectable: true,
               defaultSortBySignal: true,
+              showBackButton: true,
               onDeviceSelected: (device) => setState(() => _selected = device),
             ),
     );

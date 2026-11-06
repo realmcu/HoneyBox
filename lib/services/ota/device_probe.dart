@@ -24,6 +24,17 @@ class OtaDeviceInfoRecord {
       required this.tempBankSizeBytes,
       required this.imgIndicator});
   static OtaDeviceInfoRecord? parse(Uint8List bytes) {
+    if (bytes.length >= 14 && bytes[10] == 196 && bytes[11] == 0) {
+      final data = ByteData.sublistView(bytes);
+      return OtaDeviceInfoRecord(
+          icType: bytes[0],
+          otaVersion: bytes[1] & 0x0f,
+          secureVersion: 0,
+          modeBits: bytes[2],
+          maxBuffer: data.getUint16(6, Endian.little),
+          tempBankSizeBytes: bytes[4] * 4096,
+          imgIndicator: 0);
+    }
     if (bytes.length != 12) return null;
     final data = ByteData.sublistView(bytes);
     final mode = bytes[3];
