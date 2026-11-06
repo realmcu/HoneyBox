@@ -71,3 +71,5 @@ flutter:
     - assets/example/img/
     - assets/example/gif/
     - assets/example/video/
+    # JW Demo 设置图标（宿主侧再挂一份，避免 package asset 在真机解析失败）
+    - assets/jw_settings/

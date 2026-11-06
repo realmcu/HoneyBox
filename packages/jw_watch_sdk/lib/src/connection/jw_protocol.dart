@@ -125,6 +125,15 @@ abstract final class JWProtocolCommands {
       replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setDoNotDisturb(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x47, responseKey: null, value: value);
+
+  /// Heat-stress reminder window: set `0x86`, request `0x87`, response `0x88`.
+  static JWProtocolRequest readHeatStressReminder() => const JWProtocolRequest(
+      command: 2,
+      key: 0x87,
+      responseKey: 0x88,
+      replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest setHeatStressReminder(Uint8List value) =>
+      JWProtocolRequest(command: 2, key: 0x86, responseKey: null, value: value);
   static JWProtocolRequest readSedentaryReminder() => const JWProtocolRequest(
       command: 2,
       key: 0x26,
@@ -144,6 +153,25 @@ abstract final class JWProtocolCommands {
   static JWProtocolRequest setAlarm2(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x65, responseKey: null, value: value);
   static const int alarms2ResponseKey = 0x67;
+
+  /// Notify switches: request `0x28` → response `0x29`; bulk set `0x2D`.
+  static JWProtocolRequest readNotifySettings() => const JWProtocolRequest(
+      command: 2,
+      key: 0x28,
+      responseKey: 0x29,
+      replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest setNotifySettings(Uint8List value) =>
+      JWProtocolRequest(command: 2, key: 0x2d, responseKey: null, value: value);
+  static JWProtocolRequest setNotifyChannel(int mode) =>
+      _setting(0x25, mode);
+
+  /// Incoming call alert (`cmd 0x04` / `key 0x01`).
+  static JWProtocolRequest sendIncomingCall(Uint8List value) =>
+      JWProtocolRequest(command: 4, key: 0x01, responseKey: null, value: value);
+
+  /// App message alert (`cmd 0x04` / `key 0x04`).
+  static JWProtocolRequest sendNotifyMessage(Uint8List value) =>
+      JWProtocolRequest(command: 4, key: 0x04, responseKey: null, value: value);
 
   static JWProtocolRequest _setting(int key, int value) => JWProtocolRequest(
       command: 2,

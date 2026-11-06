@@ -49,8 +49,10 @@ transport 不会通过发送两种协议来猜测设备。重复服务或重复 
   接收数组只读，发送输入立即复制。协议消费者应持续消费，暂停订阅不提供有界背压。
 - 写入按 GATT 操作串行，大小使用当前有效 MTU（最小 23，最大 517，单次 value 最大 512）。
   BLE transport 不分配 seq、不重传业务帧、不等待设备 ACK；帧分片与整帧队列属于 T3。
-- 可选 `readGatt(service:, characteristic:)` / `writeGatt(withoutResponse:)` 仅存在于 BLE 具体连接，
-  不扩充通用 transport 接口。read 与 write 共用平台队列，普通 read 失败不结束连接；
+- 可选 `readGatt(service:, characteristic:)` / `writeGatt(withoutResponse:)` /
+  `writeCharacteristic(service:, characteristic:, bytes:)` 仅存在于 BLE 具体连接，
+  不扩充通用 transport 接口。`writeGatt` 写 profile TX；`writeCharacteristic` 写任意已发现可写特征
+  （如 Immediate Alert `1802/2a06`）。read 与 write 共用平台队列，普通失败不结束连接；
   超时会结束连接，防止尚未结束的原生操作与新操作重叠。
 - disconnect 立即结束 connect/在途写与排队调用的等待。disconnect/dispose 的清理 Future 会等平台操作结束，
   再确认物理断开并释放租约；迟到 connect 会再次断开。平台清理失败保留租约，可显式重试 disconnect/dispose。

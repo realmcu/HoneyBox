@@ -9,9 +9,9 @@ import 'jw_device_pages.dart';
 import 'jw_feature_catalog.dart';
 import 'jw_history_pages.dart';
 import 'jw_measure_pages.dart';
-import 'jw_settings_pages.dart';
+import 'jw_settings_home_page.dart';
 
-/// T4.0 navigation shell. T4.1 injects one SDK-owned session into it.
+/// JW SDK Demo shell: 首页 / 数据 / 设置 / 功能；后三 Tab 需会话 `ready`。
 class JWWatchLabHome extends StatefulWidget {
   const JWWatchLabHome({super.key});
 
@@ -20,7 +20,11 @@ class JWWatchLabHome extends StatefulWidget {
 }
 
 class _JWWatchLabHomeState extends State<JWWatchLabHome> {
-  var _selectedIndex = 0;
+  static const _tabHome = 0;
+  static const _tabData = 1;
+  static const _tabSettings = 2;
+
+  var _selectedIndex = _tabHome;
   late final JWDemoController _controller;
 
   @override
@@ -35,7 +39,13 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
     super.dispose();
   }
 
+  bool get _sessionReady => _controller.state.isReady;
+
   void _showFeature(JWFeatureCatalogEntry entry) {
+    if (!_sessionReady) {
+      _showSessionLockedSnack();
+      return;
+    }
     if (entry.id == 'settings') {
       openJwSettingsHub(context, _controller);
       return;
@@ -78,6 +88,14 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
     );
   }
 
+  void _showSessionLockedSnack() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('请先在首页完成连接与登录，会话就绪后再操作。'),
+      ),
+    );
+  }
+
   void _openConnectionPage() {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -85,12 +103,14 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
           controller: _controller,
           onConnected: () {
             if (!mounted) return;
-            setState(() => _selectedIndex = 0);
+            setState(() => _selectedIndex = _tabHome);
           },
         ),
       ),
     );
   }
+
+  void _goHome() => setState(() => _selectedIndex = _tabHome);
 
   void _showDeveloperTools() {
     showModalBottomSheet<void>(
@@ -113,24 +133,45 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
     );
   }
 
+  Widget _buildTabBody() {
+    final ready = _sessionReady;
+    return switch (_selectedIndex) {
+      _tabHome => _HomePage(
+          controller: _controller,
+          onConnect: _openConnectionPage,
+        ),
+      _tabData => ready
+          ? _DataTabPage(controller: _controller)
+          : _SessionLockedPage(
+              title: '数据',
+              pageKey: 'jw.demo.page.data.locked',
+              onGoHome: _goHome,
+            ),
+      _tabSettings => ready
+          ? JwSettingsHomePage(controller: _controller)
+          : _SessionLockedPage(
+              title: '设置',
+              pageKey: 'jw.demo.page.settings.locked',
+              onGoHome: _goHome,
+            ),
+      _ => ready
+          ? _FeaturesPage(
+              state: _controller.state,
+              onFeatureTap: _showFeature,
+            )
+          : _SessionLockedPage(
+              title: '功能',
+              pageKey: 'jw.demo.page.features.locked',
+              onGoHome: _goHome,
+            ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
-        final page = switch (_selectedIndex) {
-          0 =>
-            _HomePage(controller: _controller, onConnect: _openConnectionPage),
-          1 => _FeaturesPage(
-              state: _controller.state,
-              onFeatureTap: _showFeature,
-            ),
-          2 => const _ScenariosPage(),
-          _ => _DevicePage(
-              state: _controller.state,
-              onDisconnect: _controller.disconnect,
-            ),
-        };
         return Scaffold(
           appBar: AppBar(
             title: const Text('JW SDK Demo'),
@@ -151,8 +192,10 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
               ),
               Expanded(
                 child: KeyedSubtree(
-                  key: ValueKey<int>(_selectedIndex),
-                  child: page,
+                  key: ValueKey<String>(
+                    '$_selectedIndex-${_sessionReady ? 'ready' : 'locked'}',
+                  ),
+                  child: _buildTabBody(),
                 ),
               ),
             ],
@@ -169,22 +212,22 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
                 label: '首页',
               ),
               NavigationDestination(
+                key: Key('jw.demo.tab.data'),
+                icon: Icon(Icons.insights_outlined),
+                selectedIcon: Icon(Icons.insights),
+                label: '数据',
+              ),
+              NavigationDestination(
+                key: Key('jw.demo.tab.settings'),
+                icon: Icon(Icons.tune_outlined),
+                selectedIcon: Icon(Icons.tune),
+                label: '设置',
+              ),
+              NavigationDestination(
                 key: Key('jw.demo.tab.features'),
                 icon: Icon(Icons.grid_view_outlined),
                 selectedIcon: Icon(Icons.grid_view),
                 label: '功能',
-              ),
-              NavigationDestination(
-                key: Key('jw.demo.tab.scenarios'),
-                icon: Icon(Icons.route_outlined),
-                selectedIcon: Icon(Icons.route),
-                label: '场景',
-              ),
-              NavigationDestination(
-                key: Key('jw.demo.tab.device'),
-                icon: Icon(Icons.watch_outlined),
-                selectedIcon: Icon(Icons.watch),
-                label: '设备',
               ),
             ],
           ),
@@ -206,12 +249,17 @@ class _SessionStatusStrip extends StatelessWidget {
     final connected = state.isConnected;
     final label = connected
         ? '${state.device?.name ?? 'JW 设备'} · '
-            '${state.isReady ? '已登录' : '已连接'}'
+            '${state.isReady ? '会话就绪' : '已连接 · 待登录'}'
         : state.phase == JWSessionPhase.connecting ||
                 state.phase == JWSessionPhase.initializing ||
                 state.phase == JWSessionPhase.loggingIn
             ? '正在连接 JW 设备…'
             : '尚未连接设备';
+    final trailing = state.isReady
+        ? '就绪'
+        : connected
+            ? '登录'
+            : '连接';
     return InkWell(
       key: const Key('jw.demo.session_status'),
       onTap: onTap,
@@ -222,7 +270,11 @@ class _SessionStatusStrip extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              connected ? Icons.bluetooth_connected : Icons.bluetooth_outlined,
+              state.isReady
+                  ? Icons.verified_outlined
+                  : connected
+                      ? Icons.bluetooth_connected
+                      : Icons.bluetooth_outlined,
               size: 18,
               color: colors.onSurfaceVariant,
             ),
@@ -230,8 +282,7 @@ class _SessionStatusStrip extends StatelessWidget {
             Expanded(
               child: Text(label, style: Theme.of(context).textTheme.titleSmall),
             ),
-            Text(connected ? '设备' : '连接',
-                style: Theme.of(context).textTheme.labelSmall),
+            Text(trailing, style: Theme.of(context).textTheme.labelSmall),
           ],
         ),
       ),
@@ -285,8 +336,8 @@ class _HomePageState extends State<_HomePage> {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'JW SDK Demo 引导你完成初始化、连接、登录与能力识别。'
-            '按下面步骤操作即可；点击每一步可查看公开 API 示例。',
+            '首页完成初始化、连接与登录后，数据 / 设置 / 功能 Tab 才会解锁。'
+            '按下面步骤操作；点击每一步可查看公开 API 示例。',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -382,6 +433,34 @@ final supportsHeartRate = functions?.supports(JWDeviceFunction.rate);''',
                 : JwDeviceFunctionPanel(
                     functions: controller.state.functionInfo!),
           ),
+          if (controller.state.isConnected) ...[
+            const SizedBox(height: 20),
+            Text('当前会话', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Card(
+              key: const Key('jw.demo.home.session_card'),
+              child: ListTile(
+                leading: Icon(
+                  controller.state.isReady
+                      ? Icons.watch_outlined
+                      : Icons.watch_off_outlined,
+                ),
+                title: Text(
+                  controller.state.device?.name ?? 'JW 设备',
+                ),
+                subtitle: Text(
+                  controller.state.isReady
+                      ? '数据 / 设置 / 功能已解锁。'
+                      : '完成登录后解锁数据、设置与功能 Tab。',
+                ),
+                trailing: TextButton(
+                  key: const Key('jw.demo.home.disconnect'),
+                  onPressed: () => unawaited(controller.disconnect()),
+                  child: const Text('断开'),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -694,80 +773,106 @@ class _FeatureAvailability extends StatelessWidget {
   }
 }
 
-class _ScenariosPage extends StatelessWidget {
-  const _ScenariosPage();
+class _SessionLockedPage extends StatelessWidget {
+  const _SessionLockedPage({
+    required this.title,
+    required this.pageKey,
+    required this.onGoHome,
+  });
+
+  final String title;
+  final String pageKey;
+  final VoidCallback onGoHome;
 
   @override
-  Widget build(BuildContext context) => ListView(
-        key: const Key('jw.demo.page.scenarios'),
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text('场景示例', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 8),
-          const Text('场景只在对应 SDK 流程已真实交付后开放执行。'),
-          const SizedBox(height: 16),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.link_outlined),
-              title: Text('首次接入设备'),
-              subtitle: Text('初始化 → 扫描 → 连接 → 登录/绑定 → 读取能力'),
-              trailing: Chip(label: Text('T4.1')),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListView(
+      key: Key(pageKey),
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(title, style: theme.textTheme.titleLarge),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Icon(Icons.lock_outline, size: 36),
+                const SizedBox(height: 12),
+                Text(
+                  '会话未就绪',
+                  style: theme.textTheme.titleMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '请先在首页完成初始化、连接与登录。'
+                  '就绪后本 Tab 才会开放写入与同步操作。',
+                  style: theme.textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  key: Key('$pageKey.go_home'),
+                  onPressed: onGoHome,
+                  child: const Text('回到首页'),
+                ),
+              ],
             ),
           ),
-        ],
-      );
+        ),
+      ],
+    );
+  }
 }
 
-class _DevicePage extends StatelessWidget {
-  const _DevicePage({required this.state, required this.onDisconnect});
+class _DataTabPage extends StatelessWidget {
+  const _DataTabPage({required this.controller});
 
-  final JWSessionState state;
-  final Future<void> Function() onDisconnect;
+  final JWDemoController controller;
 
   @override
-  Widget build(BuildContext context) => ListView(
-        key: const Key('jw.demo.page.device'),
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text('当前设备', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: Icon(state.isConnected
-                  ? Icons.watch_outlined
-                  : Icons.watch_off_outlined),
-              title: Text(state.device?.name ??
-                  (state.phase == JWSessionPhase.idle ? '尚未连接设备' : 'JW 设备')),
-              subtitle: Text(state.device == null
-                  ? '连接后显示设备信息、身份、固件、能力和会话状态。'
-                  : '序列号 ${state.device?.serialNumber ?? '未知'}\n'
-                      '固件 ${state.device?.firmware ?? '未知'} · '
-                      '硬件 ${state.device?.hardware ?? '未知'} · '
-                      '电量 ${state.device?.battery?.toString() ?? '未知'}%'),
-              isThreeLine: state.device != null,
-              trailing: state.phase != JWSessionPhase.idle &&
-                      state.phase != JWSessionPhase.disconnected
-                  ? TextButton(
-                      onPressed: onDisconnect,
-                      child: const Text('断开'),
-                    )
-                  : null,
-            ),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListView(
+      key: const Key('jw.demo.page.data'),
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text('数据', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 8),
+        Text(
+          '健康历史同步与本地查询。P0 复用现有同步流程页；'
+          '分类列表与图表见后续 P3/P4。',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 20),
-          Text('事件', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.inbox_outlined),
-              title: Text(state.error == null ? '暂无会话事件' : '最近会话错误'),
-              subtitle: Text(state.error == null
-                  ? '连接、登录和设备信息读取的结果会显示在首页引导中。'
-                  : describeJWDemoError(state.error!)),
-            ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: ListTile(
+            key: const Key('jw.demo.data.open_sync'),
+            leading: const Icon(Icons.sync_outlined),
+            title: const Text('健康数据同步'),
+            subtitle: const Text('同步计划、进度、入库结果与过程日志'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openJwHistoryHub(context, controller),
           ),
-        ],
-      );
+        ),
+        Card(
+          child: ListTile(
+            key: const Key('jw.demo.data.open_measure'),
+            leading: const Icon(Icons.favorite_outline),
+            title: const Text('点测与自动监测'),
+            subtitle: const Text('心率 / 血氧等实时测量（功能中心同入口）'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => openJwMeasureHub(context, controller),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _ConnectionPage extends StatefulWidget {

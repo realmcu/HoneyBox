@@ -77,7 +77,8 @@ double _spotSkinTemperature(int tempRaw, int statusByte) {
   return _round1(tempRaw / 10);
 }
 
-/// Spot heart rate / temperature on `cmd 0x05` key `0x0f` (V2 [HeartRateDataHandler]).
+/// Spot heart rate / temperature on `cmd 0x05` keys `0x0f` / `0x28`
+/// (V2 [HeartRateDataHandler]).
 SpotMeasurePayload? decodeSpotHeartRatePayload(
   Uint8List data, {
   required bool temperatureCapable,
@@ -94,7 +95,6 @@ SpotMeasurePayload? decodeSpotHeartRatePayload(
       heartRates: [JWHeartRate(time: time, heartRate: rate)],
     );
   }
-  if (!temperatureCapable) return null;
   final status = data[5] & 0xff;
   final tempRaw = ((data[6] << 8) | (data[7] & 0xff)) & 0xffff;
   final minutes = ((data[8] << 8) | (data[9] & 0xff)) & 0xffff;
@@ -107,9 +107,8 @@ SpotMeasurePayload? decodeSpotHeartRatePayload(
   final skin = _spotSkinTemperature(tempRaw, status);
   return SpotMeasurePayload(
     heartRates: [JWHeartRate(time: time, heartRate: rate)],
-    temperatures: tempRaw == 0
-        ? const []
-        : [
+    temperatures: temperatureCapable && tempRaw != 0
+        ? [
             JWTemperature(
               time: time,
               skinTemperature: skin,
@@ -117,7 +116,8 @@ SpotMeasurePayload? decodeSpotHeartRatePayload(
               worn: wear,
               compensated: adjust,
             ),
-          ],
+          ]
+        : const [],
   );
 }
 

@@ -2,14 +2,18 @@ import 'dart:async';
 
 import '../connection/jw_link.dart';
 import '../connection/jw_protocol.dart';
+import '../debug/jw_debug_log.dart';
+import '../debug/jw_sport_key_labels.dart';
 import 'jw_measure_codec.dart';
 import 'jw_measure_data_listener.dart';
 
 /// Routes unsolicited `cmd 0x05` spot-measure payloads to [JWMeasureDataListener]s.
 ///
-/// History sync owns batch keys (`0x13`, `0x2c`, `0x40`, …). Key `0x0f` is ignored
-/// during sync and handled here. Key `0x40` is delivered to listeners only while
-/// blood-sugar spot measure is active and health sync is not.
+/// Heart-rate spot uses keys `0x0f` and `0x28` (same layout as Android
+/// [HeartRateDataHandler]). Device end uses key `0x10` (empty value).
+/// History sync owns batch keys (`0x13`, `0x2c`, `0x40`, …). Key `0x40` is
+/// delivered to listeners only while blood-sugar spot measure is active and
+/// health sync is not.
 final class JWMeasureCoordinator {
   JWMeasureCoordinator({
     required JWLink link,
@@ -61,44 +65,77 @@ final class JWMeasureCoordinator {
   }
 
   void _onMessage(JWProtocolMessage message) {
-    if (message.command != 5 || _listeners.isEmpty) return;
+    if (message.command != 5) return;
+    if (_listeners.isEmpty) return;
     final syncing = _isHealthSyncActive();
-    if (message.key == 0x0f) {
-      final payload = decodeSpotHeartRatePayload(
-        message.value,
-        temperatureCapable: _temperatureCapable(),
+    if (message.key == 0x0f || message.key == 0x28) {
+      _handleHeartRateSpotPush(message);
+      return;
+    }
+    if (message.key == 0x10 && message.value.isEmpty) {
+      if (syncing) return;
+      JWWatchDebugLog.apiOut(
+        'JWMeasureDataListener.onHeartRateSpotMeasureEndedByDevice',
+        JWSportKeyLabels.annotate(5, 0x10),
       );
-      if (payload == null || payload.isEmpty) return;
-      if (payload.heartRates.isNotEmpty) {
-        _dispatch((l) => l.onHeartRateReceived(payload.heartRates));
-      }
-      if (payload.temperatures.isNotEmpty) {
-        _dispatch((l) => l.onTemperatureReceived(payload.temperatures));
-      }
+      _dispatch((l) => l.onHeartRateSpotMeasureEndedByDevice());
       return;
     }
     if (message.key == 0x13) {
       if (syncing) return;
       final bp = decodeSpotBloodPressure(message.value);
-      if (bp != null && bp.isNotEmpty) {
-        _dispatch((l) => l.onBloodPressureReceived(bp));
-      }
+      if (bp == null || bp.isEmpty) return;
+      JWWatchDebugLog.apiOut(
+        'JWMeasureDataListener.onBloodPressureReceived',
+        JWWatchDebugLog.formatBloodPressures(bp),
+      );
+      _dispatch((l) => l.onBloodPressureReceived(bp));
       return;
     }
     if (message.key == 0x2c) {
       if (syncing) return;
       final spo2 = decodeSpotBloodOxygen(message.value);
-      if (spo2 != null && spo2.isNotEmpty) {
-        _dispatch((l) => l.onBloodOxygenReceived(spo2));
-      }
+      if (spo2 == null || spo2.isEmpty) return;
+      JWWatchDebugLog.apiOut(
+        'JWMeasureDataListener.onBloodOxygenReceived',
+        JWWatchDebugLog.formatBloodOxygen(spo2),
+      );
+      _dispatch((l) => l.onBloodOxygenReceived(spo2));
       return;
     }
     if (message.key == 0x40) {
       if (syncing || !_bloodSugarSpotActive) return;
       final glu = decodeSpotBloodGlucose(message.value);
-      if (glu != null && glu.isNotEmpty) {
-        _dispatch((l) => l.onBloodGlucoseReceived(glu));
-      }
+      if (glu == null || glu.isEmpty) return;
+      JWWatchDebugLog.apiOut(
+        'JWMeasureDataListener.onBloodGlucoseReceived',
+        JWWatchDebugLog.formatBloodGlucose(glu),
+      );
+      _dispatch((l) => l.onBloodGlucoseReceived(glu));
+    }
+  }
+
+  void _handleHeartRateSpotPush(JWProtocolMessage message) {
+    final payload = decodeSpotHeartRatePayload(
+      message.value,
+      temperatureCapable: _temperatureCapable(),
+    );
+    if (payload == null) {
+      JWWatchDebugLog.apiOut(
+        'JWMeasureDataListener.onHeartRateReceived',
+        'skipped decode (bad length ${message.value.length}, key=0x${message.key.toRadixString(16)})',
+      );
+      return;
+    }
+    if (payload.isEmpty) {
+      return;
+    }
+    if (payload.heartRates.isNotEmpty) {
+      JWWatchDebugLog.apiOut(
+        'JWMeasureDataListener.onHeartRateReceived',
+        JWWatchDebugLog.formatHeartRates(payload.heartRates),
+      );
+      _dispatch((l) => l.onHeartRateReceived(payload.heartRates));
     }
   }
 

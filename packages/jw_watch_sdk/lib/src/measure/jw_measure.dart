@@ -1,3 +1,4 @@
+import '../debug/jw_debug_log.dart';
 import '../connection/jw_link.dart';
 import '../connection/jw_protocol.dart';
 import '../model/jw_device_function_info.dart';
@@ -126,43 +127,43 @@ final class JWMeasure {
         JWMeasureProtocol.encodeContinuousMonitoringSubCommand(0x07, enabled)));
   }
 
-  Future<void> setBodyFatMonitoring(bool enabled) async {
-    _requireReady();
-    await _link.send(JWMeasureProtocol.setBodyFatMonitoring(
-        JWMeasureProtocol.encodeContinuousMonitoringSubCommand(0x05, enabled)));
-  }
-
-  Future<void> startHeartRateSpotMeasure() async {
+  Future<void> startHeartRateMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.startHeartRateMeasure');
     _requireSpotMeasure();
     _requireFunction(JWDeviceFunction.rate);
     await _link.send(JWMeasureProtocol.setHeartRateSpotMeasure(true));
   }
 
-  Future<void> stopHeartRateSpotMeasure() async {
+  Future<void> stopHeartRateMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.stopHeartRateMeasure');
     _requireReady();
     _requireFunction(JWDeviceFunction.rate);
     await _link.send(JWMeasureProtocol.setHeartRateSpotMeasure(false));
   }
 
   Future<void> startBloodPressureSpotMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.startBloodPressureSpotMeasure');
     _requireSpotMeasure();
     _requireFunction(JWDeviceFunction.bpDetection);
     await _link.send(JWMeasureProtocol.setBloodPressureSpotMeasure(true));
   }
 
   Future<void> stopBloodPressureSpotMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.stopBloodPressureSpotMeasure');
     _requireReady();
     _requireFunction(JWDeviceFunction.bpDetection);
     await _link.send(JWMeasureProtocol.setBloodPressureSpotMeasure(false));
   }
 
   Future<void> startSpO2SpotMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.startSpO2SpotMeasure');
     _requireSpotMeasure();
     _requireFunction(JWDeviceFunction.spo2Measure);
     await _link.send(JWMeasureProtocol.setSpO2SpotMeasure(true));
   }
 
   Future<void> stopSpO2SpotMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.stopSpO2SpotMeasure');
     _requireReady();
     _requireFunction(JWDeviceFunction.spo2Measure);
     await _link.send(JWMeasureProtocol.setSpO2SpotMeasure(false));
@@ -175,12 +176,14 @@ final class JWMeasure {
   }
 
   Future<void> startTemperatureSpotMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.startTemperatureSpotMeasure');
     _requireSpotMeasure();
     _requireFunction(JWDeviceFunction.temperature);
     await _link.send(JWMeasureProtocol.setTemperatureSpotMeasure(true));
   }
 
   Future<void> stopTemperatureSpotMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.stopTemperatureSpotMeasure');
     _requireReady();
     _requireFunction(JWDeviceFunction.temperature);
     await _link.send(JWMeasureProtocol.setTemperatureSpotMeasure(false));
@@ -193,6 +196,7 @@ final class JWMeasure {
   }
 
   Future<void> startBloodGlucoseSpotMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.startBloodGlucoseSpotMeasure');
     _requireSpotMeasure();
     _requireFunction(JWDeviceFunction.bloodSugar);
     await _link.send(JWMeasureProtocol.setBloodSugarSpotMeasure(true));
@@ -200,6 +204,7 @@ final class JWMeasure {
   }
 
   Future<void> stopBloodGlucoseSpotMeasure() async {
+    JWWatchDebugLog.apiIn('JWMeasure.stopBloodGlucoseSpotMeasure');
     _requireReady();
     _requireFunction(JWDeviceFunction.bloodSugar);
     await _link.send(JWMeasureProtocol.setBloodSugarSpotMeasure(false));

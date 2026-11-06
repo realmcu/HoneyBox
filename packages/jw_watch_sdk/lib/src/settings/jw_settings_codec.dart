@@ -49,26 +49,48 @@ abstract final class JWSettingsCodec {
     final time = value.schedule;
     _time(time.startHour, time.startMinute, 'start');
     _time(time.endHour, time.endMinute, 'end');
-    return Uint8List.fromList([
-      (value.enabled ? 0x40 : 0) |
-          (time.startHour << 1) |
-          (time.startMinute >> 5),
-      (time.startMinute << 3) | (time.endHour >> 2),
-      (time.endHour << 6) | time.endMinute,
-    ]);
+    return _encodeEnableTimeWindow(value.enabled, time);
   }
 
   static JWDoNotDisturb decodeDoNotDisturb(Uint8List value) {
-    _length(value, 3, 'DND');
+    final decoded = _decodeEnableTimeWindow(value, 'DND');
+    return JWDoNotDisturb(enabled: decoded.$1, schedule: decoded.$2);
+  }
+
+  /// Same 3-byte enable/time window as Android `ApplicationLayerHeatStressReminderPacket`.
+  static Uint8List encodeHeatStressReminder(JWHeatStressReminder value) {
+    final time = value.schedule;
+    _time(time.startHour, time.startMinute, 'heat stress start');
+    _time(time.endHour, time.endMinute, 'heat stress end');
+    return _encodeEnableTimeWindow(value.enabled, time);
+  }
+
+  static JWHeatStressReminder decodeHeatStressReminder(Uint8List value) {
+    final decoded = _decodeEnableTimeWindow(value, 'heat stress');
+    return JWHeatStressReminder(enabled: decoded.$1, schedule: decoded.$2);
+  }
+
+  static Uint8List _encodeEnableTimeWindow(bool enabled, JWTimeRange time) =>
+      Uint8List.fromList([
+        (enabled ? 0x40 : 0) |
+            (time.startHour << 1) |
+            (time.startMinute >> 5),
+        (time.startMinute << 3) | (time.endHour >> 2),
+        (time.endHour << 6) | time.endMinute,
+      ]);
+
+  static (bool, JWTimeRange) _decodeEnableTimeWindow(
+      Uint8List value, String name) {
+    _length(value, 3, name);
     final startHour = (value[0] >> 1) & 0x1f;
     final startMinute = ((value[0] & 1) << 5) | ((value[1] >> 3) & 0x1f);
     final endHour = ((value[1] & 7) << 2) | ((value[2] >> 6) & 3);
     final endMinute = value[2] & 0x3f;
-    _time(startHour, startMinute, 'DND start');
-    _time(endHour, endMinute, 'DND end');
-    return JWDoNotDisturb(
-      enabled: (value[0] & 0x40) != 0,
-      schedule: JWTimeRange(
+    _time(startHour, startMinute, '$name start');
+    _time(endHour, endMinute, '$name end');
+    return (
+      (value[0] & 0x40) != 0,
+      JWTimeRange(
         startHour: startHour,
         startMinute: startMinute,
         endHour: endHour,
@@ -280,6 +302,45 @@ abstract final class JWSettingsCodec {
     }
     final alarms = byId.values.toList()..sort((a, b) => a.id.compareTo(b.id));
     return List.unmodifiable(alarms);
+  }
+
+  /// Encode notify switches as Android `ApplicationLayerNotifyPacket.getPacket`.
+  static Uint8List encodeNotifySettings(JWNotifySettings value) {
+    final data = Uint8List(4);
+    for (final channel in JWNotifyChannel.values) {
+      if (!value[channel]) continue;
+      final bit = channel.maskBit;
+      data[3 - (bit >> 3)] |= 1 << (bit & 7);
+    }
+    return data;
+  }
+
+  static JWNotifySettings decodeNotifySettings(Uint8List value) {
+    _length(value, 4, 'notify settings');
+    return JWNotifySettings({
+      for (final channel in JWNotifyChannel.values)
+        channel: (value[3 - (channel.maskBit >> 3)] &
+                (1 << (channel.maskBit & 7))) !=
+            0,
+    });
+  }
+
+  /// Android `NotifyCmdOtherNotifyInfoSetting`: `[type, ...utf8(text)]`.
+  static Uint8List encodeNotifyMessage(JWNotifyChannel channel, String text) {
+    final type = channel.messageType;
+    if (type == null) {
+      throw ArgumentError.value(
+          channel, 'channel', 'use sendIncomingCall for call alerts');
+    }
+    final bytes = utf8.encode(text);
+    final len = bytes.length > 200 ? 200 : bytes.length;
+    return Uint8List.fromList([type, ...bytes.sublist(0, len)]);
+  }
+
+  static Uint8List encodeIncomingCall(String display) {
+    final bytes = utf8.encode(display);
+    final len = bytes.length > 200 ? 200 : bytes.length;
+    return Uint8List.fromList(bytes.sublist(0, len));
   }
 
   static void _length(Uint8List value, int length, String name) {

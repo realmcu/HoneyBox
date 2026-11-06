@@ -84,6 +84,17 @@ void main() {
     );
     expect(JWSettingsCodec.decodeDoNotDisturb(JWSettingsCodec.encodeDoNotDisturb(dnd)), dnd);
 
+    const heatStress = JWHeatStressReminder(
+      enabled: true,
+      schedule: JWTimeRange(
+          startHour: 8, startMinute: 0, endHour: 22, endMinute: 0),
+    );
+    expect(
+      JWSettingsCodec.decodeHeatStressReminder(
+          JWSettingsCodec.encodeHeatStressReminder(heatStress)),
+      heatStress,
+    );
+
     const sedentary = JWSedentaryReminder(
       enabled: true,
       thresholdMinutes: 60,
@@ -156,5 +167,43 @@ void main() {
       Uint8List.fromList([...labeledWrite, 1, 1]),
     );
     expect(labeledRead.alarm, labeled);
+  });
+
+  test('notify settings mask matches Android ApplicationLayerNotifyPacket', () {
+    final settings = JWNotifySettings({
+      JWNotifyChannel.call: true,
+      JWNotifyChannel.wechat: true,
+      JWNotifyChannel.other: true,
+      JWNotifyChannel.tim: true,
+    });
+    final encoded = JWSettingsCodec.encodeNotifySettings(settings);
+    expect(encoded[3] & 0x01, 0x01); // call
+    expect(encoded[3] & 0x04, 0x04); // wechat
+    expect(encoded[1] & 0x04, 0x04); // tim
+    expect(encoded[0] & 0x80, 0x80); // other
+    expect(JWSettingsCodec.decodeNotifySettings(encoded), settings);
+
+    expect(
+      JWSettingsCodec.encodeNotifyMessage(JWNotifyChannel.qq, 'hi'),
+      Uint8List.fromList([0x01, 0x68, 0x69]),
+    );
+    expect(
+      () => JWSettingsCodec.encodeNotifyMessage(JWNotifyChannel.call, 'x'),
+      throwsArgumentError,
+    );
+    expect(
+      encodeJWRequest(JWProtocolCommands.readNotifySettings()),
+      Uint8List.fromList([2, 0, 0x28, 0, 0]),
+    );
+    expect(
+      encodeJWRequest(JWProtocolCommands.setNotifyChannel(0x05)),
+      Uint8List.fromList([2, 0, 0x25, 0, 1, 0x05]),
+    );
+    expect(
+      encodeJWRequest(
+        JWProtocolCommands.sendNotifyMessage(Uint8List.fromList([0x02])),
+      ),
+      Uint8List.fromList([4, 0, 0x04, 0, 1, 0x02]),
+    );
   });
 }

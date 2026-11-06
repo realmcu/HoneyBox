@@ -47,7 +47,7 @@ await session.setUnitSystemVerified(JWUnitSystem.metric);''',
     icon: Icons.monitor_heart_outlined,
     features: [JWFeature.measurements, JWFeature.advancedHealth],
     example: '''session.measure.addMeasureDataListener(listener);
-await session.measure.startHeartRateSpotMeasure();
+await session.measure.startHeartRateMeasure();
 // 同步中 isHealthSyncActive == true 时点测会被拒绝''',
   ),
   JWFeatureCatalogEntry(

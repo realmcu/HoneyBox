@@ -60,6 +60,49 @@ void main() {
     expect(payload.heartRates.single.time.second, 45);
   });
 
+  test('12-byte spot heart rate decodes when temperatureCapable is false', () {
+    final data = Uint8List.fromList([
+      0x6a,
+      0x85,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0x02,
+      0xee,
+      45,
+      88,
+    ]);
+    final payload =
+        decodeSpotHeartRatePayload(data, temperatureCapable: false);
+    expect(payload, isNotNull);
+    expect(payload!.heartRates.single.heartRate, 88);
+    expect(payload.temperatures, isEmpty);
+  });
+
+  test('12-byte HR spot payload from key 0x28 matches device sample', () {
+    final data = Uint8List.fromList([
+      0x35,
+      0x66,
+      0,
+      1,
+      0,
+      0x03,
+      0x01,
+      0x36,
+      0x02,
+      0xaa,
+      0x12,
+      0x53,
+    ]);
+    final payload =
+        decodeSpotHeartRatePayload(data, temperatureCapable: false);
+    expect(payload, isNotNull);
+    expect(payload!.heartRates.single.heartRate, 0x53);
+  });
+
   test('spot blood glucose uses tenths in JWBloodGlucose.value', () {
     final data = Uint8List.fromList([
       0x6a,

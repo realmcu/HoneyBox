@@ -245,8 +245,42 @@ class JWDemoController extends ChangeNotifier {
   Future<JWVerifiedSetting<JWUnitSystem>> setUnitSystem(JWUnitSystem value) =>
       _runSessionValue((session) => session.setUnitSystemVerified(value));
 
+  Future<JWHeatStressReminder> readHeatStressReminder() =>
+      _runSessionValue((session) => session.readHeatStressReminder());
+
+  Future<JWVerifiedSetting<JWHeatStressReminder>> setHeatStressReminder(
+          JWHeatStressReminder value) =>
+      _runSessionValue(
+          (session) => session.setHeatStressReminderVerified(value));
+
   Future<JWSettingSubmission> syncTime() =>
       _runSessionValue((session) => session.setTime(DateTime.now()));
+
+  Future<JWSettingSubmission> findDevice(bool enabled) =>
+      _runSessionValue((session) => session.findDevice(enabled));
+
+  Future<JWNotifySettings> readNotifySettings() =>
+      _runSessionValue((session) => session.readNotifySettings());
+
+  Future<JWVerifiedSetting<JWNotifySettings>> setNotifySettings(
+          JWNotifySettings value) =>
+      _runSessionValue((session) => session.setNotifySettingsVerified(value));
+
+  Future<JWVerifiedSetting<JWNotifySettings>> setNotifyChannel(
+          JWNotifyChannel channel, bool enabled) =>
+      _runSessionValue(
+          (session) => session.setNotifyChannelVerified(channel, enabled));
+
+  Future<JWSettingSubmission> sendNotifyMessage(
+    JWNotifyChannel channel, {
+    String text = '',
+  }) =>
+      _runSessionValue(
+          (session) => session.sendNotifyMessage(channel, text: text));
+
+  Future<JWSettingSubmission> sendIncomingCall({String display = ''}) =>
+      _runSessionValue(
+          (session) => session.sendIncomingCall(display: display));
 
   Future<Uint8List> resetHistorySyncMarkers() =>
       _runSessionValue((session) => session.resetHistorySyncMarkers());
@@ -287,14 +321,11 @@ class JWDemoController extends ChangeNotifier {
   Future<void> setPressureAutoMeasure(bool enabled) =>
       _runSession((s) => s.measure.setPressureAutoMeasure(enabled));
 
-  Future<void> setBodyFatMonitoring(bool enabled) =>
-      _runSession((s) => s.measure.setBodyFatMonitoring(enabled));
+  Future<void> startHeartRateMeasure() =>
+      _runSession((s) => s.measure.startHeartRateMeasure());
 
-  Future<void> startHeartRateSpotMeasure() =>
-      _runSession((s) => s.measure.startHeartRateSpotMeasure());
-
-  Future<void> stopHeartRateSpotMeasure() =>
-      _runSession((s) => s.measure.stopHeartRateSpotMeasure());
+  Future<void> stopHeartRateMeasure() =>
+      _runSession((s) => s.measure.stopHeartRateMeasure());
 
   Future<void> startBloodPressureSpotMeasure() =>
       _runSession((s) => s.measure.startBloodPressureSpotMeasure());

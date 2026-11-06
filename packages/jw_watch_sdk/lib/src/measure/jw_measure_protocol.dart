@@ -47,10 +47,6 @@ abstract final class JWMeasureProtocol {
       JWProtocolRequest(
           command: _sport, key: 0x4f, responseKey: null, value: value);
 
-  static JWProtocolRequest setBodyFatMonitoring(Uint8List value) =>
-      JWProtocolRequest(
-          command: _sport, key: 0x52, responseKey: null, value: value);
-
   static JWProtocolRequest setHeartRateSpotMeasure(bool enable) =>
       JWProtocolRequest(
         command: _sport,

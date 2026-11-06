@@ -292,6 +292,48 @@ void main() {
     expect(c.state, WatchTransportState.connected);
   });
 
+  test('writeCharacteristic targets IAS Alert Level without response by default',
+      () async {
+    final alert = FakeCharacteristic('2a06')
+      ..canWrite = false
+      ..canWriteWithoutResponse = true
+      ..canRead = false
+      ..canNotify = false;
+    final d = backend.device('a');
+    d.services = [
+      WatchBleGattService('1800', [d.tx, d.rx]),
+      WatchBleGattService('1802', [alert]),
+    ];
+    final c = create();
+    addTearDown(c.dispose);
+    await c.connect();
+    await c.writeCharacteristic(
+      service: '1802',
+      characteristic: '2a06',
+      bytes: bytes(2),
+    );
+    await c.writeCharacteristic(
+      service: '1802',
+      characteristic: '2a06',
+      bytes: bytes(0),
+    );
+    expect(alert.writes, [
+      [2],
+      [0]
+    ]);
+    expect(alert.modes, [true, true]);
+    expect(d.tx.writes, isEmpty);
+    await expectLater(
+      c.writeCharacteristic(
+        service: '1803',
+        characteristic: '2a06',
+        bytes: bytes(2),
+      ),
+      fails(WatchTransportErrorCode.profileUnavailable),
+    );
+    expect(c.state, WatchTransportState.connected);
+  });
+
   test(
       'failed physical disconnect retains lease and explicit cleanup can retry',
       () async {

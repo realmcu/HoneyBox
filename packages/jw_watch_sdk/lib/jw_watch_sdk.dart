@@ -2,6 +2,7 @@
 library;
 
 export 'src/capability/jw_feature.dart';
+export 'src/debug/jw_debug_log.dart';
 export 'src/connection/jw_scan_device.dart';
 export 'src/connection/jw_session.dart';
 export 'src/connection/jw_watch.dart';

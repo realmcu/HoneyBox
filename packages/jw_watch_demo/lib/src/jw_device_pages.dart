@@ -103,7 +103,7 @@ class _JWDeviceHubPageState extends State<JWDeviceHubPage> {
                   padding: const EdgeInsets.all(16),
                   children: [
                     Text(
-                      '点标题「· API」可查看公开调用示例。',
+                      '点标题可查看公开 API 调用示例。',
                       style: theme.textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 16),
@@ -340,10 +340,8 @@ class _DeviceApiTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = theme.textTheme.titleMedium?.copyWith(
-      color: theme.colorScheme.primary,
-    );
-    return InkWell(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => unawaited(
         JwDemoContentSheet.showApiExample(
           context,
@@ -353,7 +351,7 @@ class _DeviceApiTitle extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Text('$title · API', style: style),
+        child: Text(title, style: theme.textTheme.titleMedium),
       ),
     );
   }

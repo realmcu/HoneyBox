@@ -498,6 +498,27 @@ final class JWWatchSession {
     return const JWSettingSubmission('turn wrist to wake');
   }
 
+  /// Starts or stops Immediate Alert find-device (GATT `1802` / `2a06`).
+  ///
+  /// Writes alert level `2` when [enabled] is true and `0` when false. This is
+  /// the same path as Android `WristbandManager.enableImmediateAlert`, not a
+  /// private protocol FAC vibrate command. Requires [JWDeviceFunction.findDevice]
+  /// and a [WatchBleConnection] with a writable IAS endpoint.
+  Future<JWSettingSubmission> findDevice(bool enabled) async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.findDevice, 'find device');
+    if (connection is! WatchBleConnection) {
+      throw StateError('Find device requires a BLE connection');
+    }
+    final ble = connection as WatchBleConnection;
+    await ble.writeCharacteristic(
+      service: '1802',
+      characteristic: '2a06',
+      bytes: Uint8List.fromList([enabled ? 2 : 0]),
+    );
+    return const JWSettingSubmission('find device');
+  }
+
   Future<JWDoNotDisturb> readDoNotDisturb() async {
     _requireReadyForSettings();
     return JWSettingsCodec.decodeDoNotDisturb(
@@ -514,11 +535,86 @@ final class JWWatchSession {
     return JWVerifiedSetting(previous: previous, value: actual);
   }
 
+  Future<JWHeatStressReminder> readHeatStressReminder() async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.heatStress, 'heat stress reminder');
+    return JWSettingsCodec.decodeHeatStressReminder(
+        (await _link.request(JWProtocolCommands.readHeatStressReminder()))
+            .value);
+  }
+
+  Future<JWVerifiedSetting<JWHeatStressReminder>> setHeatStressReminderVerified(
+      JWHeatStressReminder value) async {
+    _requireDeviceFunction(JWDeviceFunction.heatStress, 'heat stress reminder');
+    final previous = await readHeatStressReminder();
+    await _link.send(JWProtocolCommands.setHeatStressReminder(
+        JWSettingsCodec.encodeHeatStressReminder(value)));
+    final actual = await readHeatStressReminder();
+    _verifySetting('heat stress reminder', value, actual);
+    return JWVerifiedSetting(previous: previous, value: actual);
+  }
+
   Future<JWSedentaryReminder> readSedentaryReminder() async {
     _requireReadyForSettings();
     return JWSettingsCodec.decodeSedentaryReminder(
         (await _link.request(JWProtocolCommands.readSedentaryReminder()))
             .value);
+  }
+
+  /// Reads social / call notify switches (`0x28` → `0x29`).
+  Future<JWNotifySettings> readNotifySettings() async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.notifyReminder, 'notify reminder');
+    return JWSettingsCodec.decodeNotifySettings(
+        (await _link.request(JWProtocolCommands.readNotifySettings())).value);
+  }
+
+  /// Writes the full notify-switch table (`0x2D`) and reads it back.
+  Future<JWVerifiedSetting<JWNotifySettings>> setNotifySettingsVerified(
+      JWNotifySettings value) async {
+    _requireDeviceFunction(JWDeviceFunction.notifyReminder, 'notify reminder');
+    final previous = await readNotifySettings();
+    await _link.send(JWProtocolCommands.setNotifySettings(
+        JWSettingsCodec.encodeNotifySettings(value)));
+    final actual = await readNotifySettings();
+    _verifySetting('notify settings', value, actual);
+    return JWVerifiedSetting(previous: previous, value: actual);
+  }
+
+  /// Toggles one channel via single-byte `0x25`, then reads the full table.
+  Future<JWVerifiedSetting<JWNotifySettings>> setNotifyChannelVerified(
+    JWNotifyChannel channel,
+    bool enabled,
+  ) async {
+    _requireDeviceFunction(JWDeviceFunction.notifyReminder, 'notify reminder');
+    final previous = await readNotifySettings();
+    await _link.send(JWProtocolCommands.setNotifyChannel(
+        enabled ? channel.enableCode : channel.disableCode));
+    final actual = await readNotifySettings();
+    final expected = previous.withChannel(channel, enabled);
+    _verifySetting('notify channel', expected, actual);
+    return JWVerifiedSetting(previous: previous, value: actual);
+  }
+
+  /// Pushes an app message alert to the watch (`cmd 0x04` / `key 0x04`).
+  Future<JWSettingSubmission> sendNotifyMessage(
+    JWNotifyChannel channel, {
+    String text = '',
+  }) async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.notifyReminder, 'notify reminder');
+    await _link.send(JWProtocolCommands.sendNotifyMessage(
+        JWSettingsCodec.encodeNotifyMessage(channel, text)));
+    return const JWSettingSubmission('notify message');
+  }
+
+  /// Pushes an incoming-call alert (`cmd 0x04` / `key 0x01`).
+  Future<JWSettingSubmission> sendIncomingCall({String display = ''}) async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.notifyReminder, 'notify reminder');
+    await _link.send(JWProtocolCommands.sendIncomingCall(
+        JWSettingsCodec.encodeIncomingCall(display)));
+    return const JWSettingSubmission('incoming call');
   }
 
   Future<JWVerifiedSetting<JWSedentaryReminder>> setSedentaryReminderVerified(
@@ -728,6 +824,13 @@ final class JWWatchSession {
     _requireConnected();
     if (_state.phase != JWSessionPhase.ready) {
       throw StateError('JW settings require an authenticated session');
+    }
+  }
+
+  void _requireDeviceFunction(JWDeviceFunction function, String name) {
+    final info = _state.functionInfo;
+    if (info == null || !info.supports(function)) {
+      throw StateError('JW device does not support $name');
     }
   }
 

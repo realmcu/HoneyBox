@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -7,8 +8,23 @@ import 'mtu.dart';
 
 /// Permissions are requested by the host. The adapter only reports radio state/errors.
 final class FlutterBlueWatchBackend implements WatchBleBackend {
-  FlutterBlueWatchBackend({this.license = License.nonprofit});
+  FlutterBlueWatchBackend({this.license = License.nonprofit}) {
+    _silencePluginLogsOnce();
+  }
+
   static final shared = FlutterBlueWatchBackend();
+  static var _pluginLogsSilenced = false;
+
+  /// flutter_blue_plus defaults to verbose Android logcat (`[FBP] onCharacteristic…`).
+  static void _silencePluginLogsOnce() {
+    if (_pluginLogsSilenced) return;
+    _pluginLogsSilenced = true;
+    // Unit tests / unsupported hosts have no platform channel.
+    unawaited(
+      FlutterBluePlus.setLogLevel(LogLevel.none).catchError((_) => null),
+    );
+  }
+
   final License license;
   @override
   Future<void> ensureReady() async {

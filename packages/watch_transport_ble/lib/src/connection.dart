@@ -303,6 +303,59 @@ final class WatchBleConnection implements WatchTransportConnection {
     }, fatal: false).then((_) => value);
   }
 
+  /// Writes an arbitrary discovered GATT characteristic (e.g. IAS Alert Level).
+  ///
+  /// Distinct from [writeGatt], which always targets the profile TX endpoint.
+  /// When [withoutResponse] is omitted, prefers write-without-response when the
+  /// characteristic supports it (Bluetooth Immediate Alert convention).
+  Future<void> writeCharacteristic({
+    required String service,
+    required String characteristic,
+    required Uint8List bytes,
+    bool? withoutResponse,
+  }) {
+    if (_closed) return Future.error(_closedError);
+    if (state != WatchTransportState.connected) {
+      return Future.error(const WatchTransportException(
+          WatchTransportErrorCode.notConnected, 'BLE is not connected'));
+    }
+    final matches = [
+      for (final s in _services)
+        if (normalizeBleUuid(s.uuid) == normalizeBleUuid(service))
+          ...s.characteristics.where((c) =>
+              normalizeBleUuid(c.uuid) == normalizeBleUuid(characteristic) &&
+              (c.canWrite || c.canWriteWithoutResponse))
+    ];
+    if (matches.length != 1) {
+      return Future.error(
+          _profileError('Expected one writable GATT characteristic'));
+    }
+    final target = matches.single;
+    final bool mode;
+    if (withoutResponse != null) {
+      mode = withoutResponse;
+    } else if (target.canWriteWithoutResponse) {
+      mode = true;
+    } else if (target.canWrite) {
+      mode = false;
+    } else {
+      return Future.error(_profileError('Unsupported write mode'));
+    }
+    if (mode ? !target.canWriteWithoutResponse : !target.canWrite) {
+      return Future.error(_profileError('Unsupported write mode'));
+    }
+    final copy = Uint8List.fromList(bytes);
+    return _writes.enqueue(() async {
+      _check();
+      try {
+        await _operation(target.write(copy, withoutResponse: mode));
+        _check();
+      } catch (error) {
+        throw _error(error, BleConnectionStage.write);
+      }
+    }, fatal: false);
+  }
+
   void _receive(List<int> data) {
     if (_closed || data.isEmpty) return;
     if (_bufferSize + data.length > _config.maxBufferedBytes) {

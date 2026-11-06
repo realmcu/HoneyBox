@@ -161,6 +161,25 @@ final class JWDoNotDisturb {
   int get hashCode => Object.hash(enabled, schedule);
 }
 
+/// Heat-stress / 高温健康提醒 active window (`0x02/0x86`–`0x88`).
+///
+/// When [enabled] is true, heat-stress alerts fire only inside [schedule]
+/// (may cross midnight). When false, firmware uses its all-day default.
+final class JWHeatStressReminder {
+  const JWHeatStressReminder({required this.enabled, required this.schedule});
+  final bool enabled;
+  final JWTimeRange schedule;
+
+  @override
+  bool operator ==(Object other) =>
+      other is JWHeatStressReminder &&
+      other.enabled == enabled &&
+      other.schedule == schedule;
+
+  @override
+  int get hashCode => Object.hash(enabled, schedule);
+}
+
 /// Sedentary reminder representation used by Android V2's eight-byte packet.
 final class JWSedentaryReminder {
   const JWSedentaryReminder({
@@ -244,4 +263,85 @@ final class JWAlarm2ReadChunk {
   final JWAlarm? alarm;
   final int curIndex;
   final int count;
+}
+
+/// Social / call notification channels (Android `JWNotifyType`).
+///
+/// [maskBit] indexes the 32-bit notify switch mask (`0x28`/`0x29`/`0x2D`).
+/// [messageType] is the Android notify payload type for `cmd 0x04` / `key 0x04`
+/// (null for [call], which uses incoming-call key `0x01`).
+enum JWNotifyChannel {
+  call(maskBit: 0, messageType: null, enableCode: 0x01, disableCode: 0x02),
+  qq(maskBit: 1, messageType: 0x01, enableCode: 0x03, disableCode: 0x04),
+  wechat(maskBit: 2, messageType: 0x02, enableCode: 0x05, disableCode: 0x06),
+  sms(maskBit: 3, messageType: 0x04, enableCode: 0x07, disableCode: 0x08),
+  line(maskBit: 4, messageType: 0x08, enableCode: 0x09, disableCode: 0x0a),
+  twitter(maskBit: 5, messageType: 0x09, enableCode: 0x0b, disableCode: 0x0c),
+  facebook(maskBit: 6, messageType: 0x0a, enableCode: 0x0e, disableCode: 0x0f),
+  messenger(maskBit: 7, messageType: 0x0b, enableCode: 0x10, disableCode: 0x11),
+  whatsapp(maskBit: 8, messageType: 0x0c, enableCode: 0x12, disableCode: 0x13),
+  linkedin(maskBit: 9, messageType: 0x0d, enableCode: 0x14, disableCode: 0x15),
+  instagram(
+      maskBit: 10, messageType: 0x0e, enableCode: 0x16, disableCode: 0x17),
+  skype(maskBit: 11, messageType: 0x0f, enableCode: 0x18, disableCode: 0x19),
+  viber(maskBit: 12, messageType: 0x10, enableCode: 0x1a, disableCode: 0x1b),
+  kakaotalk(
+      maskBit: 13, messageType: 0x11, enableCode: 0x1c, disableCode: 0x1d),
+  vkontakte(
+      maskBit: 14, messageType: 0x12, enableCode: 0x1e, disableCode: 0x1f),
+  tim(maskBit: 18, messageType: 0x03, enableCode: 0x26, disableCode: 0x27),
+  gmail(maskBit: 19, messageType: 0x05, enableCode: 0x28, disableCode: 0x29),
+  dingtalk(
+      maskBit: 20, messageType: 0x06, enableCode: 0x2a, disableCode: 0x2b),
+  workWechat(
+      maskBit: 21, messageType: 0x07, enableCode: 0x2c, disableCode: 0x2d),
+  other(maskBit: 31, messageType: 0x00, enableCode: 0x36, disableCode: 0x37);
+
+  const JWNotifyChannel({
+    required this.maskBit,
+    required this.messageType,
+    required this.enableCode,
+    required this.disableCode,
+  });
+
+  final int maskBit;
+  final int? messageType;
+  final int enableCode;
+  final int disableCode;
+}
+
+/// Full notify-switch table returned by `0x29` / written by `0x2D`.
+final class JWNotifySettings {
+  JWNotifySettings(Map<JWNotifyChannel, bool> enabled)
+      : enabled = Map<JWNotifyChannel, bool>.unmodifiable({
+          for (final channel in JWNotifyChannel.values)
+            channel: enabled[channel] ?? false,
+        });
+
+  factory JWNotifySettings.all(bool value) => JWNotifySettings({
+        for (final channel in JWNotifyChannel.values) channel: value,
+      });
+
+  final Map<JWNotifyChannel, bool> enabled;
+
+  bool operator [](JWNotifyChannel channel) => enabled[channel]!;
+
+  JWNotifySettings withChannel(JWNotifyChannel channel, bool value) =>
+      JWNotifySettings({...enabled, channel: value});
+
+  JWNotifySettings withAll(bool value) => JWNotifySettings.all(value);
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! JWNotifySettings) return false;
+    for (final channel in JWNotifyChannel.values) {
+      if (enabled[channel] != other.enabled[channel]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll([
+        for (final channel in JWNotifyChannel.values) enabled[channel],
+      ]);
 }

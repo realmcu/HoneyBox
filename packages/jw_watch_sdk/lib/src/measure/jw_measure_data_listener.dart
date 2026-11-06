@@ -13,4 +13,8 @@ abstract interface class JWMeasureDataListener {
   void onTemperatureReceived(List<JWTemperature> batch);
 
   void onBloodGlucoseReceived(List<JWBloodGlucose> batch);
+
+  /// Watch ended spot HR (`cmd 0x05` key `0x10`, empty value). Android
+  /// `onDeviceCancelSingleHrpRead`.
+  void onHeartRateSpotMeasureEndedByDevice();
 }

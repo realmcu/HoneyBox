@@ -5,19 +5,10 @@ import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
 import 'jw_demo_content_sheet.dart';
 import 'jw_demo_controller.dart';
+import 'jw_settings_api_sheet.dart';
+import 'jw_settings_basic_pages.dart';
 
-/// Opens the settings hub as a full-screen route (not a bottom sheet).
-void openJwSettingsHub(BuildContext context, JWDemoController controller) {
-  unawaited(
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => JWSettingsHubPage(controller: controller),
-      ),
-    ),
-  );
-}
-
-/// Hub: simple controls inline; complex areas open dedicated sub-pages.
+/// Legacy combined settings hub（功能调试用；设置 Tab 已改用 App 风格主页）。
 class JWSettingsHubPage extends StatefulWidget {
   const JWSettingsHubPage({super.key, required this.controller});
 
@@ -59,7 +50,7 @@ class _JWSettingsHubPageState extends State<JWSettingsHubPage>
   void _openDisplay() {
     unawaited(Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => JWDisplaySettingsPage(controller: widget.controller),
+        builder: (_) => JwScreenDisplayPage(controller: widget.controller),
       ),
     ));
   }
@@ -296,154 +287,8 @@ await session.setGoals(const JWGoals(steps: 8000, sleepMinutes: 480, calories: 4
   }
 }
 
-class JWDisplaySettingsPage extends StatefulWidget {
-  const JWDisplaySettingsPage({super.key, required this.controller});
-  final JWDemoController controller;
-
-  @override
-  State<JWDisplaySettingsPage> createState() => _JWDisplaySettingsPageState();
-}
-
-class _JWDisplaySettingsPageState extends State<JWDisplaySettingsPage>
-    with _DemoAsyncMixin {
-  // Values prepared for the next command, not inferred device state. Stable
-  // JW firmware ACKs these writes but does not always support their reads.
-  JWDateFormat _dateFormat = JWDateFormat.monthDay;
-  int _screenLightDuration = 10;
-  int _screenBrightness = 60;
-  int _homePage = 0;
-  bool _turnWristToWake = false;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: _SettingsApiTitle(
-            title: '显示设置',
-            apiCode: '''await session.setScreenBrightness(80);
-await session.setTurnWristToWake(true);''',
-            compact: true,
-          ),
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            const Text('选择后立即下发。设备不会稳定提供以下设置的当前值读取接口，因此页面显示的是准备下发的值。'),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<JWDateFormat>(
-              value: _dateFormat,
-              decoration: const InputDecoration(labelText: '日期格式'),
-              items: const [
-                DropdownMenuItem(
-                  value: JWDateFormat.monthDay,
-                  child: Text('月/日'),
-                ),
-                DropdownMenuItem(
-                  value: JWDateFormat.dayMonth,
-                  child: Text('日/月'),
-                ),
-              ],
-              onChanged: busy
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      run(() async {
-                        await widget.controller.setDateFormat(value);
-                        if (mounted) {
-                          setState(() {
-                            _dateFormat = value;
-                            resultMessage = '日期格式已下发。';
-                          });
-                        }
-                      });
-                    },
-            ),
-            DropdownButtonFormField<int>(
-              value: _screenLightDuration,
-              decoration: const InputDecoration(labelText: '亮屏时长'),
-              items: [
-                for (final seconds in [3, 5, 10, 15, 20, 30])
-                  DropdownMenuItem(value: seconds, child: Text('$seconds 秒')),
-              ],
-              onChanged: busy
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      run(() async {
-                        await widget.controller.setScreenLightDuration(value);
-                        if (mounted) {
-                          setState(() {
-                            _screenLightDuration = value;
-                            resultMessage = '亮屏时长已下发。';
-                          });
-                        }
-                      });
-                    },
-            ),
-            DropdownButtonFormField<int>(
-              value: _screenBrightness,
-              decoration: const InputDecoration(labelText: '屏幕亮度'),
-              items: [
-                for (final value in [20, 40, 60, 80, 100])
-                  DropdownMenuItem(value: value, child: Text('$value%')),
-              ],
-              onChanged: busy
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      run(() async {
-                        await widget.controller.setScreenBrightness(value);
-                        if (mounted) {
-                          setState(() {
-                            _screenBrightness = value;
-                            resultMessage = '屏幕亮度已下发。';
-                          });
-                        }
-                      });
-                    },
-            ),
-            DropdownButtonFormField<int>(
-              value: _homePage,
-              decoration: const InputDecoration(labelText: '设备主页索引'),
-              items: [
-                for (final value in [0, 1, 2, 3, 4, 5])
-                  DropdownMenuItem(value: value, child: Text('主页 $value')),
-              ],
-              onChanged: busy
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      run(() async {
-                        await widget.controller.setHomePage(value);
-                        if (mounted) {
-                          setState(() {
-                            _homePage = value;
-                            resultMessage = '设备主页已下发。';
-                          });
-                        }
-                      });
-                    },
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('抬腕亮屏'),
-              value: _turnWristToWake,
-              onChanged: busy
-                  ? null
-                  : (value) => run(() async {
-                        await widget.controller.setTurnWristToWake(value);
-                        if (mounted) {
-                          setState(() {
-                            _turnWristToWake = value;
-                            resultMessage = '抬腕亮屏已下发。';
-                          });
-                        }
-                      }),
-            ),
-            ...buildAsyncFeedback(context),
-          ],
-        ),
-      );
-}
+/// 兼容旧入口；实现见 [JwScreenDisplayPage]。
+typedef JWDisplaySettingsPage = JwScreenDisplayPage;
 
 class JWRemindersSettingsPage extends StatefulWidget {
   const JWRemindersSettingsPage({super.key, required this.controller});
@@ -483,8 +328,8 @@ class _JWRemindersSettingsPageState extends State<JWRemindersSettingsPage>
     return Scaffold(
       appBar: AppBar(
         title: _SettingsApiTitle(
-          title: '提醒与勿扰',
-          apiCode: 'await session.setSedentaryReminderVerified(reminder);',
+          title: '勿扰模式',
+          apiCode: JwSettingsApiExamples.doNotDisturb,
           compact: true,
         ),
       ),
@@ -500,7 +345,10 @@ class _JWRemindersSettingsPageState extends State<JWRemindersSettingsPage>
           if (dnd != null) ...[
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: Text('勿扰 ${_timeRangeLabel(dnd.schedule)}'),
+              title: _SettingsApiTitle(
+                title: '勿扰 ${_timeRangeLabel(dnd.schedule)}',
+                apiCode: JwSettingsApiExamples.doNotDisturb,
+              ),
               value: dnd.enabled,
               onChanged: busy
                   ? null
@@ -517,7 +365,10 @@ class _JWRemindersSettingsPageState extends State<JWRemindersSettingsPage>
           if (sedentary != null) ...[
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: Text('久坐提醒（${sedentary.thresholdMinutes} 分钟）'),
+              title: _SettingsApiTitle(
+                title: '久坐提醒（${sedentary.thresholdMinutes} 分钟）',
+                apiCode: JwSettingsApiExamples.sedentaryReminder,
+              ),
               subtitle: Text(
                   '${sedentary.startHour}:00–${sedentary.endHour}:00'),
               value: sedentary.enabled,
@@ -681,8 +532,7 @@ class _JWAlarmsSettingsPageState extends State<JWAlarmsSettingsPage>
       appBar: AppBar(
         title: _SettingsApiTitle(
           title: '闹钟',
-          apiCode:
-              'final alarms = await session.readAlarms();\nawait session.setAlarms(alarms);',
+          apiCode: JwSettingsApiExamples.alarm,
           compact: true,
         ),
         actions: [
@@ -852,7 +702,7 @@ class _JWProfileGoalsPageState extends State<JWProfileGoalsPage>
         appBar: AppBar(
           title: _SettingsApiTitle(
             title: '用户资料与目标',
-            apiCode: 'await session.setUserProfile(profile);\nawait session.setGoals(goals);',
+            apiCode: JwSettingsApiExamples.userProfileGoals,
             compact: true,
           ),
         ),
@@ -962,10 +812,11 @@ class _SettingsApiTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final style = (compact ? theme.textTheme.titleLarge : theme.textTheme.titleMedium)
-        ?.copyWith(color: colors.primary);
-    return InkWell(
+    final style = compact
+        ? theme.textTheme.titleLarge
+        : theme.textTheme.titleMedium;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => unawaited(
         JwDemoContentSheet.showApiExample(
           context,
@@ -975,7 +826,7 @@ class _SettingsApiTitle extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Text('$title · API', style: style),
+        child: Text(title, style: style),
       ),
     );
   }

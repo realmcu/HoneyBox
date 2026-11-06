@@ -24,6 +24,19 @@ String jwMeasureSampleLine(Object sample) {
   };
 }
 
+/// Compact value for spot-measure row subtitle.
+String? jwMeasureSpotValueLabel(Object? sample) {
+  if (sample == null) return null;
+  return switch (sample) {
+    JWHeartRate r => '${r.heartRate} bpm',
+    JWTemperature r => '${r.skinTemperature}°C',
+    JWBloodPressure r => '${r.systolic}/${r.diastolic} mmHg',
+    JWBloodOxygen r => 'SpO₂ ${r.value}%',
+    JWBloodGlucose r => '${(r.value / 10).toStringAsFixed(1)} mmol/L',
+    _ => null,
+  };
+}
+
 String _shortTime(DateTime time) {
   final local = time.toLocal();
   return '${local.month.toString().padLeft(2, '0')}-'

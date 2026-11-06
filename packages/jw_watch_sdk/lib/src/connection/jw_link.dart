@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:watch_frame_channel/watch_frame_channel.dart';
 import 'package:watch_transport/watch_transport.dart';
 
+import '../debug/jw_debug_log.dart';
 import '../model/jw_error.dart';
 import 'jw_protocol.dart';
 
@@ -38,6 +39,7 @@ final class JWLink {
   final _events = StreamController<JWProtocolMessage>.broadcast(sync: true);
   final _failures = StreamController<JWException>.broadcast(sync: true);
   StreamSubscription<WatchReceivedPayload>? _payloadSubscription;
+  StreamSubscription<WatchFrameEvent>? _wireSubscription;
   Future<void> _tail = Future.value();
   _PendingRequest? _pending;
   JWException? _failure;
@@ -54,6 +56,7 @@ final class JWLink {
     }
     if (_open) return;
     _payloadSubscription = _channel.payloads.listen(_onPayload);
+    _wireSubscription = _channel.frames.listen(_onWireFrame);
     unawaited(
         _channel.terminated.then((error) => _fail(_mapFrameError(error))));
     try {
@@ -134,34 +137,53 @@ final class JWLink {
       {bool expectResponse = true}) async {
     final pending = _PendingRequest(request);
     _pending = pending;
+    if (expectResponse) {
+      JWWatchDebugLog.apiIn(
+          'JWLink.request', JWWatchDebugLog.describeRequest(request));
+    }
     try {
-      pending.send = _channel.startSend(encodeJWRequest(request));
+      final encoded = encodeJWRequest(request);
+      pending.send = _channel.startSend(encoded);
       await pending.send!.completed;
-      if (!expectResponse) return JWProtocolMessage(0, 0, Uint8List(0));
-      return await pending.response.future.timeout(request.replyTimeout);
+      if (!expectResponse) {
+        return JWProtocolMessage(0, 0, Uint8List(0));
+      }
+      final reply = await pending.response.future.timeout(request.replyTimeout);
+      return reply;
     } on TimeoutException {
-      // A business response is separate from the underlying frame ACK. A
-      // firmware version can accept a query but not implement its response.
-      // Treat that as one operation failure, never as a physical disconnect.
       const error = JWException(
           JWErrorCode.businessReplyTimeout, 'JW business reply timed out');
+      if (expectResponse) {
+        JWWatchDebugLog.apiOut(
+          'JWLink.request',
+          'timeout ${JWWatchDebugLog.describeRequest(request)}',
+        );
+      }
       throw error;
     } catch (error) {
       final mapped = _mapFrameError(error);
-      // ACK/NACK, sequence, write and protocol errors belong to this request.
-      // They must never manufacture a transport disconnect. Real disconnects
-      // arrive through WatchFrameChannel.terminated from transport.disconnected.
+      if (expectResponse) {
+        JWWatchDebugLog.apiOut('JWLink.request', 'failed $mapped');
+      }
       throw mapped;
     } finally {
       if (identical(_pending, pending)) _pending = null;
     }
   }
 
+  void _onWireFrame(WatchFrameEvent event) {
+    JWWatchDebugLog.wireFrame(
+      event,
+      awaitingAckSeq: _pending?.send?.sequence,
+    );
+  }
+
   void _onPayload(WatchReceivedPayload payload) {
     List<JWProtocolMessage> messages;
     try {
       messages = decodeJWMessages(payload.bytes);
-    } on FormatException {
+    } on FormatException catch (error) {
+      JWWatchDebugLog.l2DecodeFailed(payload.bytes, error, l1Seq: payload.seq);
       return;
     }
     for (final message in messages) {
@@ -171,6 +193,11 @@ final class JWLink {
               (pending.request.responseCommand ?? pending.request.command) &&
           message.key == pending.request.responseKey &&
           !pending.response.isCompleted) {
+        JWWatchDebugLog.l2MatchedBusinessReply(
+          request: pending.request,
+          reply: message,
+          outboundSeq: pending.send?.sequence,
+        );
         if (pending.send != null) _channel.confirmReceived(pending.send!);
         pending.response.complete(message);
       } else if (!_events.isClosed) {
@@ -195,8 +222,7 @@ final class JWLink {
     _disposed = true;
     _fail(const JWException(
         JWErrorCode.transportDisconnected, 'JW session disposed'));
-    await _payloadSubscription?.cancel();
-    await _channel.close(_failure);
+    await _wireSubscription?.cancel();
     await _events.close();
     await _failures.close();
   }
