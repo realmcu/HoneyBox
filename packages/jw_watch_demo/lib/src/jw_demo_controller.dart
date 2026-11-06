@@ -251,6 +251,81 @@ class JWDemoController extends ChangeNotifier {
   Future<Uint8List> resetHistorySyncMarkers() =>
       _runSessionValue((session) => session.resetHistorySyncMarkers());
 
+  bool get isHealthSyncActive => _session?.isHealthSyncActive ?? false;
+
+  Future<JWAutoMeasureConfig> readHeartRateAutoMeasure() =>
+      _runSessionValue((s) => s.measure.readHeartRateAutoMeasure());
+
+  Future<void> setHeartRateAutoMeasure(JWAutoMeasureConfig config) =>
+      _runSession((s) => s.measure.setHeartRateAutoMeasure(config));
+
+  Future<JWAutoMeasureConfig> readSpO2AutoMeasure() =>
+      _runSessionValue((s) => s.measure.readSpO2AutoMeasure());
+
+  Future<void> setSpO2AutoMeasure(JWAutoMeasureConfig config) =>
+      _runSession((s) => s.measure.setSpO2AutoMeasure(config));
+
+  Future<JWAutoMeasureConfig> readBloodPressureAutoMeasure() =>
+      _runSessionValue((s) => s.measure.readBloodPressureAutoMeasure());
+
+  Future<void> setBloodPressureAutoMeasure(JWAutoMeasureConfig config) =>
+      _runSession((s) => s.measure.setBloodPressureAutoMeasure(config));
+
+  Future<JWBloodSugarAutoMeasureConfig> readBloodSugarAutoMeasure() =>
+      _runSessionValue((s) => s.measure.readBloodSugarAutoMeasure());
+
+  Future<void> setBloodSugarAutoMeasure(
+          JWBloodSugarAutoMeasureConfig config) =>
+      _runSession((s) => s.measure.setBloodSugarAutoMeasure(config));
+
+  Future<JWTemperatureControlSetting> readTemperatureControl() =>
+      _runSessionValue((s) => s.measure.readTemperatureControl());
+
+  Future<void> setTemperatureControl(JWTemperatureControlSetting setting) =>
+      _runSession((s) => s.measure.setTemperatureControl(setting));
+
+  Future<void> setPressureAutoMeasure(bool enabled) =>
+      _runSession((s) => s.measure.setPressureAutoMeasure(enabled));
+
+  Future<void> setBodyFatMonitoring(bool enabled) =>
+      _runSession((s) => s.measure.setBodyFatMonitoring(enabled));
+
+  Future<void> startHeartRateSpotMeasure() =>
+      _runSession((s) => s.measure.startHeartRateSpotMeasure());
+
+  Future<void> stopHeartRateSpotMeasure() =>
+      _runSession((s) => s.measure.stopHeartRateSpotMeasure());
+
+  Future<void> startBloodPressureSpotMeasure() =>
+      _runSession((s) => s.measure.startBloodPressureSpotMeasure());
+
+  Future<void> stopBloodPressureSpotMeasure() =>
+      _runSession((s) => s.measure.stopBloodPressureSpotMeasure());
+
+  Future<void> startSpO2SpotMeasure() =>
+      _runSession((s) => s.measure.startSpO2SpotMeasure());
+
+  Future<void> stopSpO2SpotMeasure() =>
+      _runSession((s) => s.measure.stopSpO2SpotMeasure());
+
+  Future<void> checkSpO2SpotMeasure() =>
+      _runSession((s) => s.measure.checkSpO2SpotMeasure());
+
+  Future<void> startTemperatureSpotMeasure() =>
+      _runSession((s) => s.measure.startTemperatureSpotMeasure());
+
+  Future<void> stopTemperatureSpotMeasure() =>
+      _runSession((s) => s.measure.stopTemperatureSpotMeasure());
+
+  Future<void> checkTemperatureSpotMeasure() =>
+      _runSession((s) => s.measure.checkTemperatureSpotMeasure());
+
+  Future<void> startBloodGlucoseSpotMeasure() =>
+      _runSession((s) => s.measure.startBloodGlucoseSpotMeasure());
+
+  Future<void> stopBloodGlucoseSpotMeasure() =>
+      _runSession((s) => s.measure.stopBloodGlucoseSpotMeasure());
+
   Future<JWSettingSubmission> setUserProfile(JWUserProfile profile) =>
       _runSessionValue((session) => session.setUserProfile(profile));
 

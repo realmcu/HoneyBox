@@ -17,6 +17,8 @@ import '../model/jw_identity.dart';
 import '../model/jw_session_state.dart';
 import '../settings/jw_settings_models.dart';
 import '../settings/jw_settings_codec.dart';
+import '../measure/jw_measure.dart';
+import '../measure/jw_measure_coordinator.dart';
 import 'jw_link.dart';
 import 'jw_protocol.dart';
 
@@ -64,6 +66,27 @@ final class JWWatchSession {
   JWHistoryStore get historyStore => _historyStore;
 
   Future<void>? _healthSync;
+
+  /// True while [syncHealthData] is running on this session.
+  bool get isHealthSyncActive => _healthSync != null;
+
+  JWMeasureCoordinator? _measureCoordinator;
+  JWMeasure? _measure;
+
+  /// Measure control and spot-measure listeners for the authenticated session.
+  JWMeasure get measure => _measure ??= JWMeasure(
+        link: _link,
+        coordinator: _measureCoordinator ??= JWMeasureCoordinator(
+          link: _link,
+          isHealthSyncActive: () => _healthSync != null,
+          temperatureCapable: () =>
+              _state.functionInfo?.supports(JWDeviceFunction.temperature) ??
+              false,
+        ),
+        isReady: () => _state.isReady,
+        isHealthSyncActive: () => _healthSync != null,
+        functionInfo: () => _state.functionInfo,
+      );
 
   /// Synchronizes JW health history for the authenticated session.
   ///
@@ -718,6 +741,9 @@ final class JWWatchSession {
     if (_disposed) return;
     _disposed = true;
     _authenticatedUserId = null;
+    _measureCoordinator?.dispose();
+    _measureCoordinator = null;
+    _measure = null;
     await _linkFailures?.cancel();
     await _link.dispose();
     _state = _state.copyWith(phase: JWSessionPhase.disposed);

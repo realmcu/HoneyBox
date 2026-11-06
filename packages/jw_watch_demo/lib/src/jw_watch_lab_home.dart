@@ -8,6 +8,7 @@ import 'jw_demo_controller.dart';
 import 'jw_device_pages.dart';
 import 'jw_feature_catalog.dart';
 import 'jw_history_pages.dart';
+import 'jw_measure_pages.dart';
 import 'jw_settings_pages.dart';
 
 /// T4.0 navigation shell. T4.1 injects one SDK-owned session into it.
@@ -45,6 +46,10 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
     }
     if (entry.id == 'history') {
       openJwHistoryHub(context, _controller);
+      return;
+    }
+    if (entry.id == 'measurements') {
+      openJwMeasureHub(context, _controller);
       return;
     }
     unawaited(
@@ -660,7 +665,7 @@ class _FeatureAvailability extends StatelessWidget {
   final JWFeatureCatalogEntry entry;
   final List<JWFeatureSupport?> supports;
 
-  static const _demoReadyIds = {'device', 'settings', 'history'};
+  static const _demoReadyIds = {'device', 'settings', 'history', 'measurements'};
 
   @override
   Widget build(BuildContext context) {

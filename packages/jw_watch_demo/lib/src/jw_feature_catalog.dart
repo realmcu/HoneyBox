@@ -46,8 +46,9 @@ await session.setUnitSystemVerified(JWUnitSystem.metric);''',
     subtitle: '心率、血压、血氧、体温与专项健康数据',
     icon: Icons.monitor_heart_outlined,
     features: [JWFeature.measurements, JWFeature.advancedHealth],
-    example: '''await watch.measurements.startHeartRate();
-final sample = await watch.measurements.heartRateResults.first;''',
+    example: '''session.measure.addMeasureDataListener(listener);
+await session.measure.startHeartRateSpotMeasure();
+// 同步中 isHealthSyncActive == true 时点测会被拒绝''',
   ),
   JWFeatureCatalogEntry(
     id: 'history',

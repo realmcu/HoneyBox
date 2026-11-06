@@ -116,7 +116,7 @@ void main() {
     expect(find.byKey(const Key('jw.demo.page.home')), findsOneWidget);
   });
 
-  testWidgets('opens API guidance in content sheet', (tester) async {
+  testWidgets('measurements feature opens measure hub', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: JWWatchLabHome()));
 
     await tester.tap(find.byKey(const Key('jw.demo.tab.features')));
@@ -124,7 +124,7 @@ void main() {
     await tester.tap(find.byKey(const Key('jw.demo.feature.measurements')));
     await tester.pumpAndSettle();
 
-    expect(find.text('公开 API 示例'), findsOneWidget);
-    expect(find.textContaining('startHeartRate'), findsOneWidget);
+    expect(find.byKey(const Key('jw.demo.measure.hub')), findsOneWidget);
+    expect(find.textContaining('请先完成登录或首次绑定'), findsOneWidget);
   });
 }
