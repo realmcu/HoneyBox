@@ -29,6 +29,7 @@ class ScanPage extends ConsumerStatefulWidget {
   final bool defaultOnlyNamed;
   final bool defaultOnlyConnectable;
   final bool defaultSortBySignal;
+  final bool showBackButton;
   final ValueChanged<ScanDevice>? onDeviceSelected;
   final VoidCallback? onBrowseSavedHistory;
 
@@ -44,6 +45,7 @@ class ScanPage extends ConsumerStatefulWidget {
     this.defaultOnlyNamed = false,
     this.defaultOnlyConnectable = false,
     this.defaultSortBySignal = false,
+    this.showBackButton = false,
     this.onDeviceSelected,
     this.onBrowseSavedHistory,
     this.requiredServiceUuid,
@@ -236,12 +238,16 @@ class _ScanPageState extends ConsumerState<ScanPage>
     final base = debugOn ? <ScanDevice>[debugDevice, ...all] : all;
     final devices = _applyFilter(base);
     final scanning = bleState == BleState.scanning;
+    final showBack =
+        widget.showBackButton && (ModalRoute.of(context)?.canPop ?? false);
 
     return Scaffold(
-      drawer: const AppDrawer(),
+      drawer: showBack ? null : const AppDrawer(),
       // Let a rightward swipe from the left half of the screen open the drawer.
-      drawerEdgeDragWidth: MediaQuery.sizeOf(context).width * 0.5,
+      drawerEdgeDragWidth:
+          showBack ? 0 : MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
+        leading: showBack ? const BackButton() : null,
         title: Text('${widget.appTitle} · 扫描设备',
             style: tt.titleLarge?.copyWith(color: cs.onPrimary)),
         backgroundColor: cs.primary,

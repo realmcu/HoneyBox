@@ -14,6 +14,8 @@ import '../../providers/rtl8762_ota_provider.dart';
 import '../../services/ota/ota_platform.dart';
 import '../../services/ota/android_realtek_ota_platform.dart';
 import '../../services/ota/android_realtek_firmware_parser.dart';
+import '../../services/ota/rtl87x3g_firmware_parser.dart';
+import '../../services/ota/rtl87x3g_ota_platform.dart';
 import '../../services/ota/firmware_inspection.dart';
 import '../../services/ota/ota_preflight.dart';
 import '../../services/ota/ota_session.dart';
@@ -26,6 +28,7 @@ import '../../services/ota/ota_failure.dart';
 import '../../services/ota/ota_progress.dart';
 import '../../services/ota/ota_repository.dart';
 import '../../services/ota/ota_postcheck.dart';
+import '../../services/ota/ota_target.dart';
 
 final otaRepositoryProvider = FutureProvider<OtaRepository>((ref) async {
   final directory = await getApplicationDocumentsDirectory();
@@ -36,6 +39,9 @@ final otaPlatformProvider = Provider<OtaPlatform>((ref) =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.android
         ? AndroidRealtekOtaPlatform()
         : const UnsupportedOtaPlatform());
+
+final rtl87x3gOtaPlatformProvider =
+    Provider<OtaPlatform>((ref) => Rtl87x3gOtaPlatform());
 
 final otaBlePermissionProvider =
     Provider<Future<bool?> Function()>((ref) => () async {
@@ -64,6 +70,8 @@ final otaDeviceProbeProvider = Provider<DeviceProbe>((ref) =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.android
         ? const FlutterBlueDeviceProbe()
         : const UnknownDeviceProbe());
+final rtl87x3gDeviceProbeProvider = Provider<DeviceProbe>((ref) =>
+    !kIsWeb ? const FlutterBlueDeviceProbe() : const UnknownDeviceProbe());
 final otaPostcheckerProvider = Provider<OtaPostchecker>(
     (ref) => OtaPostchecker(ref.watch(otaDeviceProbeProvider)));
 final otaDeviceCapabilitiesProvider =
@@ -81,7 +89,12 @@ class _UnknownParser implements FirmwareParser {
 
 class RealtekOtaPage extends ConsumerStatefulWidget {
   final ScanDevice device;
-  const RealtekOtaPage({super.key, required this.device});
+  final OtaTarget target;
+  const RealtekOtaPage({
+    super.key,
+    required this.device,
+    this.target = OtaTarget.rtl8762d,
+  });
 
   @override
   ConsumerState<RealtekOtaPage> createState() => _RealtekOtaPageState();
@@ -264,7 +277,12 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _platform = ref.read(otaPlatformProvider);
+    _platform = widget.target == OtaTarget.rtl87x3g
+        ? ref.read(rtl87x3gOtaPlatformProvider)
+        : ref.read(otaPlatformProvider);
+    if (widget.target == OtaTarget.rtl87x3g) {
+      _status = '请选择 app_MP-*.bin 固件包';
+    }
     unawaited(Future.microtask(_loadHistory));
     _ownership = ref.read(otaOwnershipProvider.notifier);
     if (_platform.supported) {
@@ -475,8 +493,10 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
       DeviceProbeResult probe;
       try {
         // 固件尚未选择，无法安全匹配档案。临时连接结束后才交给 SDK。
-        probe = await ref
-            .read(otaDeviceProbeProvider)
+        final deviceProbe = widget.target == OtaTarget.rtl87x3g
+            ? ref.read(rtl87x3gDeviceProbeProvider)
+            : ref.read(otaDeviceProbeProvider);
+        probe = await deviceProbe
             .probe(widget.device.deviceId)
             .timeout(const Duration(seconds: 35));
       } catch (error) {
@@ -491,8 +511,12 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           otaDeviceInfo: probe.otaDeviceInfo,
           batteryPercent: probe.batteryPercent,
           charging: probe.charging,
-          expectedIcType: configured.expectedIcType,
-          deviceReportedCapacity: configured.deviceReportedCapacity);
+          expectedIcType: widget.target == OtaTarget.rtl87x3g
+              ? 0x13
+              : configured.expectedIcType,
+          deviceReportedCapacity: widget.target == OtaTarget.rtl87x3g
+              ? 0x180000
+              : configured.deviceReportedCapacity);
       if (_disposed) return;
       _capabilities = capabilities;
       _startedAt = DateTime.now();
@@ -501,7 +525,12 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
       _progressTracker = OtaProgressTracker();
       final session = OtaSession(
           '${DateTime.now().microsecondsSinceEpoch}-${_sessionSequence++}',
-          onTimeout: (timedOut) {
+          phaseTimeouts: widget.target == OtaTarget.rtl87x3g
+              ? const {
+                  OtaPhase.transferring: Duration(minutes: 12),
+                  OtaPhase.validating: Duration(minutes: 3),
+                }
+              : null, onTimeout: (timedOut) {
         if (!mounted || _session != timedOut) return;
         _saveTerminal(timedOut.timedOutPhase ?? OtaPhase.idle,
             message: '阶段超时', category: OtaFailureCategory.timeout);
@@ -606,7 +635,11 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
       final DeviceCapabilities capabilities =
           _capabilities ?? ref.read(otaDeviceCapabilitiesProvider);
       final inspection = await FirmwareInspection.inspect(
-          path, capabilities, ref.read(firmwareParserProvider));
+          path,
+          capabilities,
+          widget.target == OtaTarget.rtl87x3g
+              ? const Rtl87x3gFirmwareParser()
+              : ref.read(firmwareParserProvider));
       if (!mounted) return;
       _firmwareSha256 = inspection.sha256 ?? '';
       if (session != _session || session?.outcome != null || !_ready) {
@@ -798,7 +831,10 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         } else {
           try {
             await _platform.close();
-            result = await ref.read(otaPostcheckerProvider).verifyTarget(
+            final probe = widget.target == OtaTarget.rtl87x3g
+                ? ref.read(rtl87x3gDeviceProbeProvider)
+                : ref.read(otaDeviceProbeProvider);
+            result = await OtaPostchecker(probe).verifyTarget(
                 expectedIdentity: OtaExpectedIdentity(
                     deviceId: widget.device.deviceId, icType: _expectedIcType),
                 expectedVersion: _targetVersion!);
@@ -905,7 +941,9 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         canPop: !_running,
         child: Scaffold(
           appBar: AppBar(
-              title: const Text('Realtek OTA'),
+              title: Text(widget.target == OtaTarget.rtl87x3g
+                  ? 'RTL8773G OTA'
+                  : 'Realtek OTA'),
               automaticallyImplyLeading: !_running),
           body: Padding(
               padding: const EdgeInsets.all(24),
