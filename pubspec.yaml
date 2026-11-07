@@ -73,3 +73,5 @@ flutter:
     - assets/example/video/
     # JW Demo 设置图标（宿主侧再挂一份，避免 package asset 在真机解析失败）
     - assets/jw_settings/
+    # JW Demo 健康详情图标
+    - assets/jw_health/

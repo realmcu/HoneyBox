@@ -117,22 +117,40 @@ final class JWWatchSession {
   }
 
   /// Clears device-side history sync markers so a later [syncHealthData] can
-  /// transfer records again (Android `sendHistoryIndexRequest`).
+  /// transfer records again (HL §5.FA / Android `setFullSync`).
   ///
-  /// Returns the opaque device payload from key `0xf8` when present.
+  /// Fire-and-forget: protocol has no application reply; returns empty bytes
+  /// after transport send completes.
   Future<Uint8List> resetHistorySyncMarkers() async {
     _requireReadyForSettings();
     if (_healthSync != null) {
       throw StateError('JW health sync is already active');
     }
-    final reply =
-        await _link.request(JWProtocolCommands.resetHistorySyncMarkers());
-    if (reply.command != 6 || reply.key != 0xf8) {
-      throw FormatException(
-          'Unexpected JW history marker reset reply '
-          '0x${reply.command.toRadixString(16)}/0x${reply.key.toRadixString(16)}');
+    await _link.send(JWProtocolCommands.resetHistorySyncMarkers());
+    return Uint8List(0);
+  }
+
+  /// Factory RESET (HL §6.FC): erase device data; firmware typically reboots.
+  ///
+  /// Android App「清除数据」→ `WristbandManager.sendResetRequest`. Requires an
+  /// explicit application confirmation. No business reply; link drop / ACK
+  /// timeout after a successful enqueue is treated as success.
+  Future<void> clearDeviceData({required bool confirmed}) async {
+    if (!confirmed) {
+      throw StateError('JW clearDeviceData requires explicit user confirmation');
     }
-    return reply.value;
+    _requireReadyForSettings();
+    if (_healthSync != null) {
+      throw StateError('JW health sync is already active');
+    }
+    try {
+      await _link.send(JWProtocolCommands.clearDeviceData());
+    } on JWException catch (error) {
+      if (error.code != JWErrorCode.transportDisconnected &&
+          error.code != JWErrorCode.ackTimeout) {
+        rethrow;
+      }
+    }
   }
 
   /// Opens the JW byte channel. This does not log in, bind, or query device
@@ -554,6 +572,31 @@ final class JWWatchSession {
     return JWVerifiedSetting(previous: previous, value: actual);
   }
 
+  Future<JWHighHeartRateReminder> readHighHeartRateReminder() async {
+    _requireReadyForSettings();
+    _requireAnyDeviceFunction(
+      const [JWDeviceFunction.rateReminder, JWDeviceFunction.highHrv],
+      'high heart rate reminder',
+    );
+    return JWSettingsCodec.decodeHighHeartRateReminder(
+        (await _link.request(JWProtocolCommands.readHighHeartRateReminder()))
+            .value);
+  }
+
+  Future<JWVerifiedSetting<JWHighHeartRateReminder>>
+      setHighHeartRateReminderVerified(JWHighHeartRateReminder value) async {
+    _requireAnyDeviceFunction(
+      const [JWDeviceFunction.rateReminder, JWDeviceFunction.highHrv],
+      'high heart rate reminder',
+    );
+    final previous = await readHighHeartRateReminder();
+    await _link.send(JWProtocolCommands.setHighHeartRateReminder(
+        JWSettingsCodec.encodeHighHeartRateReminder(value)));
+    final actual = await readHighHeartRateReminder();
+    _verifySetting('high heart rate reminder', value, actual);
+    return JWVerifiedSetting(previous: previous, value: actual);
+  }
+
   Future<JWSedentaryReminder> readSedentaryReminder() async {
     _requireReadyForSettings();
     return JWSettingsCodec.decodeSedentaryReminder(
@@ -830,6 +873,14 @@ final class JWWatchSession {
   void _requireDeviceFunction(JWDeviceFunction function, String name) {
     final info = _state.functionInfo;
     if (info == null || !info.supports(function)) {
+      throw StateError('JW device does not support $name');
+    }
+  }
+
+  void _requireAnyDeviceFunction(
+      List<JWDeviceFunction> functions, String name) {
+    final info = _state.functionInfo;
+    if (info == null || !functions.any(info.supports)) {
       throw StateError('JW device does not support $name');
     }
   }

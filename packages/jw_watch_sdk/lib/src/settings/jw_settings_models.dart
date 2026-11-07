@@ -180,6 +180,29 @@ final class JWHeatStressReminder {
   int get hashCode => Object.hash(enabled, schedule);
 }
 
+/// High heart-rate alarm (`0x02/0x75`–`0x77`).
+///
+/// Firmware support is `rateReminder` and/or `highHrv` (App UKBridge OR).
+/// [thresholdBpm] valid range matches Android: 40–220.
+final class JWHighHeartRateReminder {
+  const JWHighHeartRateReminder({
+    required this.enabled,
+    required this.thresholdBpm,
+  }) : assert(thresholdBpm >= 40 && thresholdBpm <= 220);
+
+  final bool enabled;
+  final int thresholdBpm;
+
+  @override
+  bool operator ==(Object other) =>
+      other is JWHighHeartRateReminder &&
+      other.enabled == enabled &&
+      other.thresholdBpm == thresholdBpm;
+
+  @override
+  int get hashCode => Object.hash(enabled, thresholdBpm);
+}
+
 /// Sedentary reminder representation used by Android V2's eight-byte packet.
 final class JWSedentaryReminder {
   const JWSedentaryReminder({

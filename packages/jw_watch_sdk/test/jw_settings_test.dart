@@ -36,7 +36,11 @@ void main() {
         Uint8List.fromList([2, 0, 0x44, 0, 1, 0]));
     expect(
       encodeJWRequest(JWProtocolCommands.resetHistorySyncMarkers()),
-      Uint8List.fromList([6, 0, 0xf7, 0, 0]),
+      Uint8List.fromList([5, 0, 0xfa, 0, 0]),
+    );
+    expect(
+      encodeJWRequest(JWProtocolCommands.clearDeviceData()),
+      Uint8List.fromList([6, 0, 0xfc, 0, 0]),
     );
     expect(JWProtocolCommands.readScreenBrightness().replyTimeout,
         const Duration(seconds: 5));
@@ -93,6 +97,13 @@ void main() {
       JWSettingsCodec.decodeHeatStressReminder(
           JWSettingsCodec.encodeHeatStressReminder(heatStress)),
       heatStress,
+    );
+
+    const highHr = JWHighHeartRateReminder(enabled: true, thresholdBpm: 180);
+    expect(
+      JWSettingsCodec.decodeHighHeartRateReminder(
+          JWSettingsCodec.encodeHighHeartRateReminder(highHr)),
+      highHr,
     );
 
     const sedentary = JWSedentaryReminder(

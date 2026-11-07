@@ -253,6 +253,14 @@ class JWDemoController extends ChangeNotifier {
       _runSessionValue(
           (session) => session.setHeatStressReminderVerified(value));
 
+  Future<JWHighHeartRateReminder> readHighHeartRateReminder() =>
+      _runSessionValue((session) => session.readHighHeartRateReminder());
+
+  Future<JWVerifiedSetting<JWHighHeartRateReminder>> setHighHeartRateReminder(
+          JWHighHeartRateReminder value) =>
+      _runSessionValue(
+          (session) => session.setHighHeartRateReminderVerified(value));
+
   Future<JWSettingSubmission> syncTime() =>
       _runSessionValue((session) => session.setTime(DateTime.now()));
 
@@ -284,6 +292,13 @@ class JWDemoController extends ChangeNotifier {
 
   Future<Uint8List> resetHistorySyncMarkers() =>
       _runSessionValue((session) => session.resetHistorySyncMarkers());
+
+  /// Sends factory RESET (`0x06/0xFC`), then tears down the local session.
+  Future<void> clearDeviceData({required bool confirmed}) async {
+    await _runSessionValue(
+        (session) => session.clearDeviceData(confirmed: confirmed));
+    await disconnect();
+  }
 
   bool get isHealthSyncActive => _session?.isHealthSyncActive ?? false;
 

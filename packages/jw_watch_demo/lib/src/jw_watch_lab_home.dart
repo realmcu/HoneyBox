@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
+import 'jw_data_home_page.dart';
 import 'jw_demo_content_sheet.dart';
 import 'jw_demo_controller.dart';
 import 'jw_device_pages.dart';
@@ -141,7 +142,7 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
           onConnect: _openConnectionPage,
         ),
       _tabData => ready
-          ? _DataTabPage(controller: _controller)
+          ? JwDataHomePage(controller: _controller)
           : _SessionLockedPage(
               title: '数据',
               pageKey: 'jw.demo.page.data.locked',
@@ -828,52 +829,6 @@ class _SessionLockedPage extends StatelessWidget {
   }
 }
 
-class _DataTabPage extends StatelessWidget {
-  const _DataTabPage({required this.controller});
-
-  final JWDemoController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ListView(
-      key: const Key('jw.demo.page.data'),
-      padding: const EdgeInsets.all(16),
-      children: [
-        Text('数据', style: theme.textTheme.titleLarge),
-        const SizedBox(height: 8),
-        Text(
-          '健康历史同步与本地查询。P0 复用现有同步流程页；'
-          '分类列表与图表见后续 P3/P4。',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Card(
-          child: ListTile(
-            key: const Key('jw.demo.data.open_sync'),
-            leading: const Icon(Icons.sync_outlined),
-            title: const Text('健康数据同步'),
-            subtitle: const Text('同步计划、进度、入库结果与过程日志'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => openJwHistoryHub(context, controller),
-          ),
-        ),
-        Card(
-          child: ListTile(
-            key: const Key('jw.demo.data.open_measure'),
-            leading: const Icon(Icons.favorite_outline),
-            title: const Text('点测与自动监测'),
-            subtitle: const Text('心率 / 血氧等实时测量（功能中心同入口）'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => openJwMeasureHub(context, controller),
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 class _ConnectionPage extends StatefulWidget {
   const _ConnectionPage({

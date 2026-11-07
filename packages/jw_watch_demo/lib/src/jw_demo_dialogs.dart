@@ -203,7 +203,7 @@ class _SheetActions extends StatelessWidget {
   }
 }
 
-/// 单列滚轮；单位浮在选中行右侧（对齐 App 40dp 值宽 + 3dp 间距）。
+/// 单列滚轮；单位浮在选中行右侧。
 class _WheelColumn extends StatefulWidget {
   const _WheelColumn({
     super.key,
@@ -211,6 +211,8 @@ class _WheelColumn extends StatefulWidget {
     required this.initialIndex,
     required this.onChanged,
     this.suffix,
+    this.valueWidth = 48,
+    this.suffixGap = 12,
   });
 
   final List<String> values;
@@ -218,13 +220,18 @@ class _WheelColumn extends StatefulWidget {
   final ValueChanged<int> onChanged;
   final String? suffix;
 
+  /// 选中值占位宽度；间隔等三位数需更大，避免与单位重叠。
+  final double valueWidth;
+
+  /// 数值与单位间距。
+  final double suffixGap;
+
   @override
   State<_WheelColumn> createState() => _WheelColumnState();
 }
 
 class _WheelColumnState extends State<_WheelColumn> {
   static const _itemExtent = 40.0;
-  static const _valueWidth = 40.0;
   late final FixedExtentScrollController _controller;
   late int _selected;
 
@@ -264,7 +271,7 @@ class _WheelColumnState extends State<_WheelColumn> {
               final selected = index == _selected;
               return Center(
                 child: SizedBox(
-                  width: _valueWidth,
+                  width: widget.valueWidth,
                   child: Text(
                     widget.values[index],
                     textAlign: TextAlign.center,
@@ -288,9 +295,9 @@ class _WheelColumnState extends State<_WheelColumn> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const SizedBox(width: _valueWidth),
+                SizedBox(width: widget.valueWidth),
                 Padding(
-                  padding: const EdgeInsets.only(left: 3),
+                  padding: EdgeInsets.only(left: widget.suffixGap),
                   child: Text(
                     widget.suffix!,
                     style: const TextStyle(
@@ -591,6 +598,9 @@ class _SinglePickerSheetState<T> extends State<_SinglePickerSheet<T>> {
                     values: _labels,
                     initialIndex: _index,
                     suffix: widget.dataTips,
+                    // 间隔等多为两三位数字 +「分钟」，加宽数值区并拉开单位。
+                    valueWidth: 72,
+                    suffixGap: 16,
                     onChanged: (index) {
                       if (index == _index) return;
                       _index = index;

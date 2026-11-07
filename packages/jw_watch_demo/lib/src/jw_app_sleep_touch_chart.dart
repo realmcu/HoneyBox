@@ -1,0 +1,341 @@
+import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+
+import 'jw_app_chart_models.dart';
+import 'jw_health_app_theme.dart';
+
+final class JwAppSleepTouchSelection {
+  const JwAppSleepTouchSelection({
+    required this.begin,
+    required this.end,
+    required this.appType,
+    required this.minutes,
+    required this.anchorX,
+  });
+
+  final DateTime begin;
+  final DateTime end;
+  final int appType;
+  final int minutes;
+  final double anchorX;
+}
+
+/// 对齐 Android `SleepTouchView`（精细 10 带：清醒 / 眼动 / 浅睡 / 深睡；长按竖线浮标）。
+class JwAppSleepTouchChart extends StatefulWidget {
+  const JwAppSleepTouchChart({
+    super.key,
+    required this.segments,
+    required this.onSelection,
+  });
+
+  final List<JwAppSleepSegment> segments;
+  final ValueChanged<JwAppSleepTouchSelection?> onSelection;
+
+  @override
+  State<JwAppSleepTouchChart> createState() => _JwAppSleepTouchChartState();
+}
+
+class _JwAppSleepTouchChartState extends State<JwAppSleepTouchChart> {
+  static const double _thumbHeight = 10;
+
+  int _segIndex = -1;
+  int _downSegIndex = -1;
+  var _armed = false;
+  var _tracking = false;
+  Timer? _delay;
+  Offset? _downPos;
+
+  @override
+  void didUpdateWidget(covariant JwAppSleepTouchChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_sameSegments(oldWidget.segments, widget.segments)) {
+      _delay?.cancel();
+      _segIndex = -1;
+      _armed = false;
+      _tracking = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        widget.onSelection(null);
+      });
+    }
+  }
+
+  bool _sameSegments(List<JwAppSleepSegment> a, List<JwAppSleepSegment> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].begin != b[i].begin ||
+          a[i].end != b[i].end ||
+          a[i].appType != b[i].appType ||
+          a[i].minutes != b[i].minutes) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  void dispose() {
+    _delay?.cancel();
+    super.dispose();
+  }
+
+  void _clearSelection() {
+    _delay?.cancel();
+    final had = _segIndex != -1;
+    _segIndex = -1;
+    _armed = false;
+    _tracking = false;
+    if (had && mounted) setState(() {});
+    widget.onSelection(null);
+  }
+
+  List<_SleepLayoutSeg> _layout(double width) {
+    final segs = List<JwAppSleepSegment>.from(widget.segments)
+      ..sort((a, b) => a.begin.compareTo(b.begin));
+    var total = 0;
+    for (final s in segs) {
+      total += math.max(0, s.minutes);
+    }
+    if (total <= 0) {
+      return const <_SleepLayoutSeg>[];
+    }
+    final out = <_SleepLayoutSeg>[];
+    var x = 0.0;
+    for (final s in segs) {
+      final m = math.max(0, s.minutes);
+      if (m <= 0) continue;
+      final w = m / total * width;
+      final cx = x + w / 2;
+      out.add(_SleepLayoutSeg(segment: s, left: x, width: w, centerX: cx));
+      x += w;
+    }
+    return out;
+  }
+
+  int _indexAtDx(double dx, List<_SleepLayoutSeg> layout) {
+    if (layout.isEmpty) return -1;
+    for (var i = 0; i < layout.length; i++) {
+      final L = layout[i];
+      if (dx >= L.left && dx < L.left + L.width) return i;
+    }
+    if (dx < layout.first.left) return 0;
+    if (dx >= layout.last.left + layout.last.width) {
+      return layout.length - 1;
+    }
+    return -1;
+  }
+
+  void _emit(int index, List<_SleepLayoutSeg> layout) {
+    if (index < 0 || index >= layout.length) return;
+    final L = layout[index];
+    final s = L.segment;
+    widget.onSelection(
+      JwAppSleepTouchSelection(
+        begin: s.begin,
+        end: s.end,
+        appType: s.appType,
+        minutes: s.minutes,
+        anchorX: L.centerX,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        final layout = _layout(width);
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanDown: (d) {
+            if (layout.isEmpty) return;
+            _delay?.cancel();
+            _armed = true;
+            _tracking = false;
+            _downPos = d.localPosition;
+            _downSegIndex = _indexAtDx(d.localPosition.dx, layout);
+            if (_downSegIndex < 0) return;
+            _delay = Timer(JwHealthAppTheme.chartTouchDelay, () {
+              if (!mounted || !_armed) return;
+              setState(() {
+                _tracking = true;
+                _segIndex = _downSegIndex;
+              });
+              _emit(_segIndex, layout);
+            });
+          },
+          onPanUpdate: (d) {
+            if (layout.isEmpty) return;
+            final down = _downPos;
+            if (down == null) return;
+            final dx = (d.localPosition.dx - down.dx).abs();
+            final dy = (d.localPosition.dy - down.dy).abs();
+            if (!_tracking && dx > 12 && dx > dy) {
+              _clearSelection();
+              return;
+            }
+            if (!_tracking) return;
+            final idx = _indexAtDx(d.localPosition.dx, layout);
+            if (idx >= 0 && idx != _segIndex) {
+              setState(() => _segIndex = idx);
+              _emit(idx, layout);
+            }
+          },
+          onPanEnd: (_) => _clearSelection(),
+          onPanCancel: _clearSelection,
+          child: CustomPaint(
+            size: Size(width, height),
+            painter: _SleepPainter(
+              segments: widget.segments,
+              thumbHeight: _thumbHeight,
+              selectedIndex: _segIndex,
+              layout: layout,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+final class _SleepLayoutSeg {
+  const _SleepLayoutSeg({
+    required this.segment,
+    required this.left,
+    required this.width,
+    required this.centerX,
+  });
+
+  final JwAppSleepSegment segment;
+  final double left;
+  final double width;
+  final double centerX;
+}
+
+class _SleepPainter extends CustomPainter {
+  _SleepPainter({
+    required this.segments,
+    required this.thumbHeight,
+    required this.selectedIndex,
+    required this.layout,
+  });
+
+  final List<JwAppSleepSegment> segments;
+  final double thumbHeight;
+  final int selectedIndex;
+  final List<_SleepLayoutSeg> layout;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final text = TextPainter(textDirection: ui.TextDirection.ltr);
+    final totalM = segments.fold<int>(0, (a, s) => a + math.max(0, s.minutes));
+    if (segments.isEmpty || totalM <= 0) {
+      text.text = const TextSpan(
+        text: '暂无睡眠',
+        style: TextStyle(color: JwHealthAppTheme.sleepEmpty, fontSize: 23),
+      );
+      text.layout();
+      text.paint(
+        canvas,
+        Offset(
+          (size.width - text.width) / 2,
+          thumbHeight + (size.height - thumbHeight) / 2 - 8,
+        ),
+      );
+      return;
+    }
+
+    final eh = (size.height - thumbHeight) / 10.0;
+    final b = thumbHeight;
+    // 与 SleepTouchView type==2（精细）一致
+    final awakeTop = b;
+    final awakeBottom = b + 2.5 * eh;
+    final remTop = awakeBottom;
+    final remBottom = b + 5.0 * eh;
+    final lightTop = remBottom;
+    final lightBottom = b + 7.5 * eh;
+    final deepTop = lightBottom;
+    final deepBottom = size.height;
+
+    double bandTop(int appType) {
+      return switch (appType) {
+        0 => deepTop,
+        1 => lightTop,
+        2 || 3 => remTop,
+        4 => awakeTop,
+        _ => lightTop,
+      };
+    }
+
+    double bandBottom(int appType) {
+      return switch (appType) {
+        0 => deepBottom,
+        1 => lightBottom,
+        2 || 3 => remBottom,
+        4 => awakeBottom,
+        _ => lightBottom,
+      };
+    }
+
+    Color colorFor(int appType) {
+      return switch (appType) {
+        0 => JwHealthAppTheme.sleepDeep,
+        1 => JwHealthAppTheme.sleepLight,
+        2 || 3 => JwHealthAppTheme.sleepRem,
+        4 => JwHealthAppTheme.sleepAwake,
+        _ => JwHealthAppTheme.sleepLight,
+      };
+    }
+
+    for (var i = 0; i < layout.length; i++) {
+      final L = layout[i];
+      final s = L.segment;
+      final paint = Paint()
+        ..color = colorFor(s.appType)
+        ..strokeWidth = L.width
+        ..strokeCap = StrokeCap.round
+        ..isAntiAlias = true;
+      final x = L.centerX;
+      final top = bandTop(s.appType);
+      final bot = bandBottom(s.appType);
+      canvas.drawLine(Offset(x, top), Offset(x, bot), paint);
+    }
+
+    if (selectedIndex >= 0 && selectedIndex < layout.length) {
+      final x = layout[selectedIndex].centerX;
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x, size.height),
+        Paint()
+          ..color = JwHealthAppTheme.sleepThumbBg
+          ..strokeWidth = 1,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SleepPainter oldDelegate) {
+    if (oldDelegate.segments != segments ||
+        oldDelegate.thumbHeight != thumbHeight ||
+        oldDelegate.selectedIndex != selectedIndex ||
+        oldDelegate.layout.length != layout.length) {
+      return true;
+    }
+    for (var i = 0; i < layout.length; i++) {
+      final a = oldDelegate.layout[i];
+      final b = layout[i];
+      if (a.left != b.left ||
+          a.width != b.width ||
+          a.segment.begin != b.segment.begin) {
+        return true;
+      }
+    }
+    return false;
+  }
+}

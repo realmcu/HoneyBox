@@ -154,7 +154,7 @@ class _JWHistorySyncFlowPageState extends State<JWHistorySyncFlowPage> {
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  '若设备计划条数全为 0，可先重置同步标记再重新同步。',
+                  '若设备计划条数全为 0（游标已推过），可先重置同步标记（0x05/0xFA）再重新同步。',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),

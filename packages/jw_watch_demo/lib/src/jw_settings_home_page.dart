@@ -53,6 +53,8 @@ class _JwSettingsHomePageState extends State<JwSettingsHomePage> {
     return item.requiredFunctions.any(info.supports);
   }
 
+  var _syncingTime = false;
+
   Future<void> _confirmDisconnect() async {
     final ok = await JwDemoDialogs.showMessage(
       context,
@@ -63,6 +65,52 @@ class _JwSettingsHomePageState extends State<JwSettingsHomePage> {
     );
     if (ok != true || !mounted) return;
     await controller.disconnect();
+  }
+
+  Future<void> _confirmClearDeviceData() async {
+    final ok = await JwDemoDialogs.showMessage(
+      context,
+      title: '提示',
+      detail:
+          '此操作会清除你手表中所有数据。如果手表在恢复出厂设置后未重启，需要充电才能激活。',
+      negativeText: '取消',
+      positiveText: '确定',
+      barrierDismissible: false,
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await controller.clearDeviceData(confirmed: true);
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('已发送清除指令，设备将关机/重启')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(describeJWDemoError(e))),
+      );
+    }
+  }
+
+  Future<void> _syncTimeNow() async {
+    if (_syncingTime) return;
+    setState(() => _syncingTime = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await controller.syncTime();
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('当前时间已同步到设备')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(describeJWDemoError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _syncingTime = false);
+    }
   }
 
   void _open(JwSettingsItem item) {
@@ -89,6 +137,18 @@ class _JwSettingsHomePageState extends State<JwSettingsHomePage> {
       return;
     }
 
+    // 同步时间：点击即写入，无二级页。
+    if (item.id == JwSettingsItemId.syncTime) {
+      unawaited(_syncTimeNow());
+      return;
+    }
+
+    // 清除数据：对齐 App 确认弹窗后直接下发 RESET。
+    if (item.id == JwSettingsItemId.clearData) {
+      unawaited(_confirmClearDeviceData());
+      return;
+    }
+
     final page = switch (item.id) {
       JwSettingsItemId.findDevice =>
         JwFindDevicePage(controller: controller),
@@ -96,7 +156,7 @@ class _JwSettingsHomePageState extends State<JwSettingsHomePage> {
         JwNotifyRemindPage(controller: controller),
       JwSettingsItemId.eventRemind =>
         JwEventReminderPage(controller: controller),
-      JwSettingsItemId.alarm || JwSettingsItemId.alarm2 =>
+      JwSettingsItemId.alarm =>
         JWAlarmsSettingsPage(controller: controller),
       JwSettingsItemId.healthMonitoring =>
         JwHealthMonitoringPage(controller: controller),
@@ -106,8 +166,6 @@ class _JwSettingsHomePageState extends State<JwSettingsHomePage> {
         JwUnitSettingsPage(controller: controller),
       JwSettingsItemId.screenDisplay =>
         JwScreenDisplayPage(controller: controller),
-      JwSettingsItemId.syncTime =>
-        JwSyncTimeSettingsPage(controller: controller),
       JwSettingsItemId.userProfileGoals =>
         JWProfileGoalsPage(controller: controller),
       _ => null,

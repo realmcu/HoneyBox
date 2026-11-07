@@ -28,10 +28,19 @@ abstract final class JWProtocolCommands {
   static JWProtocolRequest factorySwitch() =>
       const JWProtocolRequest(command: 6, key: 0x3d, responseKey: 0x3e);
 
-  /// Factory-test command: reset device-side history sync index / markers
-  /// (Android `WristbandManager.sendHistoryIndexRequest`, `FACCmdRequestHistoryIndex`).
+  /// HL §5.FA data-sync reset: cmd `0x05`, key `0xFA`, empty value.
+  ///
+  /// Android `WristbandManager.setFullSync` / `ApplicationLayer.SettingFullSync`.
+  /// Not factory `0x06/0xF7` (HISTORY address probe / `FACCmdRequestHistoryIndex`).
   static JWProtocolRequest resetHistorySyncMarkers() =>
-      const JWProtocolRequest(command: 6, key: 0xf7, responseKey: 0xf8);
+      const JWProtocolRequest(command: 5, key: 0xfa, responseKey: null);
+
+  /// HL §6.FC factory RESET: cmd `0x06`, key `0xFC`, empty value.
+  ///
+  /// Erases device-retained data; firmware typically powers off / reboots.
+  /// Android `WristbandManager.sendResetRequest` / `FACCmdRequestReset`.
+  static JWProtocolRequest clearDeviceData() =>
+      const JWProtocolRequest(command: 6, key: 0xfc, responseKey: null);
   static JWProtocolRequest login(Uint8List identity) =>
       JWProtocolRequest(command: 3, key: 3, responseKey: 4, value: identity);
   static JWProtocolRequest bind(Uint8List identity) =>
@@ -134,6 +143,16 @@ abstract final class JWProtocolCommands {
       replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setHeatStressReminder(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x86, responseKey: null, value: value);
+
+  /// High heart-rate alarm: set `0x75`, request `0x76`, response `0x77`.
+  static JWProtocolRequest readHighHeartRateReminder() =>
+      const JWProtocolRequest(
+          command: 2,
+          key: 0x76,
+          responseKey: 0x77,
+          replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest setHighHeartRateReminder(Uint8List value) =>
+      JWProtocolRequest(command: 2, key: 0x75, responseKey: null, value: value);
   static JWProtocolRequest readSedentaryReminder() => const JWProtocolRequest(
       command: 2,
       key: 0x26,

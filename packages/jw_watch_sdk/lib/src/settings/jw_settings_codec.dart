@@ -70,6 +70,26 @@ abstract final class JWSettingsCodec {
     return JWHeatStressReminder(enabled: decoded.$1, schedule: decoded.$2);
   }
 
+  /// Android `ApplicationLayerHighHeartRatePacket`: `[open, bpm]`.
+  static Uint8List encodeHighHeartRateReminder(JWHighHeartRateReminder value) {
+    _range(value.thresholdBpm, 40, 220, 'highHeartRate thresholdBpm');
+    return Uint8List.fromList([
+      value.enabled ? 0x01 : 0x00,
+      value.thresholdBpm & 0xff,
+    ]);
+  }
+
+  static JWHighHeartRateReminder decodeHighHeartRateReminder(Uint8List value) {
+    _length(value, 2, 'high heart rate reminder');
+    // 固件关闭态可能回 0；读回时钳到有效阈值，避免抛错。
+    final raw = value[1] & 0xff;
+    final bpm = raw < 40 ? 40 : (raw > 220 ? 220 : raw);
+    return JWHighHeartRateReminder(
+      enabled: (value[0] & 0x01) == 0x01,
+      thresholdBpm: bpm,
+    );
+  }
+
   static Uint8List _encodeEnableTimeWindow(bool enabled, JWTimeRange time) =>
       Uint8List.fromList([
         (enabled ? 0x40 : 0) |

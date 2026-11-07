@@ -1,22 +1,30 @@
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
+import 'jw_data_units.dart';
+
 String jwHistoryRecordSummary(Object record) {
   return switch (record) {
     JWActivity r =>
-      '${r.time.toIso8601String()} · 步数 ${r.steps} · 距离 ${r.distance} · 能量 ${r.energy}',
-    JWSleep r => '${r.time.toIso8601String()} · 模式 ${r.mode}',
+      '${r.time.toIso8601String()} · 步数 ${r.steps} · '
+          '${jwDataFormatKm(r.distance)} km · ${jwDataFormatKcal(r.energy)} kcal',
+    JWSleep r =>
+      '${r.time.toIso8601String()} · ${jwDataSleepModeLabel(r.mode)}',
     JWHeartRate r =>
       '${r.time.toIso8601String()} · 心率 ${r.heartRate} bpm',
     JWTemperature r =>
-      '${r.time.toIso8601String()} · 皮温 ${r.skinTemperature} · 热应激 ${r.heatStress}',
+      '${r.time.toIso8601String()} · 皮温 ${r.skinTemperature} ℃ · 热应激 ${r.heatStress}',
     JWBloodPressure r =>
       '${r.time.toIso8601String()} · ${r.systolic}/${r.diastolic} mmHg',
     JWBloodOxygen r =>
-      '${r.time.toIso8601String()} · SpO₂ ${r.value}${r.high != null ? ' (${r.low}-${r.high})' : ''}',
-    JWHrv r => '${r.time.toIso8601String()} · SDNN ${r.sdnn}',
+      '${r.time.toIso8601String()} · SpO₂ ${r.value}%'
+          '${r.high != null ? ' (${r.low}-${r.high})' : ''}',
+    JWHrv r => '${r.time.toIso8601String()} · SDNN ${r.sdnn} ms',
     JWPressure r => '${r.time.toIso8601String()} · 压力 ${r.value}',
+    JWBloodGlucose r =>
+      '${r.time.toIso8601String()} · ${jwDataFormatMmol(r.value)} mmol/L',
     JWSport r =>
-      '${r.time.toIso8601String()} · 模式 ${r.mode} · ${r.duration}s · 步 ${r.steps}',
+      '${r.time.toIso8601String()} · ${jwDataSportModeLabel(r.mode)} · '
+          '${jwDataFormatDuration(r.duration)} · 步 ${r.steps}',
     _ => record.runtimeType.toString(),
   };
 }
@@ -26,14 +34,17 @@ Map<String, Object?> jwHistoryRecordFields(Object record) {
     JWActivity r => {
         'time': r.time.toIso8601String(),
         'steps': r.steps,
-        'distance': r.distance,
-        'energy': r.energy,
+        'distanceMeters': r.distance,
+        'distanceKm': jwDataMetersToKm(r.distance),
+        'energyCal': r.energy,
+        'energyKcal': jwDataCalToKcal(r.energy),
         'activeTime': r.activeTime,
         'mode': r.mode,
       },
     JWSleep r => {
         'time': r.time.toIso8601String(),
         'mode': r.mode,
+        'modeLabel': jwDataSleepModeLabel(r.mode),
       },
     JWHeartRate r => {
         'time': r.time.toIso8601String(),
@@ -68,6 +79,7 @@ Map<String, Object?> jwHistoryRecordFields(Object record) {
     JWSport r => {
         'time': r.time.toIso8601String(),
         'mode': r.mode,
+        'modeLabel': jwDataSportModeLabel(r.mode),
         'duration': r.duration,
         'pauseCount': r.pauseCount,
         'pauseDuration': r.pauseDuration,

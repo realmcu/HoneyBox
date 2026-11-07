@@ -143,10 +143,23 @@ await session.setGoals(
 await session.dispose();
 ''';
 
+  static const clearDeviceData = '''
+await session.clearDeviceData(confirmed: true);
+// Device typically reboots; dispose the local session afterwards.
+await session.dispose();
+''';
+
   static const heartRateAuto = '''
 final cfg = await session.measure.readHeartRateAutoMeasure();
 await session.measure.setHeartRateAutoMeasure(
   JWAutoMeasureConfig(enabled: true, intervalMinutes: 10),
+);
+''';
+
+  static const highHeartRate = '''
+final cfg = await session.readHighHeartRateReminder();
+await session.setHighHeartRateReminderVerified(
+  JWHighHeartRateReminder(enabled: true, thresholdBpm: 180),
 );
 ''';
 

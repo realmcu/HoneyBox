@@ -68,15 +68,8 @@ final class JwHistorySyncRunController extends ChangeNotifier
     }
     _log('正在重置设备同步标记…');
     notifyListeners();
-    final payload = await session.resetHistorySyncMarkers();
-    if (payload.isEmpty) {
-      _log('设备已应答，可再次发起同步');
-    } else {
-      _log(
-        '设备已应答（${payload.length} 字节） '
-        '${JwHistorySyncRunController._hexPreview(payload)}',
-      );
-    }
+    await session.resetHistorySyncMarkers();
+    _log('已发送同步重置（0x05/0xFA），可再次发起同步');
     notifyListeners();
   }
 

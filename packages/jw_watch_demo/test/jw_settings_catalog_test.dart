@@ -16,8 +16,13 @@ void main() {
     expect(ids.contains(JwSettingsItemId.watchFace), isTrue);
     expect(ids.contains(JwSettingsItemId.firmwareUpdate), isTrue);
     expect(ids.contains(JwSettingsItemId.eventRemind), isTrue);
+    expect(ids.contains(JwSettingsItemId.alarm), isTrue);
     expect(ids.contains(JwSettingsItemId.doNotDisturb), isFalse);
     expect(ids.contains(JwSettingsItemId.disconnect), isFalse);
+    expect(
+      groups.expand((g) => g.items).any((i) => i.title == '标签闹钟'),
+      isFalse,
+    );
 
     final event = groups
         .expand((g) => g.items)
@@ -55,6 +60,12 @@ void main() {
         .expand((g) => g.items)
         .firstWhere((i) => i.id == JwSettingsItemId.watchFace);
     expect(watchFace.implStatus, JwSettingsImplStatus.deferredThisSprint);
+
+    final clearData = groups
+        .expand((g) => g.items)
+        .firstWhere((i) => i.id == JwSettingsItemId.clearData);
+    expect(clearData.implStatus, JwSettingsImplStatus.sdkReady);
+    expect(clearData.apiCode, isNotNull);
 
     expect(jwSettingsImplStatusLabel(JwSettingsImplStatus.sdkReady), isNull);
     expect(

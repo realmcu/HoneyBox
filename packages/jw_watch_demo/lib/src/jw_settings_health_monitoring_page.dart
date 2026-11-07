@@ -125,6 +125,19 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
       _heatEndHour = cfg.schedule.endHour;
       _heatEndMinute = cfg.schedule.endMinute;
     });
+    await _loadOne(() async {
+      // App：rateReminder || highHrv 任一支持即可。
+      if (_deviceSupport(const [
+            JWDeviceFunction.rateReminder,
+            JWDeviceFunction.highHrv,
+          ]) ==
+          false) {
+        return;
+      }
+      final cfg = await controller.readHighHeartRateReminder();
+      _highHrAlarmEnabled = cfg.enabled;
+      _highHrAlarmValue = cfg.thresholdBpm;
+    });
     if (!mounted) return;
     setState(() => _loading = false);
   }
@@ -393,6 +406,16 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
   }
 
   Future<void> _openHighHrAlarm() async {
+    if (_deviceSupport(const [
+          JWDeviceFunction.rateReminder,
+          JWDeviceFunction.highHrv,
+        ]) ==
+        false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前设备不支持高心率警报')),
+      );
+      return;
+    }
     final result = await Navigator.of(context).push<_HighHrAlarmResult>(
       MaterialPageRoute(
         builder: (_) => JwHighHeartRateAlarmPage(
@@ -402,10 +425,31 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
       ),
     );
     if (result == null || !mounted) return;
+    final previousEnabled = _highHrAlarmEnabled;
+    final previousValue = _highHrAlarmValue;
     setState(() {
       _highHrAlarmEnabled = result.enabled;
       _highHrAlarmValue = result.maxRate;
     });
+    await _apply(
+      id: 'high_hr',
+      revert: () {
+        if (mounted) {
+          setState(() {
+            _highHrAlarmEnabled = previousEnabled;
+            _highHrAlarmValue = previousValue;
+          });
+        }
+      },
+      op: () async {
+        await controller.setHighHeartRateReminder(
+          JWHighHeartRateReminder(
+            enabled: result.enabled,
+            thresholdBpm: result.maxRate,
+          ),
+        );
+      },
+    );
   }
 
   String get _highHrSummary =>
@@ -464,10 +508,15 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
                 keyName: 'jw.demo.health.high_hr',
                 iconAsset: JwSettingsIcons.highHeartRate,
                 title: '高心率警报',
+                apiCode: JwSettingsApiExamples.highHeartRate,
                 value: _highHrSummary,
+                // App UKBridge：rateReminder 或 highHrv 任一支持即可。
                 tag: _statusTag(
-                  sdkReady: false,
-                  requiredFunctions: const [JWDeviceFunction.rateReminder],
+                  sdkReady: true,
+                  requiredFunctions: const [
+                    JWDeviceFunction.rateReminder,
+                    JWDeviceFunction.highHrv,
+                  ],
                 ),
                 onTap: _openHighHrAlarm,
               ),
@@ -788,6 +837,24 @@ class _JwHighHeartRateAlarmPageState extends State<JwHighHeartRateAlarmPage> {
   late bool _enabled = widget.enabled;
   late int _maxRate = widget.maxRate;
 
+  static final _bpmValues = [for (var i = 100; i <= 220; i += 5) i];
+
+  Future<void> _pickMaxRate() async {
+    final selected = await JwDemoDialogs.showSinglePicker<int>(
+      context,
+      title: '最高心率',
+      values: _bpmValues,
+      labelOf: (v) => '$v',
+      initial: _maxRate.clamp(100, 220),
+      dataTips: '次/分',
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _maxRate = selected;
+      _enabled = true;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -822,20 +889,9 @@ class _JwHighHeartRateAlarmPageState extends State<JwHighHeartRateAlarmPage> {
             children: [
               SwitchListTile(
                 key: const Key('jw.demo.health.high_hr.switch'),
-                title: const Row(
-                  children: [
-                    Flexible(child: Text('高心率警报')),
-                    SizedBox(width: 8),
-                    JwSettingsStatusChip(JwSettingsImplStatus.sdkUnsupported),
-                  ],
-                ),
+                title: const Text('高心率警报'),
                 value: _enabled,
-                onChanged: (v) {
-                  setState(() => _enabled = v);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('高心率警报：SDK 未支持')),
-                  );
-                },
+                onChanged: (v) => setState(() => _enabled = v),
               ),
               ListTile(
                 title: const Text('最高心率'),
@@ -843,29 +899,7 @@ class _JwHighHeartRateAlarmPageState extends State<JwHighHeartRateAlarmPage> {
                   '$_maxRate',
                   style: const TextStyle(color: Color(0xFF818181)),
                 ),
-                onTap: () async {
-                  final values = [for (var i = 100; i <= 220; i += 5) i];
-                  final selected = await showModalBottomSheet<int>(
-                    context: context,
-                    builder: (ctx) => SafeArea(
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: [
-                          for (final v in values)
-                            ListTile(
-                              title: Text('$v'),
-                              trailing: v == _maxRate
-                                  ? const Icon(Icons.check,
-                                      color: JwSettingsAppTheme.accent)
-                                  : null,
-                              onTap: () => Navigator.pop(ctx, v),
-                            ),
-                        ],
-                      ),
-                    ),
-                  );
-                  if (selected != null) setState(() => _maxRate = selected);
-                },
+                onTap: _pickMaxRate,
               ),
             ],
           ),
