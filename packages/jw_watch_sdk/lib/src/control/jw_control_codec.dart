@@ -6,8 +6,13 @@ import 'jw_weather_info.dart';
 
 /// Encoders aligned with Android V2 `FunctionPacketHelper` control keys.
 abstract final class JWControlCodec {
+  /// Matches `ApplicationLayer` `CAMERA_CONTROL_APP_IN_FORE` (0x00) /
+  /// `CAMERA_CONTROL_APP_IN_BACK` (0x01) — see `WristbandManager.sendCameraControlCommand`.
+  ///
+  /// V2 `FunctionPacketHelper.prepareSetTakePhotoControlPacket` uses the opposite
+  /// boolean mapping; field devices follow ApplicationLayer semantics.
   static Uint8List encodeTakePhotoControl(bool enable) =>
-      Uint8List.fromList([enable ? 0x01 : 0x00]);
+      Uint8List.fromList([enable ? 0x00 : 0x01]);
 
   static Uint8List encodeMusicStatus(JWMusicStatusInfo info) {
     var value = 0;

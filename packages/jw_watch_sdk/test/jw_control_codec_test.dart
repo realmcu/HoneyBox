@@ -8,15 +8,18 @@ import 'package:jw_watch_sdk/src/control/jw_music_status_info.dart';
 import 'package:jw_watch_sdk/src/control/jw_weather_info.dart';
 
 void main() {
-  test('control commands match Android V2 FunctionPacketHelper', () {
+  test('take photo control matches ApplicationLayer camera fore/back bytes', () {
     expect(
       encodeJWRequest(JWControlProtocol.setTakePhotoControl(true)),
-      Uint8List.fromList([7, 0, 0x11, 0, 1, 1]),
+      Uint8List.fromList([7, 0, 0x11, 0, 1, 0]),
     );
     expect(
       encodeJWRequest(JWControlProtocol.setTakePhotoControl(false)),
-      Uint8List.fromList([7, 0, 0x11, 0, 1, 0]),
+      Uint8List.fromList([7, 0, 0x11, 0, 1, 1]),
     );
+  });
+
+  test('music control request framing', () {
     expect(
       encodeJWRequest(JWControlProtocol.setMusicStatus(
         const JWMusicStatusInfo(

@@ -108,7 +108,7 @@ class _JwControlLabPageState extends State<JwControlLabPage>
 
   @override
   void onTakePhoto() {
-    _append('拍照手势', 'onTakePhoto（请在「摇摇拍照」页验证快门流程）');
+    _append('拍照手势', 'onTakePhoto（请在「遥控拍照」页验证快门流程）');
   }
 
   Future<void> _pushSampleWeather() async {
@@ -258,7 +258,7 @@ class _JwControlLabPageState extends State<JwControlLabPage>
                 const SizedBox(height: 8),
                 Text(
                   '查找手机：表端触发后本机振动+提示音（2.0 可发关闭停止）；'
-                  '音乐：在表上按播/切歌键；拍照请进设置「摇摇拍照」。',
+                  '音乐：在表上按播/切歌键；拍照请进设置「遥控拍照」。',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),

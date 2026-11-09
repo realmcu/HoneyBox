@@ -109,7 +109,7 @@ List<JwSettingsGroup> jwSettingsCatalog() => const [
           JwSettingsItem(
             id: JwSettingsItemId.takePhoto,
             group: JwSettingsGroupId.shortcuts,
-            title: '摇摇拍照',
+            title: '遥控拍照',
             implStatus: JwSettingsImplStatus.sdkReady,
             icon: Icons.camera_alt_outlined,
             iconAsset: JwSettingsIcons.takePhoto,
