@@ -17,6 +17,8 @@ import '../model/jw_identity.dart';
 import '../model/jw_session_state.dart';
 import '../settings/jw_settings_models.dart';
 import '../settings/jw_settings_codec.dart';
+import '../control/jw_control.dart';
+import '../control/jw_control_coordinator.dart';
 import '../measure/jw_measure.dart';
 import '../measure/jw_measure_coordinator.dart';
 import '../today/jw_today_activity_codec.dart';
@@ -74,6 +76,8 @@ final class JWWatchSession {
 
   JWMeasureCoordinator? _measureCoordinator;
   JWMeasure? _measure;
+  JWControlCoordinator? _controlCoordinator;
+  JWControl? _control;
 
   /// Measure control and spot-measure listeners for the authenticated session.
   JWMeasure get measure => _measure ??= JWMeasure(
@@ -87,6 +91,14 @@ final class JWWatchSession {
         ),
         isReady: () => _state.isReady,
         isHealthSyncActive: () => _healthSync != null,
+        functionInfo: () => _state.functionInfo,
+      );
+
+  /// Take-photo, find-phone, music, and weather (`cmd 0x07`).
+  JWControl get control => _control ??= JWControl(
+        link: _link,
+        coordinator: _controlCoordinator ??= JWControlCoordinator(link: _link),
+        isReady: () => _state.isReady,
         functionInfo: () => _state.functionInfo,
       );
 
@@ -829,7 +841,9 @@ final class JWWatchSession {
       JWFeature.history:
           support(JWFeature.history, bit(34) || bit(36) || bit(37)),
       JWFeature.notifications: support(JWFeature.notifications, bit(40)),
-      JWFeature.controls: support(JWFeature.controls, bit(52) || bit(54)),
+      JWFeature.controls: support(
+          JWFeature.controls,
+          bit(0) || bit(12) || bit(13) /* music, camera, findPhone */),
       JWFeature.sport: support(JWFeature.sport, bit(3) || bit(48)),
       JWFeature.advancedHealth: support(
           JWFeature.advancedHealth, bit(0) || bit(2) || bit(5) || bit(15)),
@@ -912,6 +926,9 @@ final class JWWatchSession {
     _measureCoordinator?.dispose();
     _measureCoordinator = null;
     _measure = null;
+    _controlCoordinator?.dispose();
+    _controlCoordinator = null;
+    _control = null;
     await _linkFailures?.cancel();
     await _link.dispose();
     _state = _state.copyWith(phase: JWSessionPhase.disposed);

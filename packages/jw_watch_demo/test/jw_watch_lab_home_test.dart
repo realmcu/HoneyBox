@@ -3,39 +3,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jw_watch_demo/jw_watch_demo.dart';
 
 void main() {
-  testWidgets('shows four stable navigation destinations before connection',
+  testWidgets('shows three navigation destinations before connection',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(home: JWWatchLabHome()));
 
     expect(find.byKey(const Key('jw.demo.tab.home')), findsOneWidget);
     expect(find.byKey(const Key('jw.demo.tab.data')), findsOneWidget);
     expect(find.byKey(const Key('jw.demo.tab.settings')), findsOneWidget);
-    expect(find.byKey(const Key('jw.demo.tab.features')), findsOneWidget);
-    expect(find.byKey(const Key('jw.demo.tab.scenarios')), findsNothing);
-    expect(find.byKey(const Key('jw.demo.tab.device')), findsNothing);
-    expect(find.byKey(const Key('jw.demo.session_status')), findsOneWidget);
+    expect(find.byKey(const Key('jw.demo.tab.features')), findsNothing);
+    expect(find.byKey(const Key('jw.demo.session_status')), findsNothing);
+    expect(find.byKey(const Key('jw.demo.home.session_card')), findsNothing);
   });
 
-  testWidgets('locks data settings and features tabs before session ready',
+  testWidgets('data and settings tabs stay on home before session ready',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(home: JWWatchLabHome()));
 
     await tester.tap(find.byKey(const Key('jw.demo.tab.data')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('jw.demo.page.data.locked')), findsOneWidget);
-    expect(find.text('会话未就绪'), findsOneWidget);
+    expect(find.byKey(const Key('jw.demo.page.home')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('jw.demo.tab.settings')));
-    await tester.pumpAndSettle();
-    expect(
-        find.byKey(const Key('jw.demo.page.settings.locked')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('jw.demo.tab.features')));
-    await tester.pumpAndSettle();
-    expect(
-        find.byKey(const Key('jw.demo.page.features.locked')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('jw.demo.page.features.locked.go_home')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('jw.demo.page.home')), findsOneWidget);
   });

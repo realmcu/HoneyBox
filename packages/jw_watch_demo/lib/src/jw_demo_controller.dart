@@ -116,7 +116,7 @@ class JWDemoController extends ChangeNotifier {
   void _notifyUi() {
     if (_disposed || _uiNotifyScheduled) return;
     _uiNotifyScheduled = true;
-    SchedulerBinding.instance.addPostFrameCallback((_) {
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
       _uiNotifyScheduled = false;
       if (!_disposed) notifyListeners();
     });
@@ -490,6 +490,8 @@ class JWDemoController extends ChangeNotifier {
     _notifyUi();
     try {
       await operation(session);
+      _state = session.state;
+      _notifyUi();
     } catch (error) {
       _error = error;
       sheetError.value = error;

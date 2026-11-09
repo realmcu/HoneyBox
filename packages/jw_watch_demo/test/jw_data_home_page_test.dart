@@ -33,6 +33,27 @@ void main() {
         find.byKey(const Key('jw.demo.data.card.heartRate')), findsOneWidget);
   });
 
+  testWidgets('data detail hides manual measure without device capabilities',
+      (tester) async {
+    final controller = JWDemoController();
+    addTearDown(controller.dispose);
+    final hr =
+        jwDataCatalog().firstWhere((e) => e.id == JwDataTypeId.heartRate);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: JwDataDetailPage(controller: controller, item: hr),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('jw.demo.data.detail.manual_measure.heartRate')),
+      findsNothing,
+    );
+    expect(find.text('手动测量'), findsNothing);
+  });
+
   testWidgets('detail pages open without session (empty local DB)', (tester) async {
     final controller = JWDemoController();
     addTearDown(controller.dispose);

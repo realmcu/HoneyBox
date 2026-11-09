@@ -20,6 +20,8 @@ import 'jw_data_units.dart';
 import 'jw_demo_controller.dart';
 import 'jw_health_app_theme.dart';
 import 'jw_health_date_nav_bar.dart';
+import 'jw_measure_detail_page.dart';
+import 'jw_measure_module.dart';
 
 /// App `Watch*DataFragment` 风格详情：亮色顶区图表 + 长按 buoy + 下方统计。
 class JwDataDetailPage extends StatefulWidget {
@@ -391,8 +393,19 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) => _buildScaffold(context),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     const topH = JwHealthAppTheme.topPanelHeight;
+
+    final manualKind = jwSpotMeasureModuleForDataType(widget.item.id);
+    final showManualMeasure = manualKind != null &&
+        jwDataManualMeasureAvailable(widget.item.id, widget.controller);
 
     return Scaffold(
       backgroundColor: JwHealthAppTheme.pageBg,
@@ -407,6 +420,23 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
             fontSize: 17,
           ),
         ),
+        actions: [
+          if (showManualMeasure)
+            TextButton(
+              key: jwDataManualMeasureButtonKey(widget.item.id),
+              onPressed: () {
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => JWMeasureDetailPage(
+                      controller: widget.controller,
+                      kind: manualKind,
+                    ),
+                  ),
+                );
+              },
+              child: const Text('手动测量'),
+            ),
+        ],
       ),
       body: Column(
         children: [

@@ -2,6 +2,10 @@
 library;
 
 export 'src/capability/jw_feature.dart';
+export 'src/control/jw_control.dart';
+export 'src/control/jw_control_listener.dart';
+export 'src/control/jw_music_status_info.dart';
+export 'src/control/jw_weather_info.dart';
 export 'src/debug/jw_debug_log.dart';
 export 'src/connection/jw_scan_device.dart';
 export 'src/connection/jw_session.dart';

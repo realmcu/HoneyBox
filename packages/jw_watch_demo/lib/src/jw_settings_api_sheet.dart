@@ -123,6 +123,25 @@ await session.findDevice(true);  // 开始查找
 await session.findDevice(false); // 停止查找
 ''';
 
+  static const takePhoto = '''
+session.control.addControlListener(listener);
+await session.control.setTakePhotoControl(true);
+// 表端手势 -> listener.onTakePhoto()
+await session.control.setTakePhotoControl(false);
+''';
+
+  static const controlLab = '''
+session.control.addControlListener(listener);
+// onFindPhone(enable: ...)  查找手机
+// onMusicControl(0..6)      音乐键
+await session.control.setMusicStatus(JWMusicStatusInfo(
+  hasPlayer: true,
+  playing: true,
+  volumePercent: 12,
+));
+await session.control.setWeather(weatherInfo);
+''';
+
   static const notifyRemind = '''
 final settings = await session.readNotifySettings();
 await session.setNotifyChannelVerified(JWNotifyChannel.wechat, true);

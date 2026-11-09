@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
+import 'jw_data_catalog.dart';
 import 'jw_demo_controller.dart';
 
 enum JWMeasureModuleKind {
@@ -136,3 +137,27 @@ String jwMeasureModuleSubtitle(JWMeasureModuleKind kind, JWDemoController c) {
   if (parts.isEmpty) return '设备能力';
   return parts.join(' · ');
 }
+
+/// 数据详情页可跳转的手动点测模块；无点测能力的类型返回 `null`。
+JWMeasureModuleKind? jwSpotMeasureModuleForDataType(JwDataTypeId id) =>
+    switch (id) {
+      JwDataTypeId.heartRate => JWMeasureModuleKind.heartRate,
+      JwDataTypeId.bloodOxygen => JWMeasureModuleKind.bloodOxygen,
+      JwDataTypeId.bloodPressure => JWMeasureModuleKind.bloodPressure,
+      JwDataTypeId.temperature => JWMeasureModuleKind.temperature,
+      JwDataTypeId.bloodSugar => JWMeasureModuleKind.bloodGlucose,
+      JwDataTypeId.pressure => JWMeasureModuleKind.pressure,
+      _ => null,
+    };
+
+bool jwDataManualMeasureAvailable(
+  JwDataTypeId id,
+  JWDemoController controller,
+) {
+  final kind = jwSpotMeasureModuleForDataType(id);
+  if (kind == null || !kind.supportsSpotMeasure) return false;
+  return kind.visible(controller);
+}
+
+Key jwDataManualMeasureButtonKey(JwDataTypeId id) =>
+    Key('jw.demo.data.detail.manual_measure.${id.name}');

@@ -8,6 +8,8 @@ import 'jw_demo_dialogs.dart';
 import 'jw_device_pages.dart';
 import 'jw_event_reminder_page.dart';
 import 'jw_find_device_page.dart';
+import 'jw_control_lab_page.dart';
+import 'jw_take_photo_page.dart';
 import 'jw_notify_remind_page.dart';
 import 'jw_settings_app_widgets.dart';
 import 'jw_settings_basic_pages.dart';
@@ -152,6 +154,10 @@ class _JwSettingsHomePageState extends State<JwSettingsHomePage> {
     final page = switch (item.id) {
       JwSettingsItemId.findDevice =>
         JwFindDevicePage(controller: controller),
+      JwSettingsItemId.takePhoto =>
+        JwTakePhotoPage(controller: controller),
+      JwSettingsItemId.deviceControl =>
+        JwControlLabPage(controller: controller),
       JwSettingsItemId.notifyRemind =>
         JwNotifyRemindPage(controller: controller),
       JwSettingsItemId.eventRemind =>

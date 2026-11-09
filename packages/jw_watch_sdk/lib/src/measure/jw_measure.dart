@@ -9,7 +9,7 @@ import 'jw_measure_data_listener.dart';
 import 'jw_measure_models.dart';
 import 'jw_measure_protocol.dart';
 
-/// HL private-protocol measure control (Android V2 `JWFunctionManager` subset).
+/// HL measure commands (`cmd 0x05` / `0x08` spot and auto measure).
 final class JWMeasure {
   JWMeasure({
     required JWLink link,

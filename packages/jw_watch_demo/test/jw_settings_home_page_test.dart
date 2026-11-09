@@ -95,7 +95,28 @@ void main() {
     expect(find.textContaining('session.findDevice'), findsOneWidget);
   });
 
-  testWidgets('placeholder opens for SDK unsupported row', (tester) async {
+  testWidgets('device control opens lab from settings', (tester) async {
+    final controller = JWDemoController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: JwSettingsHomePage(controller: controller),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('jw.demo.settings.row.deviceControl')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byKey(const Key('jw.demo.control.lab')), findsOneWidget);
+    expect(find.text('设备控制'), findsWidgets);
+  });
+
+  testWidgets('take photo opens control page', (tester) async {
     final controller = JWDemoController();
     addTearDown(controller.dispose);
 
@@ -109,12 +130,13 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('jw.demo.settings.row.takePhoto')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('摇摇拍照'), findsWidgets);
-    expect(
-      find.textContaining('jw_watch_sdk 尚未提供对应公开 API'),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('jw.demo.settings.take_photo.page')),
+        findsOneWidget);
+    expect(find.byKey(const Key('jw.demo.settings.take_photo.api')),
+        findsOneWidget);
+    expect(find.text('未连接设备'), findsOneWidget);
   });
 }
