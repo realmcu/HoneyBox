@@ -26,3 +26,4 @@ flutter:
   assets:
     - assets/settings/
     - assets/health/
+    - assets/data_home/

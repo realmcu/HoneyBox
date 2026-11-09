@@ -19,6 +19,8 @@ import '../settings/jw_settings_models.dart';
 import '../settings/jw_settings_codec.dart';
 import '../measure/jw_measure.dart';
 import '../measure/jw_measure_coordinator.dart';
+import '../today/jw_today_activity_codec.dart';
+import '../today/jw_today_activity_models.dart';
 import 'jw_link.dart';
 import 'jw_protocol.dart';
 
@@ -114,6 +116,18 @@ final class JWWatchSession {
     ).run();
     _healthSync = run;
     return run.whenComplete(() => _healthSync = null);
+  }
+
+  /// Reads today step / calorie / distance totals from the watch (HL §5.0B/§5.0C).
+  ///
+  /// Does not read [historyStore] and does not persist the snapshot. Requires
+  /// [JWDeviceFunction.todayAdjust] when [JWSessionState.functionInfo] is present.
+  Future<JWTodayActivitySummary> fetchTodayActivitySummary() async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.todayAdjust, 'today activity summary');
+    final reply =
+        await _link.request(JWProtocolCommands.queryTodayActivitySummary);
+    return decodeJWTodayActivitySummary(reply.value);
   }
 
   /// Clears device-side history sync markers so a later [syncHealthData] can

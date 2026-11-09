@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -27,11 +28,17 @@ class JwAppBpTouchChart extends StatefulWidget {
   const JwAppBpTouchChart({
     super.key,
     required this.hours,
-    required this.onSelection,
+    this.onSelection,
+    this.axisMax = 180,
+    this.axisMin = 30,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppBpHourBucket> hours;
-  final ValueChanged<JwAppBpTouchSelection?> onSelection;
+  final ValueChanged<JwAppBpTouchSelection?>? onSelection;
+  final int axisMax;
+  final int axisMin;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppBpTouchChart> createState() => _JwAppBpTouchChartState();
@@ -39,8 +46,6 @@ class JwAppBpTouchChart extends StatefulWidget {
 
 class _JwAppBpTouchChartState extends State<JwAppBpTouchChart> {
   static const double _rightLabel = 30;
-  static const int _axisMax = 180;
-  static const int _axisMin = 30;
 
   int _touchHour = -1;
   int _downHour = -1;
@@ -59,7 +64,7 @@ class _JwAppBpTouchChartState extends State<JwAppBpTouchChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -90,10 +95,13 @@ class _JwAppBpTouchChartState extends State<JwAppBpTouchChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
-  double _eachWidth(double width) => (width - _rightLabel) / 24.0;
+  double _chartWidth(double width) =>
+      JwAppChartLayout.showYAxis(widget.mode) ? width - _rightLabel : width;
+
+  double _eachWidth(double width) => _chartWidth(width) / 24.0;
 
   int _hourFromDx(double dx, double width) {
     final ew = _eachWidth(width);
@@ -124,7 +132,7 @@ class _JwAppBpTouchChartState extends State<JwAppBpTouchChart> {
     final b = _bucket(hour);
     final ew = _eachWidth(width);
     final anchorX = (hour + 0.5) * ew;
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppBpTouchSelection(
         high: b.avgHigh,
         low: b.avgLow,
@@ -137,11 +145,24 @@ class _JwAppBpTouchChartState extends State<JwAppBpTouchChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
         final ew = _eachWidth(width);
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _BpPainter(
+            hours: widget.hours,
+            axisMax: widget.axisMax,
+            axisMin: widget.axisMin,
+            touchHour: interactive ? _touchHour : -1,
+            eachWidth: ew,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -179,16 +200,7 @@ class _JwAppBpTouchChartState extends State<JwAppBpTouchChart> {
           },
           onPanEnd: (_) => _clear(),
           onPanCancel: _clear,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _BpPainter(
-              hours: widget.hours,
-              axisMax: _axisMax,
-              axisMin: _axisMin,
-              touchHour: _touchHour,
-              eachWidth: ew,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -202,6 +214,7 @@ class _BpPainter extends CustomPainter {
     required this.axisMin,
     required this.touchHour,
     required this.eachWidth,
+    required this.mode,
   });
 
   final List<JwAppBpHourBucket> hours;
@@ -209,9 +222,8 @@ class _BpPainter extends CustomPainter {
   final int axisMin;
   final int touchHour;
   final double eachWidth;
+  final JwAppChartMode mode;
 
-  static const double _top = 19;
-  static const double _bottomText = 60;
   static const double _rightLabel = 30;
   static const double _labelPadRight = 5;
   static const double _capHalfW = 4.5;
@@ -222,6 +234,17 @@ class _BpPainter extends CustomPainter {
   static const double _bandHighStrokeFactor = 50;
   static const double _bandLowStrokeFactor = 20;
 
+  double get _top => JwAppChartLayout.top(mode);
+
+  double get _bottomText => JwAppChartLayout.bottomText(mode, detail: 60);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
+
+  double _chartRight(double width) =>
+      _showYAxis ? width - _rightLabel : width;
+
   double _yForBp(double value, double chartBottom) {
     final eh = (chartBottom - _top) / (axisMax - axisMin);
     return _top + (axisMax - value) * eh;
@@ -229,7 +252,7 @@ class _BpPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final chartRight = size.width - _rightLabel;
+    final chartRight = _chartRight(size.width);
     final chartBottom = size.height - _bottomText;
     final eh = (chartBottom - _top) / (axisMax - axisMin);
     final text = TextPainter(textDirection: ui.TextDirection.ltr);
@@ -257,38 +280,49 @@ class _BpPainter extends CustomPainter {
     final axisPaint = Paint()
       ..color = JwHealthAppTheme.bpHeadLine
       ..strokeWidth = 1;
-    canvas.drawLine(const Offset(0, _top), Offset(chartRight, _top), axisPaint);
+    canvas.drawLine(Offset(0, _top), Offset(chartRight, _top), axisPaint);
     canvas.drawLine(
       Offset(0, _yForBp(axisMin.toDouble(), chartBottom)),
       Offset(chartRight, _yForBp(axisMin.toDouble(), chartBottom)),
       axisPaint,
     );
 
-    for (var i = 0; i < 24; i++) {
-      final x = (i + 0.5) * eachWidth;
-      if (i == 0 || i == 23) {
-        canvas.drawCircle(
-          Offset(x, size.height - _bottomText + 20),
-          1.5,
-          Paint()..color = JwHealthAppTheme.bpText,
-        );
-      } else if (i % 4 == 0) {
-        final str = '${i.toString().padLeft(2, '0')}:00';
-        text.text = TextSpan(text: str, style: labelStyle);
-        text.layout();
-        text.paint(
-          canvas,
-          Offset(x - text.width / 2, size.height - _bottomText + 23),
-        );
+    if (_showXAxis) {
+      final dotY = mode == JwAppChartMode.home
+          ? JwAppChartLayout.xAxisDotY(size.height, _bottomText)
+          : JwAppChartLayout.xAxisDotYBpDetail(size.height, _bottomText);
+      final labelY = mode == JwAppChartMode.home
+          ? JwAppChartLayout.xAxisLabelY(size.height, _bottomText)
+          : JwAppChartLayout.xAxisLabelYBpDetail(size.height, _bottomText);
+      for (var i = 0; i < 24; i++) {
+        final x = (i + 0.5) * eachWidth;
+        if (i == 0 || i == 23) {
+          canvas.drawCircle(
+            Offset(x, dotY),
+            1.5,
+            Paint()..color = JwHealthAppTheme.bpText,
+          );
+        } else if (i % 4 == 0) {
+          final str = '${i.toString().padLeft(2, '0')}:00';
+          text.text = TextSpan(text: str, style: labelStyle);
+          text.layout();
+          text.paint(
+            canvas,
+            Offset(x - text.width / 2, labelY),
+          );
+        }
       }
     }
 
     final hasData =
         hours.any((h) => h.avgHigh > 0 && h.avgLow > 0);
-    if (!hasData) {
-      text.text = const TextSpan(
+    if (!hasData && JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无血压',
-        style: TextStyle(color: JwHealthAppTheme.bpEmpty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.bpEmpty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -298,7 +332,9 @@ class _BpPainter extends CustomPainter {
           _top + (chartBottom - _top) / 2 - 8,
         ),
       );
-    } else {
+      return;
+    }
+    if (hasData) {
       final linePaint = Paint()
         ..strokeWidth = _gradientStroke
         ..strokeCap = StrokeCap.round
@@ -361,30 +397,32 @@ class _BpPainter extends CustomPainter {
       }
     }
 
-    final labelRight = size.width - _labelPadRight;
-    const labelDy = 12.0;
-    text.text = TextSpan(text: '$axisMax', style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, _top - labelDy));
+    if (_showYAxis) {
+      final labelRight = size.width - _labelPadRight;
+      const labelDy = 12.0;
+      text.text = TextSpan(text: '$axisMax', style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, _top - labelDy));
 
-    text.text = const TextSpan(text: '130', style: TextStyle(color: JwHealthAppTheme.bpText, fontSize: 10.6));
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, _yForBp(130, chartBottom) - labelDy));
+      text.text = const TextSpan(text: '130', style: TextStyle(color: JwHealthAppTheme.bpText, fontSize: 10.6));
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, _yForBp(130, chartBottom) - labelDy));
 
-    text.text = const TextSpan(text: '80', style: TextStyle(color: JwHealthAppTheme.bpText, fontSize: 10.6));
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, _yForBp(80, chartBottom) - labelDy));
+      text.text = const TextSpan(text: '80', style: TextStyle(color: JwHealthAppTheme.bpText, fontSize: 10.6));
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, _yForBp(80, chartBottom) - labelDy));
 
-    text.text = const TextSpan(text: '60', style: TextStyle(color: JwHealthAppTheme.bpText, fontSize: 10.6));
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, _yForBp(60, chartBottom) - labelDy));
+      text.text = const TextSpan(text: '60', style: TextStyle(color: JwHealthAppTheme.bpText, fontSize: 10.6));
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, _yForBp(60, chartBottom) - labelDy));
 
-    text.text = TextSpan(text: '$axisMin', style: labelStyle);
-    text.layout();
-    text.paint(
-      canvas,
-      Offset(labelRight - text.width, _yForBp(axisMin.toDouble(), chartBottom) - labelDy),
-    );
+      text.text = TextSpan(text: '$axisMin', style: labelStyle);
+      text.layout();
+      text.paint(
+        canvas,
+        Offset(labelRight - text.width, _yForBp(axisMin.toDouble(), chartBottom) - labelDy),
+      );
+    }
   }
 
   JwAppBpHourBucket _bucket(int hour) {
@@ -403,5 +441,6 @@ class _BpPainter extends CustomPainter {
   bool shouldRepaint(covariant _BpPainter oldDelegate) =>
       oldDelegate.hours != hours ||
       oldDelegate.touchHour != touchHour ||
-      oldDelegate.eachWidth != eachWidth;
+      oldDelegate.eachWidth != eachWidth ||
+      oldDelegate.mode != mode;
 }

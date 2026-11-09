@@ -16,7 +16,6 @@ import 'jw_app_sport_day_chart.dart';
 import 'jw_app_step_touch_chart.dart';
 import 'jw_app_temp_touch_chart.dart';
 import 'jw_data_catalog.dart';
-import 'jw_data_mock.dart';
 import 'jw_data_units.dart';
 import 'jw_demo_controller.dart';
 import 'jw_health_app_theme.dart';
@@ -29,13 +28,11 @@ class JwDataDetailPage extends StatefulWidget {
     required this.controller,
     required this.item,
     this.initialDay,
-    this.useMock = false,
   });
 
   final JWDemoController controller;
   final JwDataTypeItem item;
   final DateTime? initialDay;
-  final bool useMock;
 
   @override
   State<JwDataDetailPage> createState() => _JwDataDetailPageState();
@@ -59,12 +56,16 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
   List<JwAppSleepSegment> _sleepSegments = const [];
 
   List<JwAppBpHourBucket> _bpHours = const [];
+  int _bpAxisMax = 180;
+  int _bpAxisMin = 30;
 
   List<JwAppSpo2HourBucket> _spo2Hours = const [];
+  int _spo2AxisMax = 100;
+  int _spo2AxisMin = 85;
 
   List<JwAppTempSlot> _tempSlots = const [];
-  double _tempAxisMax = 40;
-  double _tempAxisMin = 35;
+  double _tempAxisMax = 50;
+  double _tempAxisMin = 0;
   double _tempAvg = 0;
 
   List<JwAppHrvHourBucket> _hrvHours = const [];
@@ -75,8 +76,8 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
   int _pressureAvg = 0;
 
   List<JwAppGluHourBucket> _gluHours = const [];
-  double _gluAxisMax = 10;
-  double _gluAxisMin = 3;
+  double _gluAxisMax = 16.5;
+  double _gluAxisMin = 0;
   double _gluAvg = 0;
 
   List<JwAppSportHourBar> _sportBars = const [];
@@ -134,10 +135,14 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
     _hrAvg = 0;
     _sleepSegments = const [];
     _bpHours = const [];
+    _bpAxisMax = 180;
+    _bpAxisMin = 30;
     _spo2Hours = const [];
+    _spo2AxisMax = 100;
+    _spo2AxisMin = 85;
     _tempSlots = const [];
-    _tempAxisMax = 40;
-    _tempAxisMin = 35;
+    _tempAxisMax = 50;
+    _tempAxisMin = 0;
     _tempAvg = 0;
     _hrvHours = const [];
     _pressureSlots = const [];
@@ -145,8 +150,8 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
     _pressureAxisMin = 0;
     _pressureAvg = 0;
     _gluHours = const [];
-    _gluAxisMax = 10;
-    _gluAxisMin = 3;
+    _gluAxisMax = 16.5;
+    _gluAxisMin = 0;
     _gluAvg = 0;
     _sportBars = const [];
   }
@@ -258,59 +263,6 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
     });
   }
 
-  ({double max, double min, double avg}) _computeTempAxis(List<JwAppTempSlot> slots) {
-    double? maxT;
-    double? minT;
-    var sum = 0.0;
-    var n = 0;
-    for (final s in slots) {
-      for (final t in s.temps) {
-        if (t <= 0) continue;
-        maxT = maxT == null ? t : math.max(maxT, t);
-        minT = minT == null ? t : math.min(minT, t);
-        sum += t;
-        n++;
-      }
-    }
-    if (n == 0) {
-      return (max: 40.0, min: 35.0, avg: 0.0);
-    }
-    final avg = sum / n;
-    var axisMax = ((maxT! + 0.25) * 4).ceil() / 4;
-    var axisMin = ((minT! - 0.25) * 4).floor() / 4;
-    if (axisMax <= axisMin) axisMax = axisMin + 0.5;
-    return (max: axisMax, min: axisMin, avg: avg);
-  }
-
-  ({int axisMax, int avg}) _computePressureAxisMaxAndAvg(List<JwAppPressureSlot> slots) {
-    var maxV = 0;
-    var sum = 0;
-    var n = 0;
-    for (final s in slots) {
-      if (s.avg <= 0) continue;
-      if (s.avg > maxV) maxV = s.avg;
-      sum += s.avg;
-      n++;
-    }
-    final axisMax = maxV <= 0 ? 100 : ((maxV + 9) ~/ 10) * 10;
-    final avg = n == 0 ? 0 : (sum / n).round();
-    return (axisMax: axisMax, avg: avg);
-  }
-
-  double _computeGluAvgFromHours(List<JwAppGluHourBucket> hours) {
-    var sum = 0.0;
-    var n = 0;
-    for (final h in hours) {
-      for (final v in h.values) {
-        if (v > 0) {
-          sum += v;
-          n++;
-        }
-      }
-    }
-    return n == 0 ? 0 : sum / n;
-  }
-
   void _rebuildChartModels(List<Object> rows) {
     _clearChartModelCaches();
     switch (widget.item.id) {
@@ -330,13 +282,19 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
         break;
       case JwDataTypeId.bloodPressure:
         _bpHours = jwAppBuildBpHours(rows, _day);
+        final bp = jwAppBpAxis(_bpHours);
+        _bpAxisMax = bp.max;
+        _bpAxisMin = bp.min;
         break;
       case JwDataTypeId.bloodOxygen:
         _spo2Hours = jwAppBuildSpo2Hours(rows, _day);
+        final spo2 = jwAppSpo2Axis(_spo2Hours);
+        _spo2AxisMax = spo2.max;
+        _spo2AxisMin = spo2.min;
         break;
       case JwDataTypeId.temperature:
         _tempSlots = jwAppBuildTempSlots(rows, _day);
-        final t = _computeTempAxis(_tempSlots);
+        final t = jwAppTempAxis(_tempSlots);
         _tempAxisMax = t.max;
         _tempAxisMin = t.min;
         _tempAvg = t.avg;
@@ -346,16 +304,17 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
         break;
       case JwDataTypeId.pressure:
         _pressureSlots = jwAppBuildPressureSlots(rows, _day);
-        final p = _computePressureAxisMaxAndAvg(_pressureSlots);
+        final p = jwAppPressureAxis(_pressureSlots);
         _pressureAxisMax = p.axisMax;
         _pressureAxisMin = 0;
         _pressureAvg = p.avg;
         break;
       case JwDataTypeId.bloodSugar:
         _gluHours = jwAppBuildGluHours(rows, _day);
-        _gluAxisMax = 10;
-        _gluAxisMin = 3;
-        _gluAvg = _computeGluAvgFromHours(_gluHours);
+        final g = jwAppGluAxis(_gluHours);
+        _gluAxisMax = g.max;
+        _gluAxisMin = g.min;
+        _gluAvg = g.avg;
         break;
       case JwDataTypeId.sport:
         _sportBars = jwAppBuildSportHours(rows, _day);
@@ -376,28 +335,23 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
       _clearAllSelections();
     });
     try {
-      final List<Object> rows;
-      if (widget.useMock) {
-        rows = JwDataMock.queryDay(widget.item.id, _day);
-      } else {
-        final session = _session;
-        final scope = session?.historyScope;
-        if (session == null || scope == null) {
-          if (!mounted) return;
-          setState(() {
-            _records = const [];
-            _rebuildChartModels(const []);
-            _loading = false;
-          });
-          return;
-        }
-        rows = await jwDataQueryDay(
-          store: session.historyStore,
-          scope: scope,
-          id: widget.item.id,
-          day: _day,
-        );
+      final session = _session;
+      final scope = session?.historyScope;
+      if (session == null || scope == null) {
+        if (!mounted) return;
+        setState(() {
+          _records = const [];
+          _rebuildChartModels(const []);
+          _loading = false;
+        });
+        return;
       }
+      final rows = await jwDataQueryDay(
+        store: session.historyStore,
+        scope: scope,
+        id: widget.item.id,
+        day: _day,
+      );
       if (!mounted) return;
       setState(() {
         _records = rows;
@@ -438,7 +392,7 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final topH = JwHealthAppTheme.topPanelHeight(width);
+    const topH = JwHealthAppTheme.topPanelHeight;
 
     return Scaffold(
       backgroundColor: JwHealthAppTheme.pageBg,
@@ -447,7 +401,7 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
         foregroundColor: JwHealthAppTheme.toolbarFg,
         elevation: 0,
         title: Text(
-          widget.useMock ? '${widget.item.title}（模拟）' : widget.item.title,
+          widget.item.title,
           style: const TextStyle(
             color: JwHealthAppTheme.toolbarFg,
             fontSize: 17,
@@ -571,21 +525,6 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
                     ),
                   ),
                 ),
-                if (widget.useMock)
-                  const ColoredBox(
-                    color: Color(0xFFFFF6E5),
-                    child: Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Text(
-                        '模拟查询结果，图表交互对齐 App 长按 buoy',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF8A6D3B),
-                        ),
-                      ),
-                    ),
-                  ),
                 _buildStatsSection(),
                 const SizedBox(height: 24),
                 Padding(
@@ -660,12 +599,16 @@ class _JwDataDetailPageState extends State<JwDataDetailPage> {
         return JwAppBpTouchChart(
           key: ValueKey('bp-$_day'),
           hours: _bpHours,
+          axisMax: _bpAxisMax,
+          axisMin: _bpAxisMin,
           onSelection: _onBpSelection,
         );
       case JwDataTypeId.bloodOxygen:
         return JwAppSpo2TouchChart(
           key: ValueKey('spo2-$_day'),
           hours: _spo2Hours,
+          axisMax: _spo2AxisMax,
+          axisMin: _spo2AxisMin,
           onSelection: _onSpo2Selection,
         );
       case JwDataTypeId.temperature:
@@ -1327,18 +1270,16 @@ class _StepBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.stepBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(label: '步数', value: '${selection.steps}', unit: '步'),
-            const SizedBox(width: 12),
-            _BuoyMetric(label: '热量', value: '${selection.kcal}', unit: '千卡'),
-          ],
-        ),
+      color: JwHealthAppTheme.stepBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(label: '步数', value: '${selection.steps}', unit: '步'),
+          const SizedBox(width: 12),
+          _BuoyMetric(label: '热量', value: '${selection.kcal}', unit: '千卡'),
+        ],
       ),
     );
   }
@@ -1354,32 +1295,30 @@ class _HrBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.hrBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: '平均',
-              value: selection.avgHr > 0 ? '${selection.avgHr}' : '--',
-              unit: 'bpm',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最高',
-              value: selection.maxHr > 0 ? '${selection.maxHr}' : '--',
-              unit: 'bpm',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最低',
-              value: selection.minHr > 0 ? '${selection.minHr}' : '--',
-              unit: 'bpm',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.hrBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: '平均',
+            value: selection.avgHr > 0 ? '${selection.avgHr}' : '--',
+            unit: 'bpm',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最高',
+            value: selection.maxHr > 0 ? '${selection.maxHr}' : '--',
+            unit: 'bpm',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最低',
+            value: selection.minHr > 0 ? '${selection.minHr}' : '--',
+            unit: 'bpm',
+          ),
+        ],
       ),
     );
   }
@@ -1396,20 +1335,18 @@ class _SleepBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.sleepBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: stage,
-              value: '${selection.minutes}',
-              unit: '分钟',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.sleepBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: stage,
+            value: '${selection.minutes}',
+            unit: '分钟',
+          ),
+        ],
       ),
     );
   }
@@ -1425,26 +1362,24 @@ class _BpBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.bpBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: '收缩',
-              value: selection.high > 0 ? '${selection.high}' : '--',
-              unit: 'mmHg',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '舒张',
-              value: selection.low > 0 ? '${selection.low}' : '--',
-              unit: 'mmHg',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.bpBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: '收缩',
+            value: selection.high > 0 ? '${selection.high}' : '--',
+            unit: 'mmHg',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '舒张',
+            value: selection.low > 0 ? '${selection.low}' : '--',
+            unit: 'mmHg',
+          ),
+        ],
       ),
     );
   }
@@ -1460,26 +1395,24 @@ class _Spo2Buoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.spo2Buoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: '最高',
-              value: selection.max > 0 ? '${selection.max}' : '--',
-              unit: '%',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最低',
-              value: selection.min > 0 ? '${selection.min}' : '--',
-              unit: '%',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.spo2Buoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: '最高',
+            value: selection.max > 0 ? '${selection.max}' : '--',
+            unit: '%',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最低',
+            value: selection.min > 0 ? '${selection.min}' : '--',
+            unit: '%',
+          ),
+        ],
       ),
     );
   }
@@ -1495,32 +1428,30 @@ class _TempBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.tempBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: '平均',
-              value: selection.avg > 0 ? selection.avg.toStringAsFixed(1) : '--',
-              unit: '℃',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最高',
-              value: selection.max > 0 ? selection.max.toStringAsFixed(1) : '--',
-              unit: '℃',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最低',
-              value: selection.min > 0 ? selection.min.toStringAsFixed(1) : '--',
-              unit: '℃',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.tempBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: '平均',
+            value: selection.avg > 0 ? selection.avg.toStringAsFixed(1) : '--',
+            unit: '℃',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最高',
+            value: selection.max > 0 ? selection.max.toStringAsFixed(1) : '--',
+            unit: '℃',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最低',
+            value: selection.min > 0 ? selection.min.toStringAsFixed(1) : '--',
+            unit: '℃',
+          ),
+        ],
       ),
     );
   }
@@ -1536,26 +1467,24 @@ class _HrvBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.hrvBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: '最高',
-              value: selection.maxHrv > 0 ? '${selection.maxHrv}' : '--',
-              unit: 'ms',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最低',
-              value: selection.minHrv > 0 ? '${selection.minHrv}' : '--',
-              unit: 'ms',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.hrvBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: '最高',
+            value: selection.maxHrv > 0 ? '${selection.maxHrv}' : '--',
+            unit: 'ms',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最低',
+            value: selection.minHrv > 0 ? '${selection.minHrv}' : '--',
+            unit: 'ms',
+          ),
+        ],
       ),
     );
   }
@@ -1571,32 +1500,30 @@ class _PressureBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.pressureBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: '平均',
-              value: selection.avg > 0 ? '${selection.avg}' : '--',
-              unit: '',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最高',
-              value: selection.max > 0 ? '${selection.max}' : '--',
-              unit: '',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最低',
-              value: selection.min > 0 ? '${selection.min}' : '--',
-              unit: '',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.pressureBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: '平均',
+            value: selection.avg > 0 ? '${selection.avg}' : '--',
+            unit: '',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最高',
+            value: selection.max > 0 ? '${selection.max}' : '--',
+            unit: '',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最低',
+            value: selection.min > 0 ? '${selection.min}' : '--',
+            unit: '',
+          ),
+        ],
       ),
     );
   }
@@ -1614,32 +1541,30 @@ class _GluBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.gluBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: '平均',
-              value: selection.avg > 0 ? _fmt(selection.avg) : '--',
-              unit: 'mmol/L',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最高',
-              value: selection.max > 0 ? _fmt(selection.max) : '--',
-              unit: 'mmol/L',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '最低',
-              value: selection.min > 0 ? _fmt(selection.min) : '--',
-              unit: 'mmol/L',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.gluBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: '平均',
+            value: selection.avg > 0 ? _fmt(selection.avg) : '--',
+            unit: 'mmol/L',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最高',
+            value: selection.max > 0 ? _fmt(selection.max) : '--',
+            unit: 'mmol/L',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '最低',
+            value: selection.min > 0 ? _fmt(selection.min) : '--',
+            unit: 'mmol/L',
+          ),
+        ],
       ),
     );
   }
@@ -1655,32 +1580,30 @@ class _SportBuoy extends StatelessWidget {
     return _BuoyPositioner(
       anchorX: selection.anchorX + 17,
       parentWidth: parentWidth,
-      child: _BuoyShell(
-        color: JwHealthAppTheme.sportBuoy,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
-            const _BuoyDivider(),
-            _BuoyMetric(
-              label: '时长',
-              value: '${selection.minutes}',
-              unit: '分钟',
-            ),
-            const SizedBox(width: 12),
-            _BuoyMetric(
-              label: '场次',
-              value: '${selection.sessions}',
-              unit: '次',
-            ),
-          ],
-        ),
+      color: JwHealthAppTheme.sportBuoy,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _BuoyTimeRange(begin: _hm(selection.begin), end: _hm(selection.end)),
+          const _BuoyDivider(),
+          _BuoyMetric(
+            label: '时长',
+            value: '${selection.minutes}',
+            unit: '分钟',
+          ),
+          const SizedBox(width: 12),
+          _BuoyMetric(
+            label: '场次',
+            value: '${selection.sessions}',
+            unit: '次',
+          ),
+        ],
       ),
     );
   }
 }
 
-/// App buoy：`marginTop 12` + `match_parent` 落在 48dp 日期条内。
+/// App buoy 内容壳：高度贴日期条，宽度随内容（不要拉满屏宽）。
 class _BuoyShell extends StatelessWidget {
   const _BuoyShell({required this.color, required this.child});
   final Color color;
@@ -1688,21 +1611,14 @@ class _BuoyShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(19, 12, 19, 0),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Container(
-          height: JwHealthAppTheme.dateBarHeight - 12,
-          padding: const EdgeInsets.symmetric(horizontal: 15),
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(5.3),
-          ),
-          alignment: Alignment.centerLeft,
-          child: child,
-        ),
+    return Container(
+      height: JwHealthAppTheme.dateBarHeight - 12,
+      padding: const EdgeInsets.symmetric(horizontal: 15),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(5.3),
       ),
+      child: child,
     );
   }
 }
@@ -1809,33 +1725,100 @@ class _BuoyMetric extends StatelessWidget {
   }
 }
 
+/// 浮标定位：内容宽度自适应；优先相对 [anchorX] 居中，贴边时整体平移保证完整可见。
+/// 下方指示线始终落在长按锚点 X，可与气泡错位。
 class _BuoyPositioner extends StatelessWidget {
   const _BuoyPositioner({
     required this.anchorX,
     required this.parentWidth,
+    required this.color,
     required this.child,
   });
 
   final double anchorX;
   final double parentWidth;
+  final Color color;
   final Widget child;
+
+  static const _edgePad = 19.0;
+  static const _topPad = 12.0;
+  static const _indicatorH = 8.0;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Align(
-          alignment: Alignment.topLeft,
-          child: Transform.translate(
-            offset: Offset(
-              (anchorX - 80).clamp(0.0, (parentWidth - 160).clamp(0.0, parentWidth)),
-              0,
+    final shell = _BuoyShell(color: color, child: child);
+    return SizedBox(
+      width: parentWidth,
+      height: JwHealthAppTheme.dateBarHeight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            top: _topPad,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: CustomSingleChildLayout(
+              delegate: _BuoyLayoutDelegate(
+                anchorX: anchorX,
+                parentWidth: parentWidth,
+                edgePad: _edgePad,
+              ),
+              child: shell,
             ),
-            child: child,
           ),
-        );
-      },
+          // pop 下方指示线：钉在锚点 X，不随气泡左右夹紧而漂移。
+          Positioned(
+            left: anchorX.clamp(0.0, parentWidth) - 0.5,
+            top: JwHealthAppTheme.dateBarHeight - _indicatorH,
+            width: 1,
+            height: _indicatorH,
+            child: ColoredBox(color: color),
+          ),
+        ],
+      ),
     );
+  }
+}
+
+class _BuoyLayoutDelegate extends SingleChildLayoutDelegate {
+  _BuoyLayoutDelegate({
+    required this.anchorX,
+    required this.parentWidth,
+    required this.edgePad,
+  });
+
+  final double anchorX;
+  final double parentWidth;
+  final double edgePad;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    final maxW = math.max(0.0, parentWidth - edgePad * 2);
+    return BoxConstraints(
+      minWidth: 0,
+      maxWidth: maxW,
+      minHeight: 0,
+      maxHeight: constraints.maxHeight,
+    );
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    // 对齐 App updateBuoysPosition：先按锚点居中，再夹到可见区。
+    final minLeft = edgePad;
+    final maxLeft = math.max(minLeft, parentWidth - edgePad - childSize.width);
+    var left = anchorX - childSize.width / 2;
+    if (left < minLeft) left = minLeft;
+    if (left > maxLeft) left = maxLeft;
+    return Offset(left, 0);
+  }
+
+  @override
+  bool shouldRelayout(covariant _BuoyLayoutDelegate oldDelegate) {
+    return oldDelegate.anchorX != anchorX ||
+        oldDelegate.parentWidth != parentWidth ||
+        oldDelegate.edgePad != edgePad;
   }
 }
 

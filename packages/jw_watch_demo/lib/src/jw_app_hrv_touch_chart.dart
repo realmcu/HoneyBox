@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -30,11 +31,13 @@ class JwAppHrvTouchChart extends StatefulWidget {
   const JwAppHrvTouchChart({
     super.key,
     required this.hours,
-    required this.onSelection,
+    this.onSelection,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppHrvHourBucket> hours;
-  final ValueChanged<JwAppHrvTouchSelection?> onSelection;
+  final ValueChanged<JwAppHrvTouchSelection?>? onSelection;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppHrvTouchChart> createState() => _JwAppHrvTouchChartState();
@@ -62,7 +65,7 @@ class _JwAppHrvTouchChartState extends State<JwAppHrvTouchChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -97,7 +100,7 @@ class _JwAppHrvTouchChartState extends State<JwAppHrvTouchChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   double _itemPadding(double width) {
@@ -137,11 +140,11 @@ class _JwAppHrvTouchChartState extends State<JwAppHrvTouchChart> {
 
   void _emitFromDataIndex(int dataIndex, double width) {
     if (dataIndex < 0 || dataIndex >= widget.hours.length) {
-      widget.onSelection(null);
+      widget.onSelection?.call(null);
       return;
     }
     final b = widget.hours[dataIndex];
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppHrvTouchSelection(
         hour: b.hour,
         begin: b.startTime,
@@ -155,10 +158,20 @@ class _JwAppHrvTouchChartState extends State<JwAppHrvTouchChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _HrvPainter(
+            hours: widget.hours,
+            touchDataIndex: interactive ? _touchPos : -1,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -208,13 +221,7 @@ class _JwAppHrvTouchChartState extends State<JwAppHrvTouchChart> {
           },
           onPanEnd: (_) => _clear(),
           onPanCancel: _clear,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _HrvPainter(
-              hours: widget.hours,
-              touchDataIndex: _touchPos,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -242,14 +249,22 @@ class _HrvPainter extends CustomPainter {
   _HrvPainter({
     required this.hours,
     required this.touchDataIndex,
+    required this.mode,
   });
 
   final List<JwAppHrvHourBucket> hours;
   final int touchDataIndex;
+  final JwAppChartMode mode;
 
-  static const _top = 19.0;
-  static const _bottomInner = 25.0;
-  static const _bottomOuter = 20.0;
+  double get _top => JwAppChartLayout.top(mode);
+
+  double get _bottomInner => 25.0;
+
+  double get _bottomOuter => JwAppChartLayout.bottomText(mode, detail: 20);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
   static const _touchPad = 5.0;
   static const _itemWidth = 7.0;
   static const _radius = 3.5;
@@ -258,18 +273,7 @@ class _HrvPainter extends CustomPainter {
   static const _labelRightPad = 5.0;
   static const _lineLabelGap = 5.0;
 
-  int _chartMax(List<JwAppHrvHourBucket> data) {
-    var dataMax = 0;
-    for (final h in data) {
-      if (h.max > dataMax) dataMax = h.max;
-      for (final v in h.values) {
-        if (v > 0 && v > dataMax) dataMax = v;
-      }
-    }
-    final padded = dataMax + 60;
-    final stepped = (padded / 10.0).ceil() * 10;
-    return math.max(210, stepped);
-  }
+  int _chartMax(List<JwAppHrvHourBucket> data) => jwAppHrvChartMax(data);
 
   double _itemPadding(double width) {
     return ((width - 2 * _touchPad) / 24 - _itemWidth) / 2.0;
@@ -453,12 +457,16 @@ class _HrvPainter extends CustomPainter {
     final labelRight = size.width - _labelRightPad;
     final topStr = '$chartMax';
     const bottomStr = '0';
-    text.text = TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    final topLineEndX = labelRight - text.width - _lineLabelGap;
-    text.text = TextSpan(text: bottomStr, style: labelStyle);
-    text.layout();
-    final bottomLineEndX = labelRight - text.width - _lineLabelGap;
+    var topLineEndX = size.width;
+    var bottomLineEndX = size.width;
+    if (_showYAxis) {
+      text.text = TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      topLineEndX = labelRight - text.width - _lineLabelGap;
+      text.text = TextSpan(text: bottomStr, style: labelStyle);
+      text.layout();
+      bottomLineEndX = labelRight - text.width - _lineLabelGap;
+    }
 
     final axisPaint = Paint()
       ..color = JwHealthAppTheme.hrvLine
@@ -474,9 +482,11 @@ class _HrvPainter extends CustomPainter {
       axisPaint,
     );
 
-    final bottomDotY = size.height - _bottomOuter / 2 + 4;
-    final bottomTextY = size.height - _bottomOuter / 2 + 8;
-    for (var hour = 0; hour <= 24; hour += 3) {
+    if (_showXAxis) {
+      final bottomDotY = JwAppChartLayout.xAxisDotY(size.height, _bottomOuter);
+      final bottomTextY =
+          JwAppChartLayout.xAxisLabelY(size.height, _bottomOuter);
+      for (var hour = 0; hour <= 24; hour += 3) {
       if (hour == 0) {
         canvas.drawCircle(
           Offset(_slotCenterX(0, size.width), bottomDotY),
@@ -500,13 +510,17 @@ class _HrvPainter extends CustomPainter {
         text.paint(canvas, Offset(cx - text.width / 2, bottomTextY));
       }
     }
+    }
 
     final hasData = hours.any((h) => h.max > 0 && h.min > 0);
 
-    if (!hasData) {
-      text.text = const TextSpan(
+    if (!hasData && JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无HRV',
-        style: TextStyle(color: JwHealthAppTheme.hrvEmpty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.hrvEmpty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -575,16 +589,19 @@ class _HrvPainter extends CustomPainter {
       }
     }
 
-    text.text = TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, _top - 12));
-    text.text = TextSpan(text: bottomStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+    if (_showYAxis) {
+      text.text = TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, _top - 12));
+      text.text = TextSpan(text: bottomStr, style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+    }
   }
 
   @override
   bool shouldRepaint(covariant _HrvPainter oldDelegate) =>
       oldDelegate.hours != hours ||
-      oldDelegate.touchDataIndex != touchDataIndex;
+      oldDelegate.touchDataIndex != touchDataIndex ||
+      oldDelegate.mode != mode;
 }

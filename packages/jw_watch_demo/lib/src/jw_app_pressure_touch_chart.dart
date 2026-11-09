@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -34,14 +35,16 @@ class JwAppPressureTouchChart extends StatefulWidget {
     required this.axisMax,
     required this.axisMin,
     required this.averageRate,
-    required this.onSelection,
+    this.onSelection,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppPressureSlot> slots;
   final int axisMax;
   final int axisMin;
   final int averageRate;
-  final ValueChanged<JwAppPressureTouchSelection?> onSelection;
+  final ValueChanged<JwAppPressureTouchSelection?>? onSelection;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppPressureTouchChart> createState() =>
@@ -74,7 +77,7 @@ class _JwAppPressureTouchChartState extends State<JwAppPressureTouchChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -106,7 +109,7 @@ class _JwAppPressureTouchChartState extends State<JwAppPressureTouchChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   double _eachWidth(double width) {
@@ -127,19 +130,19 @@ class _JwAppPressureTouchChartState extends State<JwAppPressureTouchChart> {
 
   void _emit(int index, double width) {
     if (index < 0 || index >= widget.slots.length) {
-      widget.onSelection(null);
+      widget.onSelection?.call(null);
       return;
     }
     final s = widget.slots[index];
     if (s.avg <= 0) {
-      widget.onSelection(null);
+      widget.onSelection?.call(null);
       return;
     }
     final each = _eachWidth(width);
     final barW = _barWidth(each);
     final barL = _touchPad + index * each;
     final anchorX = barL + barW / 2;
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppPressureTouchSelection(
         index: index,
         begin: s.time,
@@ -154,10 +157,23 @@ class _JwAppPressureTouchChartState extends State<JwAppPressureTouchChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _PressurePainter(
+            slots: widget.slots,
+            axisMax: widget.axisMax,
+            axisMin: widget.axisMin,
+            averageRate: widget.averageRate,
+            touchPos: interactive ? _touchPos : -1,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -200,16 +216,7 @@ class _JwAppPressureTouchChartState extends State<JwAppPressureTouchChart> {
           },
           onPanEnd: (_) => _clear(),
           onPanCancel: _clear,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _PressurePainter(
-              slots: widget.slots,
-              axisMax: widget.axisMax,
-              axisMin: widget.axisMin,
-              averageRate: widget.averageRate,
-              touchPos: _touchPos,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -223,6 +230,7 @@ class _PressurePainter extends CustomPainter {
     required this.axisMin,
     required this.averageRate,
     required this.touchPos,
+    required this.mode,
   });
 
   final List<JwAppPressureSlot> slots;
@@ -230,9 +238,15 @@ class _PressurePainter extends CustomPainter {
   final int axisMin;
   final int averageRate;
   final int touchPos;
+  final JwAppChartMode mode;
 
-  static const _top = 19.0;
-  static const _bottomText = 20.0;
+  double get _top => JwAppChartLayout.top(mode);
+
+  double get _bottomText => JwAppChartLayout.bottomText(mode, detail: 20);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
   static const _touchPad = 5.0;
   static const _groupCount = 144;
   static const _barRatio = 4.0;
@@ -266,25 +280,30 @@ class _PressurePainter extends CustomPainter {
     final labelRight = size.width - _touchPad;
     final topStr = '$displayMax';
     final bottomStr = '$displayMin';
-    text.text = TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    final topLineEndX = labelRight - text.width - _lineLabelGap;
-    text.text = TextSpan(text: bottomStr, style: labelStyle);
-    text.layout();
-    final bottomLineEndX = labelRight - text.width - _lineLabelGap;
+    var topLineEndX = size.width;
+    var bottomLineEndX = size.width;
+    if (_showYAxis) {
+      text.text = TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      topLineEndX = labelRight - text.width - _lineLabelGap;
+      text.text = TextSpan(text: bottomStr, style: labelStyle);
+      text.layout();
+      bottomLineEndX = labelRight - text.width - _lineLabelGap;
+    }
 
     final axisPaint = Paint()
       ..color = JwHealthAppTheme.pressureHeadLine
       ..strokeWidth = 1;
 
-    const labelHours = [0, 6, 12, 18, 24];
-    for (final h in labelHours) {
+    if (_showXAxis) {
+      const labelHours = [0, 6, 12, 18, 24];
+      final ly = JwAppChartLayout.xAxisLabelY(size.height, _bottomText);
+      for (final h in labelHours) {
       final label = '${h.toString().padLeft(2, '0')}:00';
       text.text = TextSpan(text: label, style: labelStyle);
       text.layout();
       final lx = _touchPad + h * 6 * eachWidth;
       final tw = text.width;
-      final ly = size.height - _bottomText / 2 + 8;
       if (h == 0) {
         text.paint(canvas, Offset(lx, ly));
       } else if (h == 24) {
@@ -292,6 +311,7 @@ class _PressurePainter extends CustomPainter {
       } else {
         text.paint(canvas, Offset(lx - tw / 2, ly));
       }
+    }
     }
 
     canvas.drawLine(
@@ -309,10 +329,13 @@ class _PressurePainter extends CustomPainter {
         slots.isNotEmpty &&
         slots.any((s) => s.avg > 0);
 
-    if (!hasData) {
-      text.text = const TextSpan(
+    if (!hasData && JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无压力',
-        style: TextStyle(color: JwHealthAppTheme.pressureEmpty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.pressureEmpty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -322,7 +345,9 @@ class _PressurePainter extends CustomPainter {
           _top + chartH / 2 - 8,
         ),
       );
-    } else {
+      return;
+    }
+    if (hasData) {
       final len = slots.length < _groupCount ? slots.length : _groupCount;
       final barPaint = Paint()..isAntiAlias = true;
       for (var i = 0; i < len; i++) {
@@ -351,12 +376,14 @@ class _PressurePainter extends CustomPainter {
       }
     }
 
-    text.text = TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, _top - 12));
-    text.text = TextSpan(text: bottomStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+    if (_showYAxis) {
+      text.text = TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, _top - 12));
+      text.text = TextSpan(text: bottomStr, style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+    }
   }
 
   @override
@@ -365,5 +392,6 @@ class _PressurePainter extends CustomPainter {
       oldDelegate.axisMax != axisMax ||
       oldDelegate.axisMin != axisMin ||
       oldDelegate.averageRate != averageRate ||
-      oldDelegate.touchPos != touchPos;
+      oldDelegate.touchPos != touchPos ||
+      oldDelegate.mode != mode;
 }

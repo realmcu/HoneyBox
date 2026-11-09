@@ -8,7 +8,6 @@ import 'jw_demo_content_sheet.dart';
 import 'jw_demo_controller.dart';
 import 'jw_device_pages.dart';
 import 'jw_feature_catalog.dart';
-import 'jw_history_pages.dart';
 import 'jw_measure_pages.dart';
 import 'jw_settings_home_page.dart';
 
@@ -53,10 +52,6 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
     }
     if (entry.id == 'device') {
       openJwDeviceHub(context, _controller);
-      return;
-    }
-    if (entry.id == 'history') {
-      openJwHistoryHub(context, _controller);
       return;
     }
     if (entry.id == 'measurements') {

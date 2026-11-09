@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -28,11 +29,13 @@ class JwAppSleepTouchChart extends StatefulWidget {
   const JwAppSleepTouchChart({
     super.key,
     required this.segments,
-    required this.onSelection,
+    this.onSelection,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppSleepSegment> segments;
-  final ValueChanged<JwAppSleepTouchSelection?> onSelection;
+  final ValueChanged<JwAppSleepTouchSelection?>? onSelection;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppSleepTouchChart> createState() => _JwAppSleepTouchChartState();
@@ -58,7 +61,7 @@ class _JwAppSleepTouchChartState extends State<JwAppSleepTouchChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -90,7 +93,7 @@ class _JwAppSleepTouchChartState extends State<JwAppSleepTouchChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   List<_SleepLayoutSeg> _layout(double width) {
@@ -133,7 +136,7 @@ class _JwAppSleepTouchChartState extends State<JwAppSleepTouchChart> {
     if (index < 0 || index >= layout.length) return;
     final L = layout[index];
     final s = L.segment;
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppSleepTouchSelection(
         begin: s.begin,
         end: s.end,
@@ -146,11 +149,23 @@ class _JwAppSleepTouchChartState extends State<JwAppSleepTouchChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
         final layout = _layout(width);
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _SleepPainter(
+            segments: widget.segments,
+            thumbHeight: _thumbHeight,
+            selectedIndex: interactive ? _segIndex : -1,
+            layout: layout,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -189,15 +204,7 @@ class _JwAppSleepTouchChartState extends State<JwAppSleepTouchChart> {
           },
           onPanEnd: (_) => _clearSelection(),
           onPanCancel: _clearSelection,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _SleepPainter(
-              segments: widget.segments,
-              thumbHeight: _thumbHeight,
-              selectedIndex: _segIndex,
-              layout: layout,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -224,30 +231,46 @@ class _SleepPainter extends CustomPainter {
     required this.thumbHeight,
     required this.selectedIndex,
     required this.layout,
+    required this.mode,
   });
 
   final List<JwAppSleepSegment> segments;
   final double thumbHeight;
   final int selectedIndex;
   final List<_SleepLayoutSeg> layout;
+  final JwAppChartMode mode;
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
 
   @override
   void paint(Canvas canvas, Size size) {
+    // 与 Android SleepTouchView 一致：直角条（Paint 默认 Cap.BUTT），并裁切避免越界。
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+
     final text = TextPainter(textDirection: ui.TextDirection.ltr);
     final totalM = segments.fold<int>(0, (a, s) => a + math.max(0, s.minutes));
     if (segments.isEmpty || totalM <= 0) {
-      text.text = const TextSpan(
-        text: '暂无睡眠',
-        style: TextStyle(color: JwHealthAppTheme.sleepEmpty, fontSize: 23),
-      );
-      text.layout();
-      text.paint(
-        canvas,
-        Offset(
-          (size.width - text.width) / 2,
-          thumbHeight + (size.height - thumbHeight) / 2 - 8,
-        ),
-      );
+      if (JwAppChartLayout.showEmptyHint(mode)) {
+        text.text = TextSpan(
+          text: '暂无睡眠',
+          style: TextStyle(
+            color: JwHealthAppTheme.sleepEmpty,
+            fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+          ),
+        );
+        text.layout();
+        text.paint(
+          canvas,
+          Offset(
+            (size.width - text.width) / 2,
+            thumbHeight + (size.height - thumbHeight) / 2 - 8,
+          ),
+        );
+      }
+      canvas.restore();
       return;
     }
 
@@ -296,15 +319,11 @@ class _SleepPainter extends CustomPainter {
     for (var i = 0; i < layout.length; i++) {
       final L = layout[i];
       final s = L.segment;
-      final paint = Paint()
-        ..color = colorFor(s.appType)
-        ..strokeWidth = L.width
-        ..strokeCap = StrokeCap.round
-        ..isAntiAlias = true;
-      final x = L.centerX;
+      // 用矩形画直角条，避免 strokeCap.round 圆头溢出 view。
       final top = bandTop(s.appType);
       final bot = bandBottom(s.appType);
-      canvas.drawLine(Offset(x, top), Offset(x, bot), paint);
+      final rect = Rect.fromLTRB(L.left, top, L.left + L.width, bot);
+      canvas.drawRect(rect, Paint()..color = colorFor(s.appType));
     }
 
     if (selectedIndex >= 0 && selectedIndex < layout.length) {
@@ -317,6 +336,7 @@ class _SleepPainter extends CustomPainter {
           ..strokeWidth = 1,
       );
     }
+    canvas.restore();
   }
 
   @override
@@ -324,6 +344,7 @@ class _SleepPainter extends CustomPainter {
     if (oldDelegate.segments != segments ||
         oldDelegate.thumbHeight != thumbHeight ||
         oldDelegate.selectedIndex != selectedIndex ||
+        oldDelegate.mode != mode ||
         oldDelegate.layout.length != layout.length) {
       return true;
     }

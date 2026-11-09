@@ -3,17 +3,32 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
+import 'jw_app_day_chart_bundle.dart';
 import 'jw_data_catalog.dart';
 import 'jw_data_detail_page.dart';
-import 'jw_data_mock.dart';
+import 'jw_data_home_chart.dart';
+import 'jw_data_home_icons.dart';
+import 'jw_data_home_header.dart';
+import 'jw_data_home_presentation.dart';
 import 'jw_demo_controller.dart';
-import 'jw_history_pages.dart';
 import 'jw_history_sync_run_controller.dart';
 import 'jw_history_sync_state.dart';
 import 'jw_settings_app_widgets.dart';
 import 'jw_settings_catalog.dart';
 
-/// 数据 Tab 首页：轻量同步条 + 全量类型卡片（最近一条来自本地 DB）。
+const _kDataHomeIconSize = 40.0;
+
+/// 图表列表错落（App `st_home_deep` / `st_home_low`），在 `#EDF0FA` 底上用中性灰 + 白 + 轻阴影分块。
+abstract final class JwDataHomeCardColors {
+  /// 偶数序（含第一条）：中性浅灰，与顶区白卡区分
+  static const low = Color(0xFFF9F9F9);
+  /// 奇数序：白卡
+  static const deep = Color(0xFFFFFFFF);
+  static const cardShadow = Color(0x14171C3C);
+  static const cardElevation = 1.0;
+}
+
+/// 数据 Tab 首页：轻量同步条 + 图表模式卡片（今日小图 + 最近一条）。
 class JwDataHomePage extends StatefulWidget {
   const JwDataHomePage({super.key, required this.controller});
 
@@ -25,10 +40,12 @@ class JwDataHomePage extends StatefulWidget {
 
 class _JwDataHomePageState extends State<JwDataHomePage> {
   late final JwHistorySyncRunController _sync;
-  final Map<JwDataTypeId, String> _summaries = {};
+  final Map<JwDataTypeId, JwDataHomeCardData> _cards = {};
   var _loadingCards = false;
   Object? _cardError;
-  var _useMock = JwDataMock.enabledByDefault;
+  JWTodayActivitySummary? _todaySummary;
+  var _loadingToday = false;
+  var _resettingMarkers = false;
 
   JWDemoController get controller => widget.controller;
 
@@ -39,6 +56,7 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
     _sync.addListener(_onSyncChanged);
     controller.addListener(_onControllerChanged);
     unawaited(_refreshCards());
+    unawaited(_refreshTodaySummary());
   }
 
   @override
@@ -52,6 +70,7 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
   void _onControllerChanged() {
     if (!mounted) return;
     unawaited(_refreshCards());
+    unawaited(_refreshTodaySummary());
   }
 
   void _onSyncChanged() {
@@ -59,6 +78,45 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
     setState(() {});
     if (_sync.state.phase == JwHistorySyncPhase.success) {
       unawaited(_refreshCards());
+      unawaited(_refreshTodaySummary());
+    }
+  }
+
+  bool _todaySummarySupported() {
+    final info = controller.state.functionInfo;
+    if (info == null) return true;
+    return info.supports(JWDeviceFunction.todayAdjust);
+  }
+
+  Future<void> _refreshTodaySummary() async {
+    final session = controller.session;
+    if (session == null || !controller.state.isReady) {
+      if (!mounted) return;
+      setState(() {
+        _todaySummary = null;
+        _loadingToday = false;
+      });
+      return;
+    }
+    if (!_todaySummarySupported()) {
+      if (!mounted) return;
+      setState(() {
+        _todaySummary = null;
+        _loadingToday = false;
+      });
+      return;
+    }
+    setState(() => _loadingToday = true);
+    try {
+      final summary = await session.fetchTodayActivitySummary();
+      if (!mounted) return;
+      setState(() {
+        _todaySummary = summary;
+        _loadingToday = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingToday = false);
     }
   }
 
@@ -74,34 +132,28 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
       _cardError = null;
     });
     try {
-      final next = <JwDataTypeId, String>{};
-      if (_useMock) {
-        for (final item in jwDataCatalog()) {
-          next[item.id] = JwDataMock.cardSummary(item.id);
-        }
-      } else {
-        final session = controller.session;
-        final scope = session?.historyScope;
-        if (session == null || scope == null) {
-          if (!mounted) return;
-          setState(() {
-            _summaries.clear();
-            _loadingCards = false;
-            _cardError = null;
-          });
-          return;
-        }
-        for (final item in jwDataCatalog()) {
-          next[item.id] = await jwDataQueryCardSummary(
-            store: session.historyStore,
-            scope: scope,
-            id: item.id,
-          );
-        }
+      final next = <JwDataTypeId, JwDataHomeCardData>{};
+      final session = controller.session;
+      final scope = session?.historyScope;
+      if (session == null || scope == null) {
+        if (!mounted) return;
+        setState(() {
+          _cards.clear();
+          _loadingCards = false;
+          _cardError = null;
+        });
+        return;
+      }
+      for (final item in jwDataCatalog()) {
+        next[item.id] = await jwDataLoadHomeCard(
+          store: session.historyStore,
+          scope: scope,
+          item: item,
+        );
       }
       if (!mounted) return;
       setState(() {
-        _summaries
+        _cards
           ..clear()
           ..addAll(next);
         _loadingCards = false;
@@ -113,12 +165,6 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
         _loadingCards = false;
       });
     }
-  }
-
-  void _setUseMock(bool value) {
-    if (_useMock == value) return;
-    setState(() => _useMock = value);
-    unawaited(_refreshCards());
   }
 
   Future<void> _startSync() async {
@@ -139,6 +185,27 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
     }
   }
 
+  Future<void> _resetSyncMarkers() async {
+    final session = controller.session;
+    if (session == null || !controller.state.isReady) return;
+    if (_sync.state.isActive) return;
+    setState(() => _resettingMarkers = true);
+    try {
+      await _sync.resetDeviceSyncMarkers(session);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已重置同步标记，可重新同步历史数据')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(describeJWDemoError(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _resettingMarkers = false);
+    }
+  }
+
   void _openDetail(JwDataTypeItem item) {
     unawaited(
       Navigator.of(context).push<void>(
@@ -146,30 +213,16 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
           builder: (_) => JwDataDetailPage(
             controller: controller,
             item: item,
-            useMock: _useMock,
           ),
         ),
       ),
     );
   }
 
-  String _syncStatusText(JwHistorySyncRunState state) {
-    return switch (state.phase) {
-      JwHistorySyncPhase.idle => '点击同步拉取设备健康历史',
-      JwHistorySyncPhase.syncing => state.awaitingDevicePlan
-          ? '同步中：等待设备计划…'
-          : '同步中 ${state.receivedWire}/${state.totalWire}',
-      JwHistorySyncPhase.success =>
-        '同步完成 · 收到 ${state.receivedWire} 条',
-      JwHistorySyncPhase.failed =>
-        '同步失败：${state.failure?.message ?? '未知错误'}',
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     final catalog = jwDataCatalog();
-    final syncing = _sync.state.isActive;
+    final sessionReady = controller.session != null && controller.state.isReady;
     return Theme(
       data: JwSettingsAppTheme.theme(Theme.of(context)),
       child: ListView(
@@ -185,96 +238,18 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
             ),
           ),
           const SizedBox(height: 12),
-          Material(
-            color: JwSettingsAppTheme.card,
-            borderRadius: BorderRadius.circular(JwSettingsAppTheme.itemRadius),
-            child: SwitchListTile(
-              key: const Key('jw.demo.data.mock_toggle'),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-              title: const Text(
-                '模拟数据',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: JwSettingsAppTheme.title,
-                ),
-              ),
-              subtitle: Text(
-                _useMock ? '当前按本地库查询形状注入预览数据' : '当前读取真实本地库',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: JwSettingsAppTheme.subtitle,
-                ),
-              ),
-              value: _useMock,
-              onChanged: _setUseMock,
-            ),
+          JwDataHomeHeader(
+            syncState: _sync.state,
+            summary: _todaySummary,
+            loadingSummary: _loadingToday,
+            todaySupported: _todaySummarySupported(),
+            sessionReady: sessionReady,
+            syncing: _sync.state.isActive,
+            resettingMarkers: _resettingMarkers,
+            onSync: _sync.state.isActive ? null : () => unawaited(_startSync()),
+            onResetMarkers:
+                _sync.state.isActive ? null : () => unawaited(_resetSyncMarkers()),
           ),
-          const SizedBox(height: 12),
-          Material(
-            color: JwSettingsAppTheme.card,
-            borderRadius: BorderRadius.circular(JwSettingsAppTheme.itemRadius),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '健康数据同步',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: JwSettingsAppTheme.title,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _useMock
-                              ? '模拟模式下同步不会写入预览数据'
-                              : _syncStatusText(_sync.state),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: JwSettingsAppTheme.subtitle,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  TextButton(
-                    key: const Key('jw.demo.data.sync_debug'),
-                    onPressed: () => openJwHistoryHub(context, controller),
-                    child: const Text('详情'),
-                  ),
-                  const SizedBox(width: 4),
-                  FilledButton(
-                    key: const Key('jw.demo.data.sync_start'),
-                    onPressed: (_useMock || syncing)
-                        ? null
-                        : () => unawaited(_startSync()),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: JwSettingsAppTheme.positiveButton,
-                      foregroundColor: JwSettingsAppTheme.positiveButtonText,
-                      minimumSize: const Size(72, 36),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(
-                          JwSettingsAppTheme.buttonRadius,
-                        ),
-                      ),
-                    ),
-                    child: Text(syncing ? '同步中' : '同步'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_loadingCards) ...[
-            const SizedBox(height: 8),
-            const LinearProgressIndicator(minHeight: 2),
-          ],
           if (_cardError != null) ...[
             const SizedBox(height: 8),
             Text(
@@ -283,51 +258,63 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
             ),
           ],
           const SizedBox(height: 16),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: catalog.length,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.35,
+          for (var i = 0; i < catalog.length; i++) ...[
+            if (i > 0) const SizedBox(height: 12),
+            _DataHomeChartCard(
+              item: catalog[i],
+              data: _cards[catalog[i].id],
+              deviceUnsupported: !_deviceSupports(catalog[i]),
+              stripedBackground: i.isOdd,
+              onTap: () => _openDetail(catalog[i]),
             ),
-            itemBuilder: (context, index) {
-              final item = catalog[index];
-              final supported = _deviceSupports(item);
-              final summary = _summaries[item.id] ?? '—';
-              return _DataTypeCard(
-                item: item,
-                summary: summary,
-                deviceUnsupported: !supported,
-                onTap: () => _openDetail(item),
-              );
-            },
-          ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _DataTypeCard extends StatelessWidget {
-  const _DataTypeCard({
+class _DataHomeChartCard extends StatelessWidget {
+  const _DataHomeChartCard({
     required this.item,
-    required this.summary,
+    required this.data,
     required this.deviceUnsupported,
+    required this.stripedBackground,
     required this.onTap,
   });
 
   final JwDataTypeItem item;
-  final String summary;
+  final JwDataHomeCardData? data;
   final bool deviceUnsupported;
+  final bool stripedBackground;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final today = jwDataDayStart(DateTime.now());
+    final fallback = jwDataHomePresentationFallback(item.id);
+    final presentation = deviceUnsupported
+        ? fallback
+        : (data?.presentation ?? fallback);
+    final chartBundle = deviceUnsupported
+        ? JwAppDayChartBundle.build(id: item.id, rows: const [], day: today)
+        : (data?.bundle ??
+            JwAppDayChartBundle.build(
+              id: item.id,
+              rows: const [],
+              day: today,
+            ));
+    final cardBg = stripedBackground
+        ? JwDataHomeCardColors.deep
+        : JwDataHomeCardColors.low;
+    final valueMuted =
+        presentation.primaryValue == JwDataHomeCardPresentation.emptyToken;
+
     return Material(
-      color: JwSettingsAppTheme.card,
+      color: cardBg,
+      elevation: JwDataHomeCardColors.cardElevation,
+      shadowColor: JwDataHomeCardColors.cardShadow,
+      surfaceTintColor: Colors.transparent,
       borderRadius: BorderRadius.circular(JwSettingsAppTheme.itemRadius),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -339,38 +326,105 @@ class _DataTypeCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(item.icon, size: 22, color: JwSettingsAppTheme.title),
-                  const SizedBox(width: 8),
+                  JwDataHomeIcons.image(
+                    item.id,
+                    width: _kDataHomeIconSize,
+                    height: _kDataHomeIconSize,
+                    fallback: item.icon,
+                  ),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      item.title,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: JwSettingsAppTheme.title,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: JwSettingsAppTheme.title,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            if (deviceUnsupported)
+                              const JwSettingsStatusChip(
+                                JwSettingsImplStatus.sdkReady,
+                                deviceUnsupported: true,
+                              )
+                            else
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    presentation.primaryValue,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w600,
+                                      color: valueMuted
+                                          ? JwSettingsAppTheme.muted
+                                          : JwSettingsAppTheme.title,
+                                    ),
+                                  ),
+                                  if (presentation.primaryUnit != null) ...[
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      presentation.primaryUnit!,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: JwSettingsAppTheme.subtitle,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                          ],
+                        ),
+                        ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  presentation.subtitleLine,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: JwSettingsAppTheme.subtitle,
+                                  ),
+                                ),
+                              ),
+                              if (presentation.subtitleTrailing != null)
+                                Text(
+                                  presentation.subtitleTrailing!,
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: JwSettingsAppTheme.muted,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  if (deviceUnsupported)
-                    const JwSettingsStatusChip(
-                      JwSettingsImplStatus.sdkReady,
-                      deviceUnsupported: true,
-                    ),
                 ],
               ),
-              const Spacer(),
-              Text(
-                summary,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: summary == '暂无数据' || summary == '—'
-                      ? JwSettingsAppTheme.muted
-                      : JwSettingsAppTheme.subtitle,
-                ),
-              ),
+              const SizedBox(height: 10),
+              JwDataHomeChart(bundle: chartBundle),
             ],
           ),
         ),

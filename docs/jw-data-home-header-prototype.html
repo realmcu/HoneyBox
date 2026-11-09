@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JW Demo · 数据首页顶区原型</title>
+  <style>
+    :root {
+      --bg: #edf0fa;
+      --card: #ffffff;
+      --title: #171c3c;
+      --subtitle: #818181;
+      --muted: #b1b1b1;
+      --divider: #e8e8e8;
+      --accent: #5c5ce0;
+      --accent-soft: rgba(92, 92, 224, 0.14);
+      --cta: #ff2d55;
+      --cta-soft: rgba(255, 45, 85, 0.12);
+      --warn: #b86a00;
+      --success: #2e9b6a;
+      --ring-track: #e6eaf3;
+      --ring-sync: #5c5ce0;
+      --ring-steps: #ff2d55;
+      --radius: 12px;
+      --shadow: 0 2px 12px rgba(23, 28, 60, 0.06);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Helvetica Neue", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(160deg, #e8ecf8 0%, #f5f7fc 45%, #edf0fa 100%);
+      color: var(--title);
+      line-height: 1.45;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 20px 48px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 28px;
+    }
+
+    @media (min-width: 900px) {
+      .page {
+        grid-template-columns: 390px 1fr;
+        align-items: start;
+      }
+    }
+
+    h1 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 0 0 6px;
+      grid-column: 1 / -1;
+    }
+
+    .page > .intro {
+      grid-column: 1 / -1;
+      font-size: 0.9rem;
+      color: var(--subtitle);
+      margin: 0;
+    }
+
+    /* Phone shell */
+    .phone {
+      width: 100%;
+      max-width: 390px;
+      margin: 0 auto;
+      background: var(--bg);
+      border-radius: 28px;
+      box-shadow: 0 24px 48px rgba(23, 28, 60, 0.12);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+    }
+
+    .status-bar {
+      height: 44px;
+      padding: 12px 20px 0;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      color: var(--title);
+    }
+
+    .screen {
+      padding: 0 16px 24px;
+    }
+
+    .nav-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin: 4px 0 12px;
+    }
+
+    /* Hero header — fixed height */
+    .hero {
+      position: relative;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-height: 148px;
+      padding: 16px 16px 14px;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      overflow: hidden;
+    }
+
+    .hero:hover:not(.hero--disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(23, 28, 60, 0.08);
+    }
+
+    .hero:active:not(.hero--disabled) {
+      transform: scale(0.995);
+    }
+
+    .hero--disabled {
+      cursor: default;
+    }
+
+    .hero-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .ring-wrap {
+      flex-shrink: 0;
+      width: 88px;
+      height: 88px;
+      position: relative;
+    }
+
+    .ring-wrap svg {
+      width: 88px;
+      height: 88px;
+      transform: rotate(-90deg);
+    }
+
+    .ring-wrap .track {
+      fill: none;
+      stroke: var(--ring-track);
+      stroke-width: 7;
+    }
+
+    .ring-wrap .progress {
+      fill: none;
+      stroke-width: 7;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.35s ease, stroke 0.4s ease;
+    }
+
+    .ring-wrap.sync .progress {
+      stroke: var(--ring-sync);
+    }
+
+    .ring-wrap.stats .progress {
+      stroke: var(--ring-steps);
+    }
+
+    .ring-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .ring-center .big {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .ring-center .small {
+      font-size: 11px;
+      color: var(--subtitle);
+      margin-top: 2px;
+    }
+
+    .hero-main {
+      flex: 1;
+      min-width: 0;
+      padding-top: 2px;
+    }
+
+    .hero-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: none;
+      letter-spacing: 0.02em;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+
+    .hero-label[data-mode="stats"] {
+      color: var(--subtitle);
+    }
+
+    .hero-label[data-mode="sync"] {
+      color: var(--accent);
+    }
+
+    .hero-label[data-mode="fail"] {
+      color: var(--warn);
+    }
+
+    .hero-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0 0 6px;
+    }
+
+    .hero-desc {
+      font-size: 13px;
+      color: var(--subtitle);
+      margin: 0;
+    }
+
+    /* Stats grid (idle / success) */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--divider);
+      opacity: 0;
+      max-height: 0;
+      overflow: hidden;
+      transition: opacity 0.4s ease, max-height 0.45s ease, margin 0.35s ease;
+    }
+
+    .hero.mode-stats .kpi-row {
+      opacity: 1;
+      max-height: 80px;
+      margin-top: 12px;
+    }
+
+    .hero.mode-sync .kpi-row,
+    .hero.mode-fail .kpi-row {
+      opacity: 0;
+      max-height: 0;
+      margin-top: 0;
+      padding-top: 0;
+      border-top-color: transparent;
+    }
+
+    .kpi {
+      text-align: center;
+    }
+
+    .kpi .val {
+      font-size: 17px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .kpi .unit {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--subtitle);
+    }
+
+    .kpi .name {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* Sync thin bar under ring area when syncing */
+    .sync-bar {
+      height: 3px;
+      background: var(--ring-track);
+      border-radius: 2px;
+      margin-top: 12px;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .hero.mode-sync .sync-bar {
+      opacity: 1;
+    }
+
+    .sync-bar > i {
+      display: block;
+      height: 100%;
+      background: var(--ring-sync);
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.25s ease;
+    }
+
+    .hero.mode-sync.awaiting .sync-bar > i {
+      width: 35%;
+      animation: pulse-bar 1.2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-bar {
+      0%,
+      100% {
+        opacity: 0.45;
+      }
+      50% {
+        opacity: 1;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .sync-bar > i,
+      .hero,
+      .ring-wrap .progress,
+      .kpi-row {
+        transition: none;
+        animation: none;
+      }
+    }
+
+    .hero-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+
+    .hero-footer a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .hero-footer a:hover {
+      text-decoration: underline;
+    }
+
+    .hero-footer .hint {
+      color: var(--muted);
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .chip.fail {
+      background: rgba(184, 106, 0, 0.12);
+      color: var(--warn);
+    }
+
+    .chip.ok {
+      background: rgba(46, 155, 106, 0.12);
+      color: var(--success);
+    }
+
+    /* Placeholder list area */
+    .list-placeholder {
+      margin-top: 16px;
+      padding: 20px;
+      border: 2px dashed var(--divider);
+      border-radius: var(--radius);
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    /* Controls panel */
+    .panel {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    .panel h2 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 12px;
+    }
+
+    .panel h3 {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 18px 0 8px;
+      color: var(--subtitle);
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      font: inherit;
+      border: 1px solid var(--divider);
+      background: #fafbff;
+      color: var(--title);
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    button.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    button.primary {
+      background: var(--cta);
+      border-color: var(--cta);
+      color: #fff;
+    }
+
+    button.primary:hover {
+      filter: brightness(1.05);
+    }
+
+    ul.notes {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 13px;
+      color: var(--subtitle);
+    }
+
+    ul.notes li {
+      margin-bottom: 8px;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--title);
+      color: #fff;
+      font-size: 13px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      opacity: 0;
+      transition: transform 0.3s ease, opacity 0.3s ease;
+      pointer-events: none;
+      z-index: 99;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    .flow {
+      font-size: 12px;
+      color: var(--subtitle);
+      background: #f7f8fc;
+      padding: 12px;
+      border-radius: 8px;
+      font-family: ui-monospace, monospace;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>数据首页顶区 · 交互原型（v0.1）</h1>
+    <p class="intro">
+      推荐方案：<strong>同一块固定高度 Hero</strong>——同步时圆环 = 进度；空闲/完成后圆环 = 今日步数目标完成度，下方三列展示步数 / 卡路里 / 距离（不含睡眠）。点击下方卡片可模拟「点击同步」。
+    </p>
+
+    <div class="phone" aria-label="手机预览">
+      <div class="status-bar">
+        <span>9:41</span>
+        <span>Demo</span>
+      </div>
+      <div class="screen">
+        <div class="nav-title">数据</div>
+
+        <article
+          class="hero mode-stats"
+          id="hero"
+          role="button"
+          tabindex="0"
+          aria-labelledby="heroTitle"
+          aria-describedby="heroDesc"
+        >
+          <div class="hero-top">
+            <div class="ring-wrap stats" id="ringWrap">
+              <svg viewBox="0 0 88 88" aria-hidden="true">
+                <circle class="track" cx="44" cy="44" r="38" />
+                <circle
+                  class="progress"
+                  id="ringProgress"
+                  cx="44"
+                  cy="44"
+                  r="38"
+                />
+              </svg>
+              <div class="ring-center">
+                <span class="big" id="ringBig">62%</span>
+                <span class="small" id="ringSmall">步数目标</span>
+              </div>
+            </div>
+            <div class="hero-main">
+              <div class="hero-label" id="heroLabel" data-mode="stats">今日活动</div>
+              <h2 class="hero-title" id="heroTitle">4,960 步 · 完成 62%</h2>
+              <p class="hero-desc" id="heroDesc">
+                上次同步 10:24 · 点击整块区域再次同步
+              </p>
+            </div>
+          </div>
+
+          <div class="kpi-row" id="kpiRow">
+            <div class="kpi">
+              <div class="val" id="kpiSteps">4,960</div>
+              <div class="name">步数</div>
+            </div>
+            <div class="kpi">
+              <div class="val" id="kpiKcal">218</div>
+              <div class="unit">kcal</div>
+              <div class="name">卡路里</div>
+            </div>
+            <div class="kpi">
+              <div class="val" id="kpiKm">3.2</div>
+              <div class="unit">km</div>
+              <div class="name">距离</div>
+            </div>
+          </div>
+
+          <div class="sync-bar" id="syncBar" aria-hidden="true">
+            <i id="syncBarFill"></i>
+          </div>
+
+          <div class="hero-footer">
+            <a href="#" id="linkHub" onclick="return false;">历史同步详情</a>
+            <span class="hint" id="footerHint">下拉也可同步</span>
+          </div>
+        </article>
+
+        <div class="list-placeholder">
+          下方健康数据卡片列表（原型中省略）
+        </div>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <h2>原型控制台</h2>
+      <p style="font-size: 13px; color: var(--subtitle); margin: 0 0 14px">
+        用于评审状态与动效，不等同于最终实现 API。
+      </p>
+
+      <h3>切换状态</h3>
+      <div class="btn-row" id="stateButtons">
+        <button type="button" data-state="idle" class="active">空闲 · 今日概要</button>
+        <button type="button" data-state="awaiting">同步 · 等计划</button>
+        <button type="button" data-state="syncing">同步 · 有进度</button>
+        <button type="button" data-state="success">刚完成 · 展开 KPI</button>
+        <button type="button" data-state="failed">同步失败</button>
+        <button type="button" data-state="offline">未连接</button>
+      </div>
+
+      <h3>模拟交互</h3>
+      <div class="btn-row">
+        <button type="button" class="primary" id="btnPlaySync">
+          播放一遍同步动画
+        </button>
+        <button type="button" id="btnRandomData">随机今日数据</button>
+      </div>
+
+      <h3>状态流</h3>
+      <pre class="flow" id="flowText">idle → (tap) → awaiting → syncing → success → idle(stats)</pre>
+
+      <h3>设计要点</h3>
+      <ul class="notes">
+        <li>
+          <strong>圆环语义切换</strong>：同步中紫色（#5C5CE0）+ 百分比或「等待计划」；完成后玫红（#FF2D55）+ 步数目标 %。
+        </li>
+        <li>
+          <strong>固定高度</strong>：KPI 三列用淡入 + 顶部分割线，避免列表跳动；同步中收起 KPI，只保留环 + 文案 + 细进度条。
+        </li>
+        <li>
+          <strong>主操作</strong>：整卡可点 = 同步；次要「历史同步详情」进 Hub；去掉右侧孤立「同步」按钮，减少抽象感。
+        </li>
+        <li>
+          <strong>数据</strong>：Demo 层对当日 Activity 求和；目标步数暂 8000，后续接用户目标。
+        </li>
+        <li>
+          <strong>失败</strong>：环归零或警示色，文案可点重试；保留上次成功 KPI 或灰显（产品可选，本原型为灰显 KPI）。
+        </li>
+      </ul>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const CIRC = 2 * Math.PI * 38;
+    const GOAL = 8000;
+
+    const demo = {
+      steps: 4960,
+      kcal: 218,
+      km: 3.2,
+      lastSync: "10:24",
+    };
+
+    const els = {
+      hero: document.getElementById("hero"),
+      ringWrap: document.getElementById("ringWrap"),
+      ringProgress: document.getElementById("ringProgress"),
+      ringBig: document.getElementById("ringBig"),
+      ringSmall: document.getElementById("ringSmall"),
+      heroLabel: document.getElementById("heroLabel"),
+      heroTitle: document.getElementById("heroTitle"),
+      heroDesc: document.getElementById("heroDesc"),
+      kpiSteps: document.getElementById("kpiSteps"),
+      kpiKcal: document.getElementById("kpiKcal"),
+      kpiKm: document.getElementById("kpiKm"),
+      syncBarFill: document.getElementById("syncBarFill"),
+      footerHint: document.getElementById("footerHint"),
+      flowText: document.getElementById("flowText"),
+      toast: document.getElementById("toast"),
+    };
+
+    let state = "idle";
+    let playing = false;
+
+    function setRing(percent, mode) {
+      const p = Math.max(0, Math.min(100, percent));
+      els.ringProgress.style.strokeDasharray = `${CIRC}`;
+      els.ringProgress.style.strokeDashoffset = `${CIRC * (1 - p / 100)}`;
+      els.ringWrap.classList.toggle("sync", mode === "sync");
+      els.ringWrap.classList.toggle("stats", mode === "stats");
+    }
+
+    function fmtSteps(n) {
+      return n.toLocaleString("zh-CN");
+    }
+
+    function stepPercent() {
+      return Math.min(100, Math.round((demo.steps / GOAL) * 100));
+    }
+
+    function refreshKpi() {
+      els.kpiSteps.textContent = fmtSteps(demo.steps);
+      els.kpiKcal.textContent = String(demo.kcal);
+      els.kpiKm.textContent = demo.km.toFixed(1);
+    }
+
+    function applyState(next) {
+      state = next;
+      document.querySelectorAll("#stateButtons button").forEach((b) => {
+        b.classList.toggle("active", b.dataset.state === next);
+      });
+
+      els.hero.classList.remove(
+        "mode-stats",
+        "mode-sync",
+        "mode-fail",
+        "awaiting",
+        "hero--disabled"
+      );
+
+      refreshKpi();
+      const pct = stepPercent();
+
+      switch (next) {
+        case "idle":
+          els.hero.classList.add("mode-stats");
+          els.heroLabel.textContent = "今日活动";
+          els.heroLabel.dataset.mode = "stats";
+          els.ringBig.textContent = pct + "%";
+          els.ringSmall.textContent = "步数目标";
+          setRing(pct, "stats");
+          els.heroTitle.textContent =
+            fmtSteps(demo.steps) + " 步 · 完成 " + pct + "%";
+          els.heroDesc.textContent =
+            "上次同步 " + demo.lastSync + " · 点击整块区域再次同步";
+          els.footerHint.textContent = "下拉也可同步";
+          els.flowText.textContent = "idle (stats visible)";
+          break;
+
+        case "awaiting":
+          els.hero.classList.add("mode-sync", "awaiting", "hero--disabled");
+          els.heroLabel.textContent = "正在同步";
+          els.heroLabel.dataset.mode = "sync";
+          els.ringBig.textContent = "…";
+          els.ringSmall.textContent = "等待设备计划";
+          setRing(18, "sync");
+          els.heroTitle.textContent = "健康数据同步";
+          els.heroDesc.textContent = "同步中：等待设备计划…";
+          els.syncBarFill.style.width = "35%";
+          els.footerHint.innerHTML =
+            '<span class="chip">同步中</span>';
+          els.flowText.textContent = "syncing · plan == null";
+          break;
+
+        case "syncing": {
+          const recv = 47;
+          const total = 120;
+          const syncPct = Math.round((recv / total) * 100);
+          els.hero.classList.add("mode-sync", "hero--disabled");
+          els.heroLabel.textContent = "正在同步";
+          els.heroLabel.dataset.mode = "sync";
+          els.ringBig.textContent = syncPct + "%";
+          els.ringSmall.textContent = recv + " / " + total + " 条";
+          setRing(syncPct, "sync");
+          els.heroTitle.textContent = "健康数据同步";
+          els.heroDesc.textContent = "正在从手表拉取历史记录…";
+          els.syncBarFill.style.width = syncPct + "%";
+          els.footerHint.innerHTML =
+            '<span class="chip">已收到 ' + recv + " 条</span>";
+          els.flowText.textContent = "syncing · " + recv + "/" + total + " wire";
+          break;
+        }
+
+        case "success":
+          els.hero.classList.add("mode-stats");
+          els.heroLabel.textContent = "同步完成";
+          els.heroLabel.dataset.mode = "stats";
+          els.ringBig.textContent = pct + "%";
+          els.ringSmall.textContent = "步数目标";
+          setRing(pct, "stats");
+          els.heroTitle.textContent = "今日活动已更新";
+          els.heroDesc.textContent =
+            "收到 120 条 · " + demo.lastSync + " 刚刚";
+          els.footerHint.innerHTML =
+            '<span class="chip ok">完成</span>';
+          els.flowText.textContent = "success → morph ring to stats + show KPI";
+          break;
+
+        case "failed":
+          els.hero.classList.add("mode-fail");
+          els.heroLabel.textContent = "同步失败";
+          els.heroLabel.dataset.mode = "fail";
+          els.ringBig.textContent = "!";
+          els.ringSmall.textContent = "点击重试";
+          setRing(0, "sync");
+          els.ringWrap.classList.remove("stats");
+          els.ringWrap.classList.add("sync");
+          els.ringProgress.style.stroke = "var(--warn)";
+          els.heroTitle.textContent = "未能完成同步";
+          els.heroDesc.textContent = "连接超时 · 点击重试";
+          els.footerHint.innerHTML =
+            '<span class="chip fail">失败</span>';
+          els.flowText.textContent = "failed · tap hero to retry";
+          break;
+
+        case "offline":
+          els.hero.classList.add("mode-stats", "hero--disabled");
+          els.heroLabel.textContent = "未连接";
+          els.heroLabel.dataset.mode = "stats";
+          els.ringBig.textContent = "—";
+          els.ringSmall.textContent = "步数目标";
+          setRing(0, "stats");
+          els.heroTitle.textContent = "连接手表后同步";
+          els.heroDesc.textContent = "今日活动将在同步后显示";
+          els.kpiSteps.textContent = "—";
+          els.kpiKcal.textContent = "—";
+          els.kpiKm.textContent = "—";
+          els.footerHint.textContent = "请先完成连接与登录";
+          els.flowText.textContent = "offline / no session";
+          break;
+      }
+
+      if (next !== "failed") {
+        els.ringProgress.style.stroke = "";
+      }
+    }
+
+    function showToast(msg) {
+      els.toast.textContent = msg;
+      els.toast.classList.add("show");
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => els.toast.classList.remove("show"), 2200);
+    }
+
+    async function playSync() {
+      if (playing) return;
+      playing = true;
+      applyState("awaiting");
+      await wait(1400);
+      applyState("syncing");
+      const steps = [
+        { r: 12, t: 80 },
+        { r: 28, t: 80 },
+        { r: 45, t: 80 },
+        { r: 62, t: 80 },
+        { r: 78, t: 80 },
+        { r: 92, t: 80 },
+        { r: 100, t: 100 },
+      ];
+      for (const s of steps) {
+        els.ringBig.textContent = s.r + "%";
+        setRing(s.r, "sync");
+        els.syncBarFill.style.width = s.r + "%";
+        els.ringSmall.textContent = Math.round((s.r / 100) * 120) + " / 120 条";
+        await wait(s.t);
+      }
+      demo.lastSync = new Date().toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      demo.steps = Math.min(GOAL, demo.steps + 420);
+      demo.kcal += 18;
+      demo.km = Math.round((demo.km + 0.35) * 10) / 10;
+      applyState("success");
+      await wait(1600);
+      applyState("idle");
+      showToast("动画结束：回到空闲态（今日概要）");
+      playing = false;
+    }
+
+    function wait(ms) {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+
+    document.getElementById("stateButtons").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-state]");
+      if (!btn || playing) return;
+      applyState(btn.dataset.state);
+    });
+
+    document.getElementById("btnPlaySync").addEventListener("click", () => {
+      playSync();
+    });
+
+    document.getElementById("btnRandomData").addEventListener("click", () => {
+      demo.steps = Math.floor(1200 + Math.random() * 9000);
+      demo.kcal = Math.floor(demo.steps * 0.042);
+      demo.km = Math.round((demo.steps * 0.00065) * 10) / 10;
+      refreshKpi();
+      if (state === "idle" || state === "success") applyState(state);
+      showToast("已刷新模拟今日数据");
+    });
+
+    function onHeroActivate() {
+      if (playing) return;
+      if (state === "offline") {
+        showToast("原型：请先切到「空闲」或播放同步");
+        return;
+      }
+      if (state === "failed") {
+        playSync();
+        return;
+      }
+      if (state === "idle" || state === "success") {
+        playSync();
+        return;
+      }
+      showToast("同步进行中…");
+    }
+
+    els.hero.addEventListener("click", onHeroActivate);
+    els.hero.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onHeroActivate();
+      }
+    });
+
+    document.getElementById("linkHub").addEventListener("click", (e) => {
+      e.preventDefault();
+      showToast("原型：进入 JwHistoryHub");
+    });
+
+    applyState("idle");
+  </script>
+</body>
+</html>

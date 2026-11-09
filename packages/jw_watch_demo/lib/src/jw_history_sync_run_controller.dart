@@ -22,12 +22,9 @@ final class JwHistorySyncRunController extends ChangeNotifier
       receivedWire: 0,
       totalWire: 0,
       startedAt: startedAt,
-      eventLog: [
-        _ts(startedAt),
-        '已发起同步，等待设备返回计划…',
-      ],
     );
     notifyListeners();
+    _log('已发起历史同步，等待设备计划…');
     final run = session.syncHealthData(this, onHistoryFrame: _logRawFrame);
     _active = run;
     return run.whenComplete(() {
@@ -69,25 +66,14 @@ final class JwHistorySyncRunController extends ChangeNotifier
     _log('正在重置设备同步标记…');
     notifyListeners();
     await session.resetHistorySyncMarkers();
-    _log('已发送同步重置（0x05/0xFA），可再次发起同步');
+    _log('已发送重置同步标记');
     notifyListeners();
   }
 
   void _log(String message) {
-    final entries = List<String>.from(_state.eventLog)
-      ..add('${_ts(DateTime.now())} $message');
-    while (entries.length > JwHistorySyncRunState.maxEventLogEntries) {
-      entries.removeAt(0);
+    if (kDebugMode) {
+      debugPrint('[JwDemoSync] $message');
     }
-    _state = _state.copyWith(eventLog: entries);
-  }
-
-  static String _ts(DateTime time) {
-    final local = time.toLocal();
-    final h = local.hour.toString().padLeft(2, '0');
-    final m = local.minute.toString().padLeft(2, '0');
-    final s = local.second.toString().padLeft(2, '0');
-    return '[$h:$m:$s]';
   }
 
   @override
@@ -97,7 +83,6 @@ final class JwHistorySyncRunController extends ChangeNotifier
       totalWire: plan.totalWireRecords,
       receivedWire: 0,
       receivedRowsByCategory: {},
-      roundRecords: {},
       clearFailure: true,
     );
     _log('同步开始：设备计划共 ${plan.totalWireRecords} 条');
@@ -158,87 +143,49 @@ final class JwHistorySyncRunController extends ChangeNotifier
 
   @override
   void onActivityReceived(List<JWActivity> batch) =>
-      _append(JWHistorySyncCategory.activity, batch);
+      _count(JWHistorySyncCategory.activity, batch.length);
 
   @override
   void onSleepReceived(List<JWSleep> batch) =>
-      _append(JWHistorySyncCategory.sleep, batch);
+      _count(JWHistorySyncCategory.sleep, batch.length);
 
   @override
   void onHeartRateReceived(List<JWHeartRate> batch) =>
-      _append(JWHistorySyncCategory.heartRate, batch);
+      _count(JWHistorySyncCategory.heartRate, batch.length);
 
   @override
   void onTemperatureReceived(List<JWTemperature> batch) =>
-      _appendTemperature(batch);
+      _count(JWHistorySyncCategory.temperature, batch.length);
 
   @override
   void onBloodPressureReceived(List<JWBloodPressure> batch) =>
-      _append(JWHistorySyncCategory.bloodPressure, batch);
+      _count(JWHistorySyncCategory.bloodPressure, batch.length);
 
   @override
   void onBloodOxygenReceived(List<JWBloodOxygen> batch) =>
-      _append(JWHistorySyncCategory.bloodOxygen, batch);
+      _count(JWHistorySyncCategory.bloodOxygen, batch.length);
 
   @override
   void onHrvReceived(List<JWHrv> batch) =>
-      _append(JWHistorySyncCategory.hrv, batch);
+      _count(JWHistorySyncCategory.hrv, batch.length);
 
   @override
   void onPressureReceived(List<JWPressure> batch) =>
-      _append(JWHistorySyncCategory.pressure, batch);
+      _count(JWHistorySyncCategory.pressure, batch.length);
 
   @override
   void onSportReceived(List<JWSport> batch) =>
-      _append(JWHistorySyncCategory.sport, batch);
+      _count(JWHistorySyncCategory.sport, batch.length);
 
-  void _append(JWHistorySyncCategory category, List<Object> batch) {
-    if (batch.isEmpty) return;
+  void _count(JWHistorySyncCategory category, int added) {
+    if (added <= 0) return;
     if (!jwHistorySyncCategoryVisibleInDemo(category)) return;
     final rows = Map<JWHistorySyncCategory, int>.from(
         _state.receivedRowsByCategory);
-    final next = (rows[category] ?? 0) + batch.length;
+    final next = (rows[category] ?? 0) + added;
     rows[category] = next;
-    final records = Map<JWHistorySyncCategory, List<Object>>.from(
-        _state.roundRecords);
-    final bucket = List<Object>.from(records[category] ?? const []);
-    for (final item in batch) {
-      if (bucket.length >= JwHistorySyncRunState.maxSamplesPerCategory) break;
-      bucket.add(item);
-    }
-    records[category] = bucket;
-    _state = _state.copyWith(
-      receivedRowsByCategory: rows,
-      roundRecords: records,
-    );
-    _log(
-      '收到 ${jwHistorySyncCategoryLabel(category)} ${batch.length} 条（累计 $next）',
-    );
-    notifyListeners();
-  }
-
-  /// Temperature rows are decoded from heart-rate wire payloads; they do not
-  /// add to wire progress or the primary parsed-row total.
-  void _appendTemperature(List<JWTemperature> batch) {
-    if (batch.isEmpty) return;
-    final rows = Map<JWHistorySyncCategory, int>.from(
-        _state.receivedRowsByCategory);
-    final next = (rows[JWHistorySyncCategory.temperature] ?? 0) + batch.length;
-    rows[JWHistorySyncCategory.temperature] = next;
-    final records = Map<JWHistorySyncCategory, List<Object>>.from(
-        _state.roundRecords);
-    final bucket = List<Object>.from(
-        records[JWHistorySyncCategory.temperature] ?? const []);
-    for (final item in batch) {
-      if (bucket.length >= JwHistorySyncRunState.maxSamplesPerCategory) break;
-      bucket.add(item);
-    }
-    records[JWHistorySyncCategory.temperature] = bucket;
-    _state = _state.copyWith(
-      receivedRowsByCategory: rows,
-      roundRecords: records,
-    );
-    _log('心率数据附带体温 ${batch.length} 条（累计 $next）');
+    _state = _state.copyWith(receivedRowsByCategory: rows);
+    _log('收到 ${jwHistorySyncCategoryLabel(category)} $added 条（累计 $next）');
     notifyListeners();
   }
 }

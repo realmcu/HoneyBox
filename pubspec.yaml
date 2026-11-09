@@ -75,3 +75,5 @@ flutter:
     - assets/jw_settings/
     # JW Demo 健康详情图标
     - assets/jw_health/
+    # JW Demo 数据首页图表模式图标
+    - assets/jw_data_home/

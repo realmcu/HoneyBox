@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -31,12 +32,14 @@ class JwAppStepTouchChart extends StatefulWidget {
     super.key,
     required this.slots,
     required this.maxSteps,
-    required this.onSelection,
+    this.onSelection,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppStepSlot> slots;
   final int maxSteps;
-  final ValueChanged<JwAppStepTouchSelection?> onSelection;
+  final ValueChanged<JwAppStepTouchSelection?>? onSelection;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppStepTouchChart> createState() => _JwAppStepTouchChartState();
@@ -73,7 +76,7 @@ class _JwAppStepTouchChartState extends State<JwAppStepTouchChart>
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
       _grow.forward(from: 0);
     }
@@ -106,7 +109,7 @@ class _JwAppStepTouchChartState extends State<JwAppStepTouchChart>
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   void _emit(int index, double width) {
@@ -122,7 +125,7 @@ class _JwAppStepTouchChartState extends State<JwAppStepTouchChart>
     final eachWidth = 4.0;
     final eachPadding = (width - eachWidth * _count) / (_count - 1);
     final anchorX = (index + 0.5) * eachWidth + index * eachPadding;
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppStepTouchSelection(
         index: index,
         begin: slot.time,
@@ -136,10 +139,31 @@ class _JwAppStepTouchChartState extends State<JwAppStepTouchChart>
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
+        Widget paintChild(Animation<double>? grow) {
+          final visibleMax = grow == null
+              ? widget.maxSteps
+              : math.max(1, (widget.maxSteps * grow.value).round());
+          return CustomPaint(
+            size: Size(width, height),
+            painter: _StepPainter(
+              slots: widget.slots,
+              maxSteps: widget.maxSteps,
+              visibleMax: visibleMax,
+              curIndex: interactive ? _curIndex : -1,
+              mode: widget.mode,
+            ),
+          );
+        }
+
+        if (!interactive) {
+          return paintChild(null);
+        }
+
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -185,19 +209,7 @@ class _JwAppStepTouchChartState extends State<JwAppStepTouchChart>
           onPanCancel: _clearSelection,
           child: AnimatedBuilder(
             animation: _grow,
-            builder: (context, _) {
-              final visibleMax =
-                  math.max(1, (widget.maxSteps * _grow.value).round());
-              return CustomPaint(
-                size: Size(width, height),
-                painter: _StepPainter(
-                  slots: widget.slots,
-                  maxSteps: widget.maxSteps,
-                  visibleMax: visibleMax,
-                  curIndex: _curIndex,
-                ),
-              );
-            },
+            builder: (context, _) => paintChild(_grow),
           ),
         );
       },
@@ -211,17 +223,25 @@ class _StepPainter extends CustomPainter {
     required this.maxSteps,
     required this.visibleMax,
     required this.curIndex,
+    required this.mode,
   });
 
   final List<JwAppStepSlot> slots;
   final int maxSteps;
   final int visibleMax;
   final int curIndex;
+  final JwAppChartMode mode;
 
   static const _count = 48;
   static const _eachWidth = 4.0;
-  static const _topHeight = 19.0;
-  static const _textHeight = 30.0;
+
+  double get _topHeight => JwAppChartLayout.top(mode);
+
+  double get _textHeight => JwAppChartLayout.bottomText(mode, detail: 30);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -240,7 +260,7 @@ class _StepPainter extends CustomPainter {
       fontSize: 10.6,
     );
 
-    if (curIndex < 0) {
+    if (_showYAxis && curIndex < 0) {
       final maxLabel = '$maxSteps';
       text.text = TextSpan(
         text: maxLabel,
@@ -260,18 +280,26 @@ class _StepPainter extends CustomPainter {
         Offset(x, chartBottom - _eachWidth / 2),
         track,
       );
-      if (i == 0 || i == _count - 1) {
-        canvas.drawCircle(
-          Offset(x, chartBottom + 20),
-          1.5,
-          Paint()..color = JwHealthAppTheme.stepLabel,
-        );
-      } else if (i % 8 == 0) {
-        final hour = i ~/ 2;
-        final str = '${hour.toString().padLeft(2, '0')}:00';
-        text.text = TextSpan(text: str, style: labelStyle);
-        text.layout();
-        text.paint(canvas, Offset(x - text.width / 2, chartBottom + 10));
+      if (_showXAxis) {
+        final dotY = mode == JwAppChartMode.home
+            ? JwAppChartLayout.xAxisDotY(size.height, _textHeight)
+            : chartBottom + 20;
+        final labelY = mode == JwAppChartMode.home
+            ? JwAppChartLayout.xAxisLabelY(size.height, _textHeight)
+            : chartBottom + 10;
+        if (i == 0 || i == _count - 1) {
+          canvas.drawCircle(
+            Offset(x, dotY),
+            1.5,
+            Paint()..color = JwHealthAppTheme.stepLabel,
+          );
+        } else if (i % 8 == 0) {
+          final hour = i ~/ 2;
+          final str = '${hour.toString().padLeft(2, '0')}:00';
+          text.text = TextSpan(text: str, style: labelStyle);
+          text.layout();
+          text.paint(canvas, Offset(x - text.width / 2, labelY));
+        }
       }
     }
 
@@ -302,10 +330,13 @@ class _StepPainter extends CustomPainter {
       canvas.drawLine(Offset(x, top), Offset(x, bottom), paint);
     }
 
-    if (total <= 0) {
-      text.text = const TextSpan(
+    if (total <= 0 && JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无步数',
-        style: TextStyle(color: JwHealthAppTheme.stepEmpty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.stepEmpty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -347,5 +378,6 @@ class _StepPainter extends CustomPainter {
       oldDelegate.slots != slots ||
       oldDelegate.maxSteps != maxSteps ||
       oldDelegate.visibleMax != visibleMax ||
-      oldDelegate.curIndex != curIndex;
+      oldDelegate.curIndex != curIndex ||
+      oldDelegate.mode != mode;
 }

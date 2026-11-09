@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
+import 'jw_app_day_chart_bundle.dart';
+import 'jw_data_home_presentation.dart';
 import 'jw_data_units.dart';
 
 /// 数据 Tab 类型目录（对齐 App WatchData 卡片 + SDK 可查询类型）。
@@ -37,6 +39,50 @@ final class JwDataTypeItem {
   /// 任一支持即视为设备支持；空列表表示不依赖能力位。
   final List<JWDeviceFunction> requiredFunctions;
   final String? unitHint;
+}
+
+final class JwDataHomeCardData {
+  const JwDataHomeCardData({
+    required this.presentation,
+    required this.bundle,
+  });
+
+  final JwDataHomeCardPresentation presentation;
+  final JwAppDayChartBundle bundle;
+}
+
+JwSleepDaySummary jwDataSummarizeSleepDay(List<Object> records) =>
+    _summarizeSleepMinutes(records);
+
+Future<JwDataHomeCardData> jwDataLoadHomeCard({
+  required JWHistoryStore store,
+  required JWHistoryScope scope,
+  required JwDataTypeItem item,
+  DateTime? day,
+}) async {
+  final targetDay = jwDataDayStart(day ?? DateTime.now());
+  final dayRows = await jwDataQueryDay(
+    store: store,
+    scope: scope,
+    id: item.id,
+    day: targetDay,
+  );
+  final bundle = JwAppDayChartBundle.build(
+    id: item.id,
+    rows: dayRows,
+    day: targetDay,
+  );
+  final presentation = await jwDataBuildHomePresentation(
+    id: item.id,
+    dayRows: dayRows,
+    day: targetDay,
+    store: store,
+    scope: scope,
+  );
+  return JwDataHomeCardData(
+    presentation: presentation,
+    bundle: bundle,
+  );
 }
 
 /// Demo 数据首页全量展示的类型列表。

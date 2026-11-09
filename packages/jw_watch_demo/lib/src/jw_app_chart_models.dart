@@ -213,6 +213,7 @@ List<JwAppHrHourBucket> jwAppBuildHrHours(List<Object> records, DateTime day) {
   ];
 }
 
+/// 对齐 App 日图 Y 轴：步数 `WatchStepDataFragment` → `((max/1000)+1)*1000`，下限 0。
 int jwAppStepMaxAxis(List<JwAppStepSlot> slots) {
   var max = 0;
   for (final s in slots) {
@@ -222,6 +223,7 @@ int jwAppStepMaxAxis(List<JwAppStepSlot> slots) {
   return ((max ~/ 1000) + 1) * 1000;
 }
 
+/// 对齐 App 心率日图：`max2=(max/10+2)*10`，`min2=(min/10-2)*10`；空数据 160/40。
 ({int max, int min, double avg}) jwAppHrAxis(List<JwAppHrHourBucket> hours) {
   var min = 999;
   var max = 0;
@@ -238,10 +240,153 @@ int jwAppStepMaxAxis(List<JwAppStepSlot> slots) {
   }
   if (n == 0) return (max: 160, min: 40, avg: 0);
   final avg = sum / n;
-  var axisMax = ((max / 10).ceil() * 10).clamp(60, 220);
-  var axisMin = ((min / 10).floor() * 10).clamp(30, 120);
+  var axisMax = (max ~/ 10 + 2) * 10;
+  // App 可能算出负值；绘图侧按 0 兜底，避免 invert。
+  var axisMin = math.max(0, (min ~/ 10 - 2) * 10);
   if (axisMax <= axisMin) axisMax = axisMin + 40;
   return (max: axisMax, min: axisMin, avg: avg);
+}
+
+/// 对齐 App `BpTouchView2`：max=`max(160,high)` 后再 `(max/10+2)*10`；min 固定 30。
+({int max, int min}) jwAppBpAxis(List<JwAppBpHourBucket> hours) {
+  var maxHigh = 0;
+  var n = 0;
+  for (final h in hours) {
+    if (h.avgHigh > 0) {
+      maxHigh = math.max(maxHigh, h.avgHigh);
+      n++;
+    }
+  }
+  if (n == 0) return (max: 180, min: 30);
+  var axisMax = math.max(160, maxHigh);
+  axisMax = (axisMax ~/ 10 + 2) * 10;
+  return (max: axisMax, min: 30);
+}
+
+/// 对齐 App `WatchBloodOxygenCommonDataFragment`：默认 100/85；
+/// max=`min(100, dataMax+1)`；min 在 dataMin<85 时降到 `max(70, dataMin-1)`。
+({int max, int min}) jwAppSpo2Axis(List<JwAppSpo2HourBucket> hours) {
+  const defaultMax = 100;
+  const defaultMin = 85;
+  var dataMax = 0;
+  var dataMin = 1000;
+  for (final h in hours) {
+    if (h.maxValue > dataMax) dataMax = h.maxValue;
+    if (h.minValue > 0 && h.minValue < dataMin) dataMin = h.minValue;
+  }
+  if (dataMax <= 0 || dataMin == 1000) {
+    return (max: defaultMax, min: defaultMin);
+  }
+  var chartMax = math.min(defaultMax, dataMax + 1);
+  chartMax = math.max(chartMax, defaultMin + 1);
+  var chartMin = defaultMin;
+  if (dataMin > 0 && dataMin < defaultMin) {
+    chartMin = math.max(70, dataMin - 1);
+  }
+  chartMin = math.min(chartMin, chartMax - 1);
+  return (max: chartMax, min: chartMin);
+}
+
+/// 对齐 App `TempHeadAdapter`：`max*1.1+0.3` / `max(0, min*0.9-0.3)`；空 50/0。
+({double max, double min, double avg}) jwAppTempAxis(List<JwAppTempSlot> slots) {
+  double? maxT;
+  double? minT;
+  var sum = 0.0;
+  var n = 0;
+  for (final s in slots) {
+    for (final t in s.temps) {
+      if (t <= 0) continue;
+      maxT = maxT == null ? t : math.max(maxT, t);
+      minT = minT == null ? t : math.min(minT, t);
+      sum += t;
+      n++;
+    }
+  }
+  if (n == 0) return (max: 50.0, min: 0.0, avg: 0.0);
+  final avg = sum / n;
+  var axisMax = maxT! * 1.1 + 0.3;
+  var axisMin = math.max(0.0, minT! * 0.9 - 0.3);
+  if (axisMax <= axisMin) {
+    axisMax = 50;
+    axisMin = 0;
+  }
+  return (max: axisMax, min: axisMin, avg: avg);
+}
+
+/// 对齐 App `FloatUtil.formatGLuMax/Min`：`max+max*0.1` / `min-min*0.2`；空 15/0。
+({double max, double min, double avg}) jwAppGluAxis(
+  List<JwAppGluHourBucket> hours,
+) {
+  double? maxV;
+  double? minV;
+  var sum = 0.0;
+  var n = 0;
+  for (final h in hours) {
+    for (final v in h.values) {
+      if (v <= 0) continue;
+      maxV = maxV == null ? v : math.max(maxV, v);
+      minV = minV == null ? v : math.min(minV, v);
+      sum += v;
+      n++;
+    }
+  }
+  if (n == 0) {
+    // bean 空值 15/0，经 format 后仍是 16.5 / 0
+    return (max: 15 + 15 * 0.1, min: 0.0, avg: 0.0);
+  }
+  final avg = sum / n;
+  final axisMax = maxV! + maxV * 0.1;
+  final axisMin = math.max(0.0, minV! - minV * 0.2);
+  return (max: axisMax, min: axisMin, avg: avg);
+}
+
+/// 对齐 App `PressureHeadAdapter`：Y max=`formatPressureChartMax`；Y min 固定 0。
+({int axisMax, int avg}) jwAppPressureAxis(List<JwAppPressureSlot> slots) {
+  var maxV = 0;
+  var sum = 0;
+  var n = 0;
+  for (final s in slots) {
+    if (s.avg <= 0) continue;
+    final slotMax = s.max > 0 ? s.max : s.avg;
+    if (slotMax > maxV) maxV = slotMax;
+    sum += s.avg;
+    n++;
+  }
+  // FloatUtil.formatPressureChartMax
+  int axisMax;
+  if (maxV <= 0) {
+    axisMax = 100;
+  } else {
+    var padded = (maxV * 1.1).ceil();
+    final rem = padded % 25;
+    if (rem != 0) padded += 25 - rem;
+    axisMax = padded;
+  }
+  final avg = n == 0 ? 0 : (sum / n).round();
+  return (axisMax: axisMax, avg: avg);
+}
+
+/// 对齐 App HRV：`max(210, round((dataMax+60)/10)*10)`，下限 0。
+int jwAppHrvChartMax(List<JwAppHrvHourBucket> hours) {
+  var dataMax = 0;
+  for (final h in hours) {
+    if (h.max > dataMax) dataMax = h.max;
+    for (final v in h.values) {
+      if (v > dataMax) dataMax = v;
+    }
+  }
+  final padded = dataMax + 60;
+  final stepped = ((padded / 10.0).round() * 10);
+  return math.max(210, stepped);
+}
+
+/// 运动时长柱：下限 0；上限取数据最大值（至少 60）。
+int jwAppSportMaxMinutesAxis(List<JwAppSportHourBar> bars) {
+  var m = 0;
+  for (final b in bars) {
+    if (b.minutes > m) m = b.minutes;
+  }
+  return m <= 0 ? 60 : m;
 }
 
 /// JW mode → App sleep chart type：1浅→1，2深→0，3退出→4，4 REM→2。

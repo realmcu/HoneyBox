@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -34,14 +35,16 @@ class JwAppGluTouchChart extends StatefulWidget {
     required this.axisMax,
     required this.axisMin,
     required this.averageRate,
-    required this.onSelection,
+    this.onSelection,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppGluHourBucket> hours;
   final double axisMax;
   final double axisMin;
   final double averageRate;
-  final ValueChanged<JwAppGluTouchSelection?> onSelection;
+  final ValueChanged<JwAppGluTouchSelection?>? onSelection;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppGluTouchChart> createState() => _JwAppGluTouchChartState();
@@ -70,7 +73,7 @@ class _JwAppGluTouchChartState extends State<JwAppGluTouchChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -106,7 +109,7 @@ class _JwAppGluTouchChartState extends State<JwAppGluTouchChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   double _eachWidth(double width) {
@@ -130,12 +133,12 @@ class _JwAppGluTouchChartState extends State<JwAppGluTouchChart> {
   void _emit(int hour, double width) {
     final b = _bucketForHour(hour);
     if (b == null || b.avg <= 0) {
-      widget.onSelection(null);
+      widget.onSelection?.call(null);
       return;
     }
     final each = _eachWidth(width);
     final anchorX = _touchPad + hour * each;
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppGluTouchSelection(
         hour: hour,
         begin: b.startTime,
@@ -150,10 +153,23 @@ class _JwAppGluTouchChartState extends State<JwAppGluTouchChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _GluPainter(
+            hours: widget.hours,
+            axisMax: widget.axisMax,
+            axisMin: widget.axisMin,
+            averageRate: widget.averageRate,
+            touchHour: interactive ? _touchHour : -1,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -189,16 +205,7 @@ class _JwAppGluTouchChartState extends State<JwAppGluTouchChart> {
           },
           onPanEnd: (_) => _clear(),
           onPanCancel: _clear,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _GluPainter(
-              hours: widget.hours,
-              axisMax: widget.axisMax,
-              axisMin: widget.axisMin,
-              averageRate: widget.averageRate,
-              touchHour: _touchHour,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -212,6 +219,7 @@ class _GluPainter extends CustomPainter {
     required this.axisMin,
     required this.averageRate,
     required this.touchHour,
+    required this.mode,
   });
 
   final List<JwAppGluHourBucket> hours;
@@ -219,9 +227,15 @@ class _GluPainter extends CustomPainter {
   final double axisMin;
   final double averageRate;
   final int touchHour;
+  final JwAppChartMode mode;
 
-  static const _top = 19.0;
-  static const _bottomText = 20.0;
+  double get _top => JwAppChartLayout.top(mode);
+
+  double get _bottomText => JwAppChartLayout.bottomText(mode, detail: 20);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
   static const _touchPad = 5.0;
   static const _radius = 3.5;
   static const _lineLabelGap = 5.0;
@@ -273,39 +287,44 @@ class _GluPainter extends CustomPainter {
     final labelRight = size.width - _touchPad;
     final topStr = _fmtAxis(displayMax);
     final bottomStr = _fmtAxis(displayMin);
-    text.text = TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    final topLineEndX = labelRight - text.width - _lineLabelGap;
-    text.text = TextSpan(text: bottomStr, style: labelStyle);
-    text.layout();
-    final bottomLineEndX = labelRight - text.width - _lineLabelGap;
+    var topLineEndX = size.width - _touchPad;
+    var bottomLineEndX = size.width - _touchPad;
+    if (_showYAxis) {
+      text.text = TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      topLineEndX = labelRight - text.width - _lineLabelGap;
+      text.text = TextSpan(text: bottomStr, style: labelStyle);
+      text.layout();
+      bottomLineEndX = labelRight - text.width - _lineLabelGap;
+    }
 
     final axisPaint = Paint()
       ..color = JwHealthAppTheme.gluHeadLine
       ..strokeWidth = 1;
 
-    for (var j = 0; j < 24; j++) {
-      if (j == 0) {
-        canvas.drawCircle(
-          Offset(_touchPad + 1.5, size.height - _bottomText / 2 + 4),
-          1.5,
-          Paint()..color = JwHealthAppTheme.gluText,
-        );
-      } else if (j == 23) {
-        canvas.drawCircle(
-          Offset(size.width - _touchPad - 1.5, size.height - _bottomText / 2 + 4),
-          1.5,
-          Paint()..color = JwHealthAppTheme.gluText,
-        );
-      } else if (j % 4 == 0) {
-        final str = '${j.toString().padLeft(2, '0')}:00';
-        text.text = TextSpan(text: str, style: labelStyle);
-        text.layout();
-        final cx = _touchPad + eachWidth * j;
-        text.paint(
-          canvas,
-          Offset(cx - text.width / 2, size.height - _bottomText / 2 + 8),
-        );
+    if (_showXAxis) {
+      final dotY = JwAppChartLayout.xAxisDotY(size.height, _bottomText);
+      final labelY = JwAppChartLayout.xAxisLabelY(size.height, _bottomText);
+      for (var j = 0; j < 24; j++) {
+        if (j == 0) {
+          canvas.drawCircle(
+            Offset(_touchPad + 1.5, dotY),
+            1.5,
+            Paint()..color = JwHealthAppTheme.gluText,
+          );
+        } else if (j == 23) {
+          canvas.drawCircle(
+            Offset(size.width - _touchPad - 1.5, dotY),
+            1.5,
+            Paint()..color = JwHealthAppTheme.gluText,
+          );
+        } else if (j % 4 == 0) {
+          final str = '${j.toString().padLeft(2, '0')}:00';
+          text.text = TextSpan(text: str, style: labelStyle);
+          text.layout();
+          final cx = _touchPad + eachWidth * j;
+          text.paint(canvas, Offset(cx - text.width / 2, labelY));
+        }
       }
     }
 
@@ -324,10 +343,14 @@ class _GluPainter extends CustomPainter {
       (h) => h.values.any((v) => v > 0) || h.avg > 0,
     );
 
-    if (!hasAny || averageRate <= 0) {
-      text.text = const TextSpan(
+    if ((!hasAny || averageRate <= 0) &&
+        JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无血糖',
-        style: TextStyle(color: JwHealthAppTheme.gluEmpty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.gluEmpty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -337,12 +360,14 @@ class _GluPainter extends CustomPainter {
           _top + (chartBottom - _top) / 2 - 8,
         ),
       );
-      text.text = TextSpan(text: topStr, style: labelStyle);
-      text.layout();
-      text.paint(canvas, Offset(labelRight - text.width, _top - 12));
-      text.text = TextSpan(text: bottomStr, style: labelStyle);
-      text.layout();
-      text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+      if (_showYAxis) {
+        text.text = TextSpan(text: topStr, style: labelStyle);
+        text.layout();
+        text.paint(canvas, Offset(labelRight - text.width, _top - 12));
+        text.text = TextSpan(text: bottomStr, style: labelStyle);
+        text.layout();
+        text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+      }
       return;
     }
 
@@ -388,7 +413,7 @@ class _GluPainter extends CustomPainter {
       canvas.drawCircle(p, 2, holePaint);
     }
 
-    if (averageRate > axisMin && averageRate < axisMax) {
+    if (_showYAxis && averageRate > axisMin && averageRate < axisMax) {
       final avgY = _top + (displayMax - averageRate) * eachHeight;
       final dash = Paint()
         ..color = JwHealthAppTheme.gluAvgDash
@@ -450,12 +475,14 @@ class _GluPainter extends CustomPainter {
       }
     }
 
-    text.text = TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, _top - 12));
-    text.text = TextSpan(text: bottomStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+    if (_showYAxis) {
+      text.text = TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, _top - 12));
+      text.text = TextSpan(text: bottomStr, style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+    }
   }
 
   @override
@@ -464,5 +491,6 @@ class _GluPainter extends CustomPainter {
       oldDelegate.axisMax != axisMax ||
       oldDelegate.axisMin != axisMin ||
       oldDelegate.averageRate != averageRate ||
-      oldDelegate.touchHour != touchHour;
+      oldDelegate.touchHour != touchHour ||
+      oldDelegate.mode != mode;
 }

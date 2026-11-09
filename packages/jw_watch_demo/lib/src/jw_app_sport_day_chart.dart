@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -30,11 +31,13 @@ class JwAppSportDayChart extends StatefulWidget {
   const JwAppSportDayChart({
     super.key,
     required this.bars,
-    required this.onSelection,
+    this.onSelection,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppSportHourBar> bars;
-  final ValueChanged<JwAppSportDayTouchSelection?> onSelection;
+  final ValueChanged<JwAppSportDayTouchSelection?>? onSelection;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppSportDayChart> createState() => _JwAppSportDayChartState();
@@ -61,7 +64,7 @@ class _JwAppSportDayChartState extends State<JwAppSportDayChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -92,7 +95,7 @@ class _JwAppSportDayChartState extends State<JwAppSportDayChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   double _slotWidth(double width) {
@@ -110,13 +113,7 @@ class _JwAppSportDayChartState extends State<JwAppSportDayChart> {
     return h.clamp(0, _hourCount - 1);
   }
 
-  int _maxMinutes() {
-    var m = 0;
-    for (final b in widget.bars) {
-      if (b.minutes > m) m = b.minutes;
-    }
-    return m <= 0 ? 60 : m;
-  }
+  int _maxMinutes() => jwAppSportMaxMinutesAxis(widget.bars);
 
   JwAppSportHourBar? _barForHour(int hour) {
     for (final b in widget.bars) {
@@ -128,10 +125,10 @@ class _JwAppSportDayChartState extends State<JwAppSportDayChart> {
   void _emit(int hour, double width) {
     final bar = _barForHour(hour);
     if (bar == null) {
-      widget.onSelection(null);
+      widget.onSelection?.call(null);
       return;
     }
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppSportDayTouchSelection(
         hour: hour,
         begin: bar.startTime,
@@ -145,10 +142,21 @@ class _JwAppSportDayChartState extends State<JwAppSportDayChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _SportDayPainter(
+            bars: widget.bars,
+            maxMinutes: _maxMinutes(),
+            touchHour: interactive ? _touchHour : -1,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -184,14 +192,7 @@ class _JwAppSportDayChartState extends State<JwAppSportDayChart> {
           },
           onPanEnd: (_) => _clear(),
           onPanCancel: _clear,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _SportDayPainter(
-              bars: widget.bars,
-              maxMinutes: _maxMinutes(),
-              touchHour: _touchHour,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -203,14 +204,21 @@ class _SportDayPainter extends CustomPainter {
     required this.bars,
     required this.maxMinutes,
     required this.touchHour,
+    required this.mode,
   });
 
   final List<JwAppSportHourBar> bars;
   final int maxMinutes;
   final int touchHour;
+  final JwAppChartMode mode;
 
-  static const _top = 19.0;
-  static const _bottomText = 20.0;
+  double get _top => JwAppChartLayout.top(mode);
+
+  double get _bottomText => JwAppChartLayout.bottomText(mode, detail: 20);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
   static const _touchPad = 5.0;
   static const _hourCount = 24;
   static const _barStroke = 8.0;
@@ -228,7 +236,7 @@ class _SportDayPainter extends CustomPainter {
       fontSize: 10.6,
     );
 
-    if (touchHour < 0) {
+    if (_showYAxis && touchHour < 0) {
       final maxLabel = '$axisMax';
       text.text = TextSpan(
         text: maxLabel,
@@ -254,17 +262,25 @@ class _SportDayPainter extends CustomPainter {
         Offset(x, chartBottom - _barStroke / 2),
         trackPaint,
       );
-      if (hour == 0 || hour == _hourCount - 1) {
-        canvas.drawCircle(
-          Offset(x, chartBottom + 10),
-          1.5,
-          Paint()..color = JwHealthAppTheme.sportText,
-        );
-      } else if (hour % 4 == 0) {
-        final str = '${hour.toString().padLeft(2, '0')}:00';
-        text.text = TextSpan(text: str, style: labelStyle);
-        text.layout();
-        text.paint(canvas, Offset(x - text.width / 2, chartBottom + 4));
+      if (_showXAxis) {
+        final dotY = mode == JwAppChartMode.home
+            ? JwAppChartLayout.xAxisDotY(size.height, _bottomText)
+            : chartBottom + 10;
+        final labelY = mode == JwAppChartMode.home
+            ? JwAppChartLayout.xAxisLabelY(size.height, _bottomText)
+            : chartBottom + 4;
+        if (hour == 0 || hour == _hourCount - 1) {
+          canvas.drawCircle(
+            Offset(x, dotY),
+            1.5,
+            Paint()..color = JwHealthAppTheme.sportText,
+          );
+        } else if (hour % 4 == 0) {
+          final str = '${hour.toString().padLeft(2, '0')}:00';
+          text.text = TextSpan(text: str, style: labelStyle);
+          text.layout();
+          text.paint(canvas, Offset(x - text.width / 2, labelY));
+        }
       }
     }
 
@@ -290,10 +306,13 @@ class _SportDayPainter extends CustomPainter {
       canvas.drawLine(Offset(x, topY), Offset(x, bottomY), barPaint);
     }
 
-    if (totalMinutes <= 0) {
-      text.text = const TextSpan(
+    if (totalMinutes <= 0 && JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无运动',
-        style: TextStyle(color: JwHealthAppTheme.sportEmpty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.sportEmpty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -335,5 +354,6 @@ class _SportDayPainter extends CustomPainter {
   bool shouldRepaint(covariant _SportDayPainter oldDelegate) =>
       oldDelegate.bars != bars ||
       oldDelegate.maxMinutes != maxMinutes ||
-      oldDelegate.touchHour != touchHour;
+      oldDelegate.touchHour != touchHour ||
+      oldDelegate.mode != mode;
 }

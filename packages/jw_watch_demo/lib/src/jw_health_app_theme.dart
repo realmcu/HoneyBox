@@ -115,5 +115,12 @@ abstract final class JwHealthAppTheme {
   static const dateBarHeight = 48.0;
   static const chartBottomInset = 25.0;
 
-  static double topPanelHeight(double width) => width * 0.77;
+  /// 绘图区固定高度（不含日期条）。
+  ///
+  /// 按 375 设计宽下 App `64.2%w`≈241 的卡片体量推算，再扣掉详情页日期条，
+  /// 取整为 220，避免再跟屏宽百分比漂移。
+  static const chartPlotHeight = 220.0;
+
+  /// 顶部面板 = 日期条 + 绘图区。
+  static const topPanelHeight = dateBarHeight + chartPlotHeight;
 }

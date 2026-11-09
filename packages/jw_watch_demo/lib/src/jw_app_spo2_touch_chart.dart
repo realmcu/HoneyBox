@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -27,19 +28,23 @@ class JwAppSpo2TouchChart extends StatefulWidget {
   const JwAppSpo2TouchChart({
     super.key,
     required this.hours,
-    required this.onSelection,
+    this.onSelection,
+    this.axisMax = 100,
+    this.axisMin = 85,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppSpo2HourBucket> hours;
-  final ValueChanged<JwAppSpo2TouchSelection?> onSelection;
+  final ValueChanged<JwAppSpo2TouchSelection?>? onSelection;
+  final int axisMax;
+  final int axisMin;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppSpo2TouchChart> createState() => _JwAppSpo2TouchChartState();
 }
 
 class _JwAppSpo2TouchChartState extends State<JwAppSpo2TouchChart> {
-  static const int _axisMax = 100;
-  static const int _axisMin = 85;
 
   static const double _leftPad = 0;
   static const double _itemW = 7;
@@ -86,7 +91,7 @@ class _JwAppSpo2TouchChartState extends State<JwAppSpo2TouchChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -118,7 +123,7 @@ class _JwAppSpo2TouchChartState extends State<JwAppSpo2TouchChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   JwAppSpo2HourBucket _bucket(int slot) {
@@ -136,7 +141,7 @@ class _JwAppSpo2TouchChartState extends State<JwAppSpo2TouchChart> {
 
   void _emit(int slot, double width) {
     final h = _bucket(slot);
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppSpo2TouchSelection(
         max: h.maxValue,
         min: h.minValue,
@@ -149,11 +154,25 @@ class _JwAppSpo2TouchChartState extends State<JwAppSpo2TouchChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
         final pad = _itemPadding(width);
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _Spo2Painter(
+            hours: widget.hours,
+            axisMax: widget.axisMax,
+            axisMin: widget.axisMin,
+            touchSlot: interactive ? _touchSlot : -1,
+            itemPadding: pad,
+            slotCenterX: _slotCenterX,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -193,17 +212,7 @@ class _JwAppSpo2TouchChartState extends State<JwAppSpo2TouchChart> {
           },
           onPanEnd: (_) => _clear(),
           onPanCancel: _clear,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _Spo2Painter(
-              hours: widget.hours,
-              axisMax: _axisMax,
-              axisMin: _axisMin,
-              touchSlot: _touchSlot,
-              itemPadding: pad,
-              slotCenterX: _slotCenterX,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -218,6 +227,7 @@ class _Spo2Painter extends CustomPainter {
     required this.touchSlot,
     required this.itemPadding,
     required this.slotCenterX,
+    required this.mode,
   });
 
   final List<JwAppSpo2HourBucket> hours;
@@ -226,13 +236,19 @@ class _Spo2Painter extends CustomPainter {
   final int touchSlot;
   final double itemPadding;
   final double Function(int slot, double width) slotCenterX;
+  final JwAppChartMode mode;
 
-  static const double _top = 19;
-  static const double _bottomText = 20;
+  double get _top => JwAppChartLayout.top(mode);
+
+  double get _bottomText => JwAppChartLayout.bottomText(mode, detail: 20);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
   static const double _leftPad = 0;
   static const double _radius = 3.5;
   static const double _labelPadRight = 5;
-  static const double _plotTop = _top + _radius;
+  double get _plotTop => _top + _radius;
 
   int get _chartRange => axisMax - axisMin;
 
@@ -258,57 +274,53 @@ class _Spo2Painter extends CustomPainter {
 
     const topStr = '100';
     const botStr = '85';
-    text.text = const TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    final topW = text.width;
-    text.text = const TextSpan(text: botStr, style: labelStyle);
-    text.layout();
-    final botW = text.width;
     final labelRight = size.width - _labelPadRight;
-    final topLineEndX = labelRight - topW - 5;
-    final bottomLineEndX = labelRight - botW - 5;
+    var topLineEndX = size.width;
+    var bottomLineEndX = size.width;
+    if (_showYAxis) {
+      text.text = const TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      final topW = text.width;
+      text.text = const TextSpan(text: botStr, style: labelStyle);
+      text.layout();
+      final botW = text.width;
+      topLineEndX = labelRight - topW - 5;
+      bottomLineEndX = labelRight - botW - 5;
+    }
 
     final linePaint = Paint()
       ..color = JwHealthAppTheme.spo2HeadLine
       ..strokeWidth = 1;
-    canvas.drawLine(const Offset(0, _top), Offset(topLineEndX, _top), linePaint);
+    canvas.drawLine(Offset(0, _top), Offset(topLineEndX, _top), linePaint);
     canvas.drawLine(
       Offset(0, size.height - _bottomText),
       Offset(bottomLineEndX, size.height - _bottomText),
       linePaint,
     );
 
-    for (var hour = 0; hour < 24; hour++) {
-      final cx = slotCenterX(hour, size.width);
-      if (hour == 0) {
-        canvas.drawCircle(
-          Offset(
-            _leftPad + itemPadding,
-            size.height - _Spo2Painter._bottomText / 2 + 4,
-          ),
-          1.5,
-          Paint()..color = JwHealthAppTheme.spo2Text,
-        );
-      } else if (hour == 23) {
-        canvas.drawCircle(
-          Offset(
-            size.width - _leftPad - itemPadding,
-            size.height - _bottomText / 2 + 4,
-          ),
-          1.5,
-          Paint()..color = JwHealthAppTheme.spo2Text,
-        );
-      } else if (hour % 4 == 0) {
-        final str = '${hour.toString().padLeft(2, '0')}:00';
-        text.text = TextSpan(text: str, style: labelStyle);
-        text.layout();
-        text.paint(
-          canvas,
-          Offset(
-            cx - text.width / 2,
-            size.height - _bottomText / 2 + 8,
-          ),
-        );
+    if (_showXAxis) {
+      final dotY = JwAppChartLayout.xAxisDotY(size.height, _bottomText);
+      final labelY = JwAppChartLayout.xAxisLabelY(size.height, _bottomText);
+      for (var hour = 0; hour < 24; hour++) {
+        final cx = slotCenterX(hour, size.width);
+        if (hour == 0) {
+          canvas.drawCircle(
+            Offset(_leftPad + itemPadding, dotY),
+            1.5,
+            Paint()..color = JwHealthAppTheme.spo2Text,
+          );
+        } else if (hour == 23) {
+          canvas.drawCircle(
+            Offset(size.width - _leftPad - itemPadding, dotY),
+            1.5,
+            Paint()..color = JwHealthAppTheme.spo2Text,
+          );
+        } else if (hour % 4 == 0) {
+          final str = '${hour.toString().padLeft(2, '0')}:00';
+          text.text = TextSpan(text: str, style: labelStyle);
+          text.layout();
+          text.paint(canvas, Offset(cx - text.width / 2, labelY));
+        }
       }
     }
 
@@ -362,10 +374,13 @@ class _Spo2Painter extends CustomPainter {
       }
     }
 
-    if (!hasData) {
-      text.text = const TextSpan(
+    if (!hasData && JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无血氧',
-        style: TextStyle(color: JwHealthAppTheme.spo2Empty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.spo2Empty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -377,22 +392,27 @@ class _Spo2Painter extends CustomPainter {
       );
     }
 
-    const labelDy = 12.0;
-    text.text = const TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - topW, _top - labelDy));
+    if (_showYAxis) {
+      text.text = const TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      final topW = text.width;
+      const labelDy = 12.0;
+      text.paint(canvas, Offset(labelRight - topW, _top - labelDy));
 
-    text.text = const TextSpan(text: botStr, style: labelStyle);
-    text.layout();
-    text.paint(
-      canvas,
-      Offset(labelRight - botW, size.height - _bottomText - labelDy),
-    );
+      text.text = const TextSpan(text: botStr, style: labelStyle);
+      text.layout();
+      final botW = text.width;
+      text.paint(
+        canvas,
+        Offset(labelRight - botW, size.height - _bottomText - labelDy),
+      );
+    }
   }
 
   @override
   bool shouldRepaint(covariant _Spo2Painter oldDelegate) =>
       oldDelegate.hours != hours ||
       oldDelegate.touchSlot != touchSlot ||
-      oldDelegate.itemPadding != itemPadding;
+      oldDelegate.itemPadding != itemPadding ||
+      oldDelegate.mode != mode;
 }

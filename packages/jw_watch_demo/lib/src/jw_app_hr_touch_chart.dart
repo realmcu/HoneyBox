@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -35,14 +36,16 @@ class JwAppHrTouchChart extends StatefulWidget {
     required this.axisMax,
     required this.axisMin,
     required this.averageRate,
-    required this.onSelection,
+    this.onSelection,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppHrHourBucket> hours;
   final int axisMax;
   final int axisMin;
   final double averageRate;
-  final ValueChanged<JwAppHrTouchSelection?> onSelection;
+  final ValueChanged<JwAppHrTouchSelection?>? onSelection;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppHrTouchChart> createState() => _JwAppHrTouchChartState();
@@ -66,7 +69,7 @@ class _JwAppHrTouchChartState extends State<JwAppHrTouchChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -97,7 +100,7 @@ class _JwAppHrTouchChartState extends State<JwAppHrTouchChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   void _emit(int hour, double width) {
@@ -114,7 +117,7 @@ class _JwAppHrTouchChartState extends State<JwAppHrTouchChart> {
     final eachWidth = (width - 2 * touchPadding) / 23.0;
     final anchorX = touchPadding + eachWidth * hour;
     final rates = bucket.rates.where((e) => e > 0);
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppHrTouchSelection(
         hour: hour,
         begin: bucket.startTime,
@@ -129,12 +132,25 @@ class _JwAppHrTouchChartState extends State<JwAppHrTouchChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
         final touchPadding = 5.0;
         final eachWidth = (width - 2 * touchPadding) / 23.0;
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _HrPainter(
+            hours: widget.hours,
+            axisMax: widget.axisMax.toDouble(),
+            axisMin: widget.axisMin.toDouble(),
+            averageRate: widget.averageRate,
+            touchHour: interactive ? _touchHour : -1,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -174,16 +190,7 @@ class _JwAppHrTouchChartState extends State<JwAppHrTouchChart> {
           },
           onPanEnd: (_) => _clear(),
           onPanCancel: _clear,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _HrPainter(
-              hours: widget.hours,
-              axisMax: widget.axisMax.toDouble(),
-              axisMin: widget.axisMin.toDouble(),
-              averageRate: widget.averageRate,
-              touchHour: _touchHour,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -197,6 +204,7 @@ class _HrPainter extends CustomPainter {
     required this.axisMin,
     required this.averageRate,
     required this.touchHour,
+    required this.mode,
   });
 
   final List<JwAppHrHourBucket> hours;
@@ -204,11 +212,21 @@ class _HrPainter extends CustomPainter {
   final double axisMin;
   final double averageRate;
   final int touchHour;
+  final JwAppChartMode mode;
 
-  static const _top = 19.0;
-  static const _bottomText = 20.0;
   static const _touchPad = 5.0;
   static const _radius = 3.5;
+
+  double get _top => JwAppChartLayout.top(mode);
+
+  double get _bottomText => JwAppChartLayout.bottomText(mode, detail: 20);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
+
+  double _chartRight(double width) =>
+      _showYAxis ? width - _touchPad - 40 : width - _touchPad;
 
   Offset _point(double value, int hour, double width, double height) {
     final eachWidth = (width - 2 * _touchPad) / 23.0;
@@ -227,55 +245,65 @@ class _HrPainter extends CustomPainter {
       fontSize: 10.6,
     );
 
-    // axis labels
-    text.text = TextSpan(text: '${axisMax.round()}', style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(size.width - _touchPad - text.width, _top - 12));
-    text.text = TextSpan(text: '${axisMin.round()}', style: labelStyle);
-    text.layout();
-    text.paint(
-      canvas,
-      Offset(size.width - _touchPad - text.width, chartBottom - 12),
-    );
+    final chartRight = _chartRight(size.width);
+    if (_showYAxis) {
+      text.text = TextSpan(text: '${axisMax.round()}', style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(size.width - _touchPad - text.width, _top - 12));
+      text.text = TextSpan(text: '${axisMin.round()}', style: labelStyle);
+      text.layout();
+      text.paint(
+        canvas,
+        Offset(size.width - _touchPad - text.width, chartBottom - 12),
+      );
+    }
 
     final axisPaint = Paint()
       ..color = JwHealthAppTheme.hrHeadLine
       ..strokeWidth = 1;
     canvas.drawLine(
       Offset(_touchPad, _top),
-      Offset(size.width - _touchPad - 40, _top),
+      Offset(chartRight, _top),
       axisPaint,
     );
     canvas.drawLine(
       Offset(_touchPad, chartBottom),
-      Offset(size.width - _touchPad - 40, chartBottom),
+      Offset(chartRight, chartBottom),
       axisPaint,
     );
 
-    for (var j = 0; j < 24; j++) {
-      final x = _touchPad + ((size.width - 2 * _touchPad) / 23.0) * j;
-      if (j == 0 || j == 23) {
-        canvas.drawCircle(
-          Offset(x, size.height - _bottomText / 2 + 4),
-          1.5,
-          Paint()..color = JwHealthAppTheme.hrAxisLabel,
-        );
-      } else if (j % 4 == 0) {
-        final str = '${j.toString().padLeft(2, '0')}:00';
-        text.text = TextSpan(text: str, style: labelStyle);
-        text.layout();
-        text.paint(
-          canvas,
-          Offset(x - text.width / 2, size.height - _bottomText / 2 + 4),
-        );
+    if (_showXAxis) {
+      for (var j = 0; j < 24; j++) {
+        final x = _touchPad + ((size.width - 2 * _touchPad) / 23.0) * j;
+        if (j == 0 || j == 23) {
+          canvas.drawCircle(
+            Offset(x, JwAppChartLayout.xAxisDotY(size.height, _bottomText)),
+            1.5,
+            Paint()..color = JwHealthAppTheme.hrAxisLabel,
+          );
+        } else if (j % 4 == 0) {
+          final str = '${j.toString().padLeft(2, '0')}:00';
+          text.text = TextSpan(text: str, style: labelStyle);
+          text.layout();
+          text.paint(
+            canvas,
+            Offset(
+              x - text.width / 2,
+              JwAppChartLayout.xAxisLabelY(size.height, _bottomText),
+            ),
+          );
+        }
       }
     }
 
     final hasData = hours.any((h) => h.rates.any((r) => r > 0));
-    if (!hasData) {
-      text.text = const TextSpan(
+    if (!hasData && JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无心率',
-        style: TextStyle(color: JwHealthAppTheme.hrEmpty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.hrEmpty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -329,7 +357,7 @@ class _HrPainter extends CustomPainter {
       canvas.drawCircle(p, 2, hole);
     }
 
-    if (averageRate > axisMin && averageRate < axisMax) {
+    if (_showYAxis && averageRate > axisMin && averageRate < axisMax) {
       final avgY = _top + (axisMax - averageRate) * ((chartBottom - _top) / (axisMax - axisMin));
       final dash = Paint()
         ..color = JwHealthAppTheme.hrAvgDash
@@ -388,5 +416,6 @@ class _HrPainter extends CustomPainter {
       oldDelegate.axisMax != axisMax ||
       oldDelegate.axisMin != axisMin ||
       oldDelegate.averageRate != averageRate ||
-      oldDelegate.touchHour != touchHour;
+      oldDelegate.touchHour != touchHour ||
+      oldDelegate.mode != mode;
 }

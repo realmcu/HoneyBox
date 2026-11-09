@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'jw_app_chart_layout.dart';
 import 'jw_app_chart_models.dart';
 import 'jw_health_app_theme.dart';
 
@@ -35,14 +36,16 @@ class JwAppTempTouchChart extends StatefulWidget {
     required this.axisMax,
     required this.axisMin,
     required this.averageRate,
-    required this.onSelection,
+    this.onSelection,
+    this.mode = JwAppChartMode.detail,
   });
 
   final List<JwAppTempSlot> slots;
   final double axisMax;
   final double axisMin;
   final double averageRate;
-  final ValueChanged<JwAppTempTouchSelection?> onSelection;
+  final ValueChanged<JwAppTempTouchSelection?>? onSelection;
+  final JwAppChartMode mode;
 
   @override
   State<JwAppTempTouchChart> createState() => _JwAppTempTouchChartState();
@@ -73,7 +76,7 @@ class _JwAppTempTouchChartState extends State<JwAppTempTouchChart> {
       _tracking = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        widget.onSelection(null);
+        widget.onSelection?.call(null);
       });
     }
   }
@@ -109,7 +112,7 @@ class _JwAppTempTouchChartState extends State<JwAppTempTouchChart> {
     _armed = false;
     _tracking = false;
     if (had && mounted) setState(() {});
-    widget.onSelection(null);
+    widget.onSelection?.call(null);
   }
 
   double _slotPitch(double width) {
@@ -146,7 +149,7 @@ class _JwAppTempTouchChartState extends State<JwAppTempTouchChart> {
         min: 0,
       ),
     );
-    widget.onSelection(
+    widget.onSelection?.call(
       JwAppTempTouchSelection(
         index: index,
         begin: slot.time,
@@ -161,10 +164,23 @@ class _JwAppTempTouchChartState extends State<JwAppTempTouchChart> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = JwAppChartLayout.interactive(widget.mode);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final height = constraints.maxHeight;
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _TempPainter(
+            slots: widget.slots,
+            axisMax: widget.axisMax,
+            axisMin: widget.axisMin,
+            averageRate: widget.averageRate,
+            touchIndex: interactive ? _touchIndex : -1,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) {
@@ -200,16 +216,7 @@ class _JwAppTempTouchChartState extends State<JwAppTempTouchChart> {
           },
           onPanEnd: (_) => _clear(),
           onPanCancel: _clear,
-          child: CustomPaint(
-            size: Size(width, height),
-            painter: _TempPainter(
-              slots: widget.slots,
-              axisMax: widget.axisMax,
-              axisMin: widget.axisMin,
-              averageRate: widget.averageRate,
-              touchIndex: _touchIndex,
-            ),
-          ),
+          child: paint,
         );
       },
     );
@@ -223,6 +230,7 @@ class _TempPainter extends CustomPainter {
     required this.axisMin,
     required this.averageRate,
     required this.touchIndex,
+    required this.mode,
   });
 
   final List<JwAppTempSlot> slots;
@@ -230,9 +238,15 @@ class _TempPainter extends CustomPainter {
   final double axisMin;
   final double averageRate;
   final int touchIndex;
+  final JwAppChartMode mode;
 
-  static const _top = 19.0;
-  static const _bottomText = 20.0;
+  double get _top => JwAppChartLayout.top(mode);
+
+  double get _bottomText => JwAppChartLayout.bottomText(mode, detail: 20);
+
+  bool get _showYAxis => JwAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => JwAppChartLayout.showXAxis(mode);
   static const _leftPadding = 2.0;
   static const _itemWidth = 8.0;
   static const _radius = 3.5;
@@ -269,12 +283,16 @@ class _TempPainter extends CustomPainter {
     final topStr = axisMax.round().toString();
     final bottomStr = axisMin.round().toString();
     final labelRight = size.width - _labelRightPad;
-    text.text = TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    final topLineEndX = labelRight - text.width - _lineLabelGap;
-    text.text = TextSpan(text: bottomStr, style: labelStyle);
-    text.layout();
-    final bottomLineEndX = labelRight - text.width - _lineLabelGap;
+    var topLineEndX = size.width;
+    var bottomLineEndX = size.width;
+    if (_showYAxis) {
+      text.text = TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      topLineEndX = labelRight - text.width - _lineLabelGap;
+      text.text = TextSpan(text: bottomStr, style: labelStyle);
+      text.layout();
+      bottomLineEndX = labelRight - text.width - _lineLabelGap;
+    }
 
     final axisPaint = Paint()
       ..color = JwHealthAppTheme.tempLine
@@ -286,31 +304,35 @@ class _TempPainter extends CustomPainter {
       axisPaint,
     );
 
-    for (var i = 0; i < 24; i++) {
-      final slotIndex = i * 2;
-      final x = _slotCenterX(slotIndex, size.width);
-      if (i == 0 || i == 23) {
-        canvas.drawCircle(
-          Offset(x, size.height - _bottomText / 2 + 4),
-          1.5,
-          Paint()..color = JwHealthAppTheme.tempText,
-        );
-      } else if (i % 4 == 0) {
-        final str = '${i.toString().padLeft(2, '0')}:00';
-        text.text = TextSpan(text: str, style: labelStyle);
-        text.layout();
-        text.paint(
-          canvas,
-          Offset(x - text.width / 2, size.height - _bottomText / 2 + 8),
-        );
+    if (_showXAxis) {
+      final dotY = JwAppChartLayout.xAxisDotY(size.height, _bottomText);
+      final labelY = JwAppChartLayout.xAxisLabelY(size.height, _bottomText);
+      for (var i = 0; i < 24; i++) {
+        final slotIndex = i * 2;
+        final x = _slotCenterX(slotIndex, size.width);
+        if (i == 0 || i == 23) {
+          canvas.drawCircle(
+            Offset(x, dotY),
+            1.5,
+            Paint()..color = JwHealthAppTheme.tempText,
+          );
+        } else if (i % 4 == 0) {
+          final str = '${i.toString().padLeft(2, '0')}:00';
+          text.text = TextSpan(text: str, style: labelStyle);
+          text.layout();
+          text.paint(canvas, Offset(x - text.width / 2, labelY));
+        }
       }
     }
 
     final hasData = slots.any((s) => s.temps.any((t) => t > 0));
-    if (!hasData) {
-      text.text = const TextSpan(
+    if (!hasData && JwAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
         text: '暂无体温',
-        style: TextStyle(color: JwHealthAppTheme.tempEmpty, fontSize: 23),
+        style: TextStyle(
+          color: JwHealthAppTheme.tempEmpty,
+          fontSize: JwAppChartLayout.emptyHintFontSize(mode),
+        ),
       );
       text.layout();
       text.paint(
@@ -336,7 +358,7 @@ class _TempPainter extends CustomPainter {
       }
     }
 
-    if (averageRate > axisMin && averageRate < axisMax) {
+    if (_showYAxis && averageRate > axisMin && averageRate < axisMax) {
       final avgY = _top + (axisMax - averageRate) * itemHeight;
       final dash = Paint()
         ..color = JwHealthAppTheme.tempAvgBg
@@ -396,12 +418,14 @@ class _TempPainter extends CustomPainter {
       }
     }
 
-    text.text = TextSpan(text: topStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, _top - 12));
-    text.text = TextSpan(text: bottomStr, style: labelStyle);
-    text.layout();
-    text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+    if (_showYAxis) {
+      text.text = TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, _top - 12));
+      text.text = TextSpan(text: bottomStr, style: labelStyle);
+      text.layout();
+      text.paint(canvas, Offset(labelRight - text.width, chartBottom - 12));
+    }
   }
 
   @override
@@ -410,5 +434,6 @@ class _TempPainter extends CustomPainter {
       oldDelegate.axisMax != axisMax ||
       oldDelegate.axisMin != axisMin ||
       oldDelegate.averageRate != averageRate ||
-      oldDelegate.touchIndex != touchIndex;
+      oldDelegate.touchIndex != touchIndex ||
+      oldDelegate.mode != mode;
 }

@@ -57,6 +57,15 @@ abstract final class JWProtocolCommands {
   static JWProtocolRequest confirmHistorySync() =>
       const JWProtocolRequest(command: 5, key: 0x1c, responseKey: null);
 
+  /// HL §5.0B/§5.0C today totals: request `0x0B`, response `0x0C` (16–17 B).
+  static const JWProtocolRequest queryTodayActivitySummary =
+      JWProtocolRequest(
+    command: 5,
+    key: 0x0b,
+    responseKey: 0x0c,
+    replyTimeout: Duration(seconds: 10),
+  );
+
   static JWProtocolRequest readLanguage() =>
       const JWProtocolRequest(command: 2, key: 0x4f, responseKey: 0x50);
   static JWProtocolRequest setLanguage(int value) => JWProtocolRequest(
