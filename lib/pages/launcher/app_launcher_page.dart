@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/current_app_provider.dart';
-import '../dashboard/dashboard_app_root.dart';
 import '../ebadge/ebadge_app_root.dart';
 import '../shared/update_flow.dart';
 import '../watch/watch_app_root.dart';
@@ -104,7 +103,9 @@ class AppLauncherPage extends ConsumerWidget {
       case AppId.watch:
         return const WatchAppRoot();
       case AppId.dashboard:
-        return const DashboardAppRoot();
+        // Dashboard is opened as a native Activity through the 'honeybox/map'
+        // channel (see _launch), so this widget route is never taken.
+        throw StateError('dashboard is opened natively, not as a Flutter route');
       case AppId.capture:
         return const CapturePage();
       case AppId.ota:

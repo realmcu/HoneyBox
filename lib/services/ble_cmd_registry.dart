@@ -158,7 +158,8 @@ abstract class BleCmdRemoteControlKey {
 ///   FFD3 write without response (App → Dev)
 ///   FFD4 notify                (Dev → App)
 ///
-/// 详见 `navi_projection_protocol.dart`。
+/// 已废弃：设备端改用 HoneyProtocol 3.12 的 L2 0x10 文件传输，
+/// 仪表盘投屏由原生 `mapfeature` 直接承载，本类无使用方。
 abstract class BleCmdNaviProjKey {
   // ── 控制通道 (FFD1→FFD2, 走 L1) ──
   static const int open = 0x01; // App → Dev: 开始投屏

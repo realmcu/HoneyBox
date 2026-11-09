@@ -57,6 +57,8 @@ class NaviBleFrameSender(
         private const val DATA_OVERHEAD = L1_HDR + 5 + 2
 
         private const val CHUNK_REQUEST = 512
+        /** Consecutive uncommitted frames before the failure becomes user-visible. */
+        private const val FAIL_VISIBLE_AFTER = 3
         private const val BEGIN_TIMEOUT_MS = 3000L
 
         /* Sliding window: keep up to WINDOW L1 frames unacknowledged and never
@@ -98,6 +100,14 @@ class NaviBleFrameSender(
     @Volatile private var frameStartNs = 0L
     @Volatile private var frameBytes = 0
     @Volatile private var frameIdx = 0
+    @Volatile private var frameJpeg: ByteArray? = null
+
+    /** Consecutive frames the device did not commit (BEGIN rejected / END failed). */
+    @Volatile private var failStreak = 0
+    /** seq of the frame we already retried, so a broken link cannot loop forever. */
+    @Volatile private var retriedSeq = -1
+    /** Frame to resend once before taking a newer one. */
+    @Volatile private var retryJpeg: ByteArray? = null
 
     private var fps = 5
     private var width = 400
@@ -152,12 +162,20 @@ class NaviBleFrameSender(
 
     private suspend fun frameLoop() {
         val intervalMs = (1000L / fps).coerceAtLeast(50L)
-        while (running.get() && state == State.SENDING) {
+        // Note: not gated on state == SENDING -- after an error we keep trying, so a
+        // transient outage can recover on its own instead of dying silently.
+        while (running.get()) {
             val cycleStartMs = System.currentTimeMillis()
-            val frame = NaviFramePreview.latestFrame.value
-            if (frame != null && frame.seq != lastNaviSeq) {
-                lastNaviSeq = frame.seq
-                sendFrame(frame.jpeg)
+            val retry = retryJpeg
+            if (retry != null) {
+                retryJpeg = null
+                sendFrame(retry)
+            } else {
+                val frame = NaviFramePreview.latestFrame.value
+                if (frame != null && frame.seq != lastNaviSeq) {
+                    lastNaviSeq = frame.seq
+                    sendFrame(frame.jpeg)
+                }
             }
 
             val remainingMs = intervalMs - (System.currentTimeMillis() - cycleStartMs)
@@ -224,6 +242,7 @@ class NaviBleFrameSender(
             while (off < total) {
                 if (beginRejected) {
                     Log.w(TAG, "BEGIN_RSP rejected mid-frame, dropping frame $lastNaviSeq")
+                    noteFailure("BEGIN 被拒绝")
                     clearRsp()
                     return@withLock false
                 }
@@ -265,6 +284,7 @@ class NaviBleFrameSender(
             frameStartNs = sendStartNs
             frameBytes = total
             frameIdx = lastNaviSeq
+            frameJpeg = jpeg
             val endValue = ByteArray(4)
             putU32(endValue, 0, crc)
             if (!writeL1Data(buildL2(KEY_END_REQ, endValue))) {
@@ -276,6 +296,36 @@ class NaviBleFrameSender(
             // with the following transfer instead of idling the link.
             return@withLock true
         }
+    }
+
+    /**
+     * One frame was not committed. Surface it (the old behaviour was a silent
+     * Log.w, which looked exactly like "projection is running" while the device
+     * stayed on the QR page) and schedule a single resend of the same frame.
+     */
+    private fun noteFailure(why: String) {
+        failStreak++
+        val idx = frameIdx
+        if (idx != retriedSeq && frameJpeg != null) {
+            retriedSeq = idx
+            retryJpeg = frameJpeg
+        }
+        if (failStreak == FAIL_VISIBLE_AFTER) {
+            onStatus("投屏异常：连续 $failStreak 帧未送达（$why），正在重试")
+            if (state != State.ERROR) {
+                state = State.ERROR
+                onState(state)
+            }
+        }
+    }
+
+    private fun noteSuccess() {
+        if (failStreak >= FAIL_VISIBLE_AFTER && state == State.ERROR) {
+            state = State.SENDING
+            onState(state)
+            onStatus("投屏已恢复")
+        }
+        failStreak = 0
     }
 
     private suspend fun sendAbort(reason: Int) {
@@ -350,9 +400,11 @@ class NaviBleFrameSender(
                             if (ms > 0) frameBytes * 1_000L / ms else frameBytes.toLong(),
                         )
                         NaviPerfStats.onSent(frameIdx, ms, 0)
+                        noteSuccess()
                     } else {
                         val err = if (v.size > 1) v[1].toInt() and 0xFF else 0
                         Log.w(TAG, "END_RSP failed status=$status err=$err")
+                        noteFailure("设备未接受（status=$status/$err）")
                     }
                 }
             }
