@@ -329,6 +329,8 @@ class MainActivity : FlutterActivity() {
                 "startCapture" -> {
                     val width = call.argument<Int>("width") ?: NaviCaptureService.DEFAULT_JPG_WIDTH
                     val height = call.argument<Int>("height") ?: NaviCaptureService.DEFAULT_JPG_HEIGHT
+                    val quality = call.argument<Int>("quality")
+                        ?: NaviCaptureService.DEFAULT_JPG_QUALITY
                     val fps = call.argument<Int>("fps") ?: 5
                     val speed = call.argument<Int>("speed") ?: 60
                     val startLat = call.argument<Double>("startLat") ?: 31.314
@@ -344,6 +346,7 @@ class MainActivity : FlutterActivity() {
                         dpi = NaviCaptureService.DEFAULT_VIRTUAL_DISPLAY_DPI,
                         width = width,
                         height = height,
+                        quality = quality,
                         startLat = startLat,
                         startLng = startLng,
                         endLat = endLat,

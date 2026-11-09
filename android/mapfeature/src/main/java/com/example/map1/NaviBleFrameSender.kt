@@ -1,6 +1,5 @@
 package com.example.map1
 
-import android.annotation.SuppressLint
 import android.util.Log
 import com.example.map1.navi.NaviFramePreview
 import com.example.map1.navi.NaviPerfStats
@@ -12,10 +11,19 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.CRC32
 
 /**
- * BLE 导航投屏帧发送器 — 完整的 L1 封装 + L2 协议栈。
+ * Dashboard projection sender for HoneyProtocol.
  *
- * 通过 VehicleBleManager 的 FFD1-FFD4 特征收发。轮询 NaviFramePreview
- * 获取 JPEG 帧，按 NAIV_PROJ 协议分包、流控发送。
+ * Transport: L1 (0xAB / big-endian / CRC-16-ARC over payload only) carried by the
+ * HMIS private service (0xFFC1 write, 0xFFC2 notify).
+ * Application: 0x10 file transfer, one JPEG frame = one file session:
+ *
+ *   BEGIN_REQ(total, chunk) -> BEGIN_RSP(status, chunk)
+ *   DATA(seq, bytes) x N          (streaming: ACK request bit = 0)
+ *   END_REQ(crc32)          -> END_RSP(status, error_code)
+ *
+ * Streaming mode: data frames never request an L1 ACK, so a whole frame is one
+ * uninterrupted burst. Loss is detected by the device's DATA sequence check
+ * (XFER_ABORT) or by the CRC32 in END_REQ, and costs exactly one frame.
  */
 class NaviBleFrameSender(
     private val onStatus: (String) -> Unit = {},
@@ -25,35 +33,38 @@ class NaviBleFrameSender(
 
     companion object {
         private const val TAG = "NaviBleSender"
-        private const val CMD_NAVI = 0x11
-        private const val KEY_OPEN = 0x01
-        private const val KEY_ACK = 0x02
-        private const val KEY_CLOSE = 0x03
-        private const val KEY_ERROR = 0x04
-        private const val KEY_FRAME = 0x05
-        private const val KEY_CREDIT = 0x06
-        private const val KEY_REPORT = 0x07
 
-        private const val L1_CTRL_DATA = 0x00
+        // HoneyProtocol 3.12 file transfer
+        private const val CMD_XFER = 0x10
+        private const val KEY_BEGIN_REQ = 0x01
+        private const val KEY_BEGIN_RSP = 0x02
+        private const val KEY_DATA = 0x03
+        private const val KEY_END_REQ = 0x05
+        private const val KEY_END_RSP = 0x06
+        private const val KEY_ABORT = 0x07
+
+        private const val FILE_TYPE_IMAGE = 0x01
+
+        // L1 header bits (2.3.2)
+        private const val L1_SYNC = 0xAB
+        private const val L1_HDR = 8
+        private const val L1_ACK_REQ = 0x40
+        private const val L1_BIT_ERR = 0x20
+        private const val L1_BIT_ACK = 0x10
         private const val L1_CTRL_ACK = 0x10
-        private const val L1_CTRL_ERROR = 0x30
 
-        private const val ACK_RESULT_OK = 0x00
+        // Overhead of one DATA L1 frame: L1(8) + L2 header(5) + seq(2)
+        private const val DATA_OVERHEAD = L1_HDR + 5 + 2
 
-        private const val FFD2_UUID = "FFD2"
-        private const val FFD4_UUID = "FFD4"
+        private const val CHUNK_REQUEST = 512
+        private const val BEGIN_TIMEOUT_MS = 3000L
 
-        private const val PROTOCOL_VERSION = 0x02
-        private const val FEATURE_RAW_ATT_PACKET = 0x01
-        private const val FEATURE_FRAME_CRC32 = 0x02
-        private const val REQUIRED_FEATURES = FEATURE_RAW_ATT_PACKET or FEATURE_FRAME_CRC32
-        private const val FRAME_HEADER_SIZE = 8
-        private const val FRAME_FIRST_HEADER_SIZE = 12
-        private const val MIN_PROTOCOL_PACKET = 104
-        private const val DEFAULT_MAX_PACKET = 20
-        private const val OPEN_TIMEOUT_MS = 5000L
-        private const val CREDIT_TIMEOUT_MS = 3000L
-        private const val RETX_KEEP_FRAMES = 3
+        /* Sliding window: keep up to WINDOW L1 frames unacknowledged and never
+         * block per packet. An ACK is only *requested* every WINDOW-th frame; the
+         * sender stalls only when the window is exhausted, so the pipeline stays
+         * full while the device still gets a bounded backlog. */
+        private const val WINDOW = 256
+        private const val WINDOW_TIMEOUT_MS = 150L
     }
 
     @Volatile var state = State.IDLE
@@ -63,37 +74,35 @@ class NaviBleFrameSender(
     private var senderJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // Protocol state
-    private val frameSeq = AtomicInteger(0)
-    private val credits = AtomicInteger(0)
-    @Volatile private var maxPacket = DEFAULT_MAX_PACKET
-    @Volatile private var waitCredits = false
-
-    // L1 sequence for control channel
+    /** L1 sequence: one counter for the whole connection, wraps at 16 bits. */
     private val l1Seq = AtomicInteger(0)
 
-    private data class RetxFrame(
-        val total: Int,
-        val crc32: Long,
-        val packets: Map<Int, ByteArray>,
-        val refundedOffsets: MutableSet<Int> = mutableSetOf(),
-    )
-
-    /** Retransmit buffers: frameSeq → immutable frame metadata and offset-indexed JPEG chunks. */
-    private val retxBufs = LinkedHashMap<Int, RetxFrame>()
-
-    /** Serializes writes to FFD3 at the L2-packet level so ATT fragments from different
-     *  L2 packets (forward and retransmit) never interleave on the wire. */
+    /** Serializes L1 frames so two frames never interleave on the wire. */
     private val sendMutex = Mutex()
 
-    // Last sent seq from NaviFramePreview (for dedup)
+    /** Single-slot response mailbox written by the GATT thread. */
+    private val rspLock = Any()
+    private var rspKey = -1
+    private var rspValue: ByteArray? = null
+
+    /** L1 seq of the newest success ACK seen on 0xFFC2. */
+    @Volatile private var lastAckSeq = -1
+    /** Reason of the last device XFER_ABORT for this session, -1 when none. */
+    @Volatile private var abortReason = -1
+
+    private var agreedChunk = 0
     private var lastNaviSeq = -1
 
-    // Frame loop params
+    /** Async session state: the BEGIN/END responses no longer gate the next frame. */
+    @Volatile private var beginRejected = false
+    @Volatile private var frameStartNs = 0L
+    @Volatile private var frameBytes = 0
+    @Volatile private var frameIdx = 0
+
     private var fps = 5
     private var width = 400
     private var height = 480
-    private var quality = 60
+    private var quality = 45
 
     // ═══════════════════════════════════════════════════════════════
     // Public API
@@ -105,66 +114,36 @@ class NaviBleFrameSender(
 
         running.set(true)
         state = State.IDLE
-        frameSeq.set(0); credits.set(0); l1Seq.set(0)
-        maxPacket = DEFAULT_MAX_PACKET; waitCredits = false
+        l1Seq.set(0)
+        agreedChunk = 0
         lastNaviSeq = -1
-        retxBufs.clear()
 
         onStatus("BLE 投屏初始化中…")
 
-        senderJob = scope.launch {
-            if (!handshake()) return@launch
-            state = State.SENDING
-            frameLoop()
+        if (VehicleBleManager.attPayload < DATA_OVERHEAD + 1) {
+            onStatus("BLE MTU 过小，无法启动投屏")
+            state = State.ERROR
+            onState(state)
+            running.set(false)
+            return
         }
+
+        state = State.SENDING
+        onState(state)
+        onStatus("BLE 投屏已启动 (0x10 流式)")
+        senderJob = scope.launch { frameLoop() }
     }
 
     fun stop() {
-        running.set(false)
+        if (!running.getAndSet(false)) return
         senderJob?.cancel()
-        scope.launch { sendClose() }
+        senderJob = null
+        scope.launch {
+            sendMutex.withLock { sendAbort(0x00) }
+        }
         state = State.IDLE
+        onState(state)
         onStatus("BLE 投屏已停止")
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Handshake
-    // ═══════════════════════════════════════════════════════════════
-
-    private suspend fun handshake(): Boolean {
-        state = State.OPENING
-        onStatus("BLE 握手…")
-
-        val requestedMaxPacket = minOf(VehicleBleManager.attPayload, 244)
-        if (requestedMaxPacket < MIN_PROTOCOL_PACKET) {
-            onStatus("BLE MTU过小，无法启动v2投屏"); state = State.ERROR; return false
-        }
-        val openL2 = buildNaviOpen(width, height, fps, quality, requestedMaxPacket)
-        val openL1 = buildL1Frame(L1_CTRL_DATA, openL2)
-
-        if (!VehicleBleManager.writeCtrl(openL1)) {
-            onStatus("FFD1 写入失败"); state = State.ERROR; return false
-        }
-        Log.i(TAG,
-            "→ NAVI_OPEN v2 ${width}x$height @${fps}fps q=$quality% packet=$requestedMaxPacket")
-
-        // Wait for ACK via FFD2 notify.
-        // Poll-based wait since notify callback runs on Binder thread.
-        val deadline = System.currentTimeMillis() + OPEN_TIMEOUT_MS
-        while (running.get() && state == State.OPENING) {
-            if (System.currentTimeMillis() > deadline) {
-                onStatus("OPEN 握手超时"); state = State.ERROR; return false
-            }
-            delay(50)
-        }
-        return state == State.SENDING
-    }
-
-    private suspend fun sendClose() {
-        val closeL2 = buildNaviClose(0x00)
-        val closeL1 = buildL1Frame(L1_CTRL_DATA, closeL2)
-        VehicleBleManager.writeCtrl(closeL1)
-        Log.i(TAG, "→ NAVI_CLOSE")
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -176,12 +155,9 @@ class NaviBleFrameSender(
         while (running.get() && state == State.SENDING) {
             val cycleStartMs = System.currentTimeMillis()
             val frame = NaviFramePreview.latestFrame.value
-            // Capture the frame reference once; sendFrame awaits full transmission before
-            // returning, ensuring one JPEG is fully sent before we check for a newer one.
             if (frame != null && frame.seq != lastNaviSeq) {
                 lastNaviSeq = frame.seq
-                val protocolSeq = frameSeq.getAndIncrement() and 0xFFFF
-                sendFrame(protocolSeq, frame.jpeg)
+                sendFrame(frame.jpeg)
             }
 
             val remainingMs = intervalMs - (System.currentTimeMillis() - cycleStartMs)
@@ -193,227 +169,288 @@ class NaviBleFrameSender(
         }
     }
 
-    private suspend fun sendFrame(seq: Int, jpeg: ByteArray) {
+    /** Sends one JPEG as one 0x10 file session. Returns true when the device committed it. */
+    private suspend fun sendFrame(jpeg: ByteArray): Boolean {
         val sendStartNs = System.nanoTime()
         val total = jpeg.size
-        val packetLimit = minOf(maxPacket, VehicleBleManager.attPayload)
-        val firstCapacity = packetLimit - FRAME_FIRST_HEADER_SIZE
-        val normalCapacity = packetLimit - FRAME_HEADER_SIZE
-        if (firstCapacity <= 0 || normalCapacity <= 0) {
-            Log.e(TAG, "ATT payload too small for v2 packet: limit=$packetLimit")
-            state = State.ERROR
-            return
-        }
+        if (total == 0) return false
 
-        val crc = CRC32().apply { update(jpeg) }.value
-        val chunks = linkedMapOf<Int, ByteArray>()
-        var buildOff = 0
-        while (buildOff < total) {
-            val capacity = if (buildOff == 0) firstCapacity else normalCapacity
-            val end = (buildOff + capacity).coerceAtMost(total)
-            chunks[buildOff] = jpeg.copyOfRange(buildOff, end)
-            buildOff = end
-        }
+        return sendMutex.withLock {
+            val attMax = VehicleBleManager.attPayload
+            val chunkMax = (attMax - DATA_OVERHEAD).coerceAtMost(2048)
+            if (chunkMax <= 0) return@withLock false
 
-        // Publish a complete immutable retransmit map before the terminal packet can trigger a
-        // REPORT notification. This closes the race where REPORT arrived just before registration.
-        val retx = RetxFrame(total, crc, chunks.toMap())
-        synchronized(retxBufs) {
-            retxBufs[seq] = retx
-            while (retxBufs.size > RETX_KEEP_FRAMES) {
-                retxBufs.remove(retxBufs.keys.first())
+            // ── BEGIN ──────────────────────────────────────────────────────
+            clearRsp()
+            val beginValue = ByteArray(8)
+            beginValue[0] = FILE_TYPE_IMAGE.toByte()
+            putU32(beginValue, 1, total.toLong())
+            putU16(beginValue, 5, CHUNK_REQUEST.coerceAtMost(chunkMax))
+            beginValue[7] = 0 // no filename
+
+            beginRejected = false
+            if (!writeL1Data(buildL2(KEY_BEGIN_REQ, beginValue))) {
+                Log.w(TAG, "BEGIN write failed total=$total")
+                return@withLock false
             }
-        }
-
-        var failed = false
-        for ((off, chunk) in retx.packets) {
-            if (waitCredits) {
-                val creditDeadline = System.currentTimeMillis() + CREDIT_TIMEOUT_MS
-                while (credits.get() <= 0) {
-                    if (!running.get() || System.currentTimeMillis() > creditDeadline) {
-                        Log.w(TAG, "credit timeout seq=$seq off=$off/$total")
-                        synchronized(retxBufs) { retxBufs.remove(seq) }
-                        return
-                    }
-                    delay(50)
+            // The chunk size only depends on the negotiated MTU, so it is learned
+            // once and reused: waiting for BEGIN_RSP on every frame would put a
+            // full round trip (15-30 ms) on the critical path for no information.
+            if (agreedChunk == 0) {
+                val beginRsp = awaitRsp(KEY_BEGIN_RSP, BEGIN_TIMEOUT_MS)
+                if (beginRsp == null || beginRsp.size < 3) {
+                    Log.w(TAG, "BEGIN_RSP timeout/missing")
+                    onStatus("设备无响应（BEGIN）")
+                    return@withLock false
                 }
+                val status = beginRsp[0].toInt() and 0xFF
+                if (status != 0) {
+                    Log.w(TAG, "BEGIN_RSP rejected status=$status")
+                    onStatus("设备拒绝投屏 status=$status")
+                    return@withLock false
+                }
+                agreedChunk = (((beginRsp[1].toInt() and 0xFF) shl 8) or
+                    (beginRsp[2].toInt() and 0xFF)).coerceIn(1, chunkMax)
             }
 
-            val packet = buildNaviPacket(seq, off, total, crc, chunk)
-            if (!sendMutex.withLock { VehicleBleManager.writeData(packet) }) {
-                Log.w(TAG, "FFD3 write failed seq=$seq off=$off/$total")
-                failed = true
-                break
+            // ── DATA: sliding window, ACKs are advisory ────────────────────
+            // Each frame is a fresh session: rebase the window on the current L1
+            // sequence so the previous frame's unacknowledged debt is not carried in.
+            lastAckSeq = l1Seq.get() - 1
+            val crc = CRC32().apply { update(jpeg) }.value
+            var off = 0
+            var seq = 0
+            var idx = 0
+            while (off < total) {
+                if (beginRejected) {
+                    Log.w(TAG, "BEGIN_RSP rejected mid-frame, dropping frame $lastNaviSeq")
+                    clearRsp()
+                    return@withLock false
+                }
+                if (!awaitWindowRoom()) {
+                    if (abortReason >= 0) {
+                        Log.w(TAG, "device ABORT reason=$abortReason at chunk=$seq")
+                        onStatus("设备中止传输 reason=$abortReason")
+                        clearRsp()
+                        return@withLock false
+                    }
+                    // Window stalled (device stopped ACKing): fall through as best
+                    // effort -- the device's seq check and the final CRC32 decide.
+                    Log.w(TAG, "window stalled at chunk=$seq, continuing unthrottled")
+                    resyncWindow()
+                }
+                val end = (off + agreedChunk).coerceAtMost(total)
+                // v2 parity: blast the whole frame, confirm once at the end.
+                // A mid-frame ACK round trip costs a full connection event and
+                // was the dominant cost at small frame sizes.
+                val wantAck = (end == total)
+                if (!writeL1Data(buildDataFrame(seq, jpeg, off, end), requestAck = wantAck)) {
+                    Log.w(TAG, "DATA write failed seq=$seq off=$off/$total")
+                    clearRsp()
+                    sendAbort(0x01)
+                    return@withLock false
+                }
+                if (abortReason >= 0) {
+                    Log.w(TAG, "device ABORT reason=$abortReason at chunk=$seq")
+                    onStatus("设备中止传输 reason=$abortReason")
+                    clearRsp()
+                    return@withLock false
+                }
+                off = end
+                seq = (seq + 1) and 0xFFFF
+                idx++
             }
-            credits.decrementAndGet()
-        }
 
-        if (failed) {
-            synchronized(retxBufs) { retxBufs.remove(seq) }
-            Log.w(TAG, "frame seq=$seq send incomplete total=$total")
-        } else {
-            val sendMs = (System.nanoTime() - sendStartNs) / 1_000_000L
-            NaviPerfStats.onSendThroughput(
-                if (sendMs > 0) total * 1_000L / sendMs else total.toLong(),
-            )
-            NaviPerfStats.onSent(seq, sendMs, 0)
-            Log.i(TAG,
-                "→ FRAME v2 seq=$seq total=${total}B packets=${retx.packets.size} " +
-                "packetLimit=$packetLimit sendMs=$sendMs crc32=0x${crc.toString(16)}")
+            // ── END + CRC32 ────────────────────────────────────────────────
+            frameStartNs = sendStartNs
+            frameBytes = total
+            frameIdx = lastNaviSeq
+            val endValue = ByteArray(4)
+            putU32(endValue, 0, crc)
+            if (!writeL1Data(buildL2(KEY_END_REQ, endValue))) {
+                Log.w(TAG, "END write failed")
+                return@withLock false
+            }
+            // END_RSP is collected asynchronously (see parseL2): the next frame's
+            // BEGIN goes out immediately, so the device's CRC32/commit work overlaps
+            // with the following transfer instead of idling the link.
+            return@withLock true
         }
     }
 
+    private suspend fun sendAbort(reason: Int) {
+        writeL1Data(buildL2(KEY_ABORT, byteArrayOf(reason.toByte())))
+        Log.i(TAG, "→ XFER_ABORT reason=$reason")
+    }
+
     // ═══════════════════════════════════════════════════════════════
-    // Inbound notify callback — called from VehicleBleManager GATT thread
+    // Inbound notify (GATT thread) — parse L1 frames, stash 0x10 replies
     // ═══════════════════════════════════════════════════════════════
 
     fun onNotify(charUuid: String, value: ByteArray) {
-        when {
-            charUuid.contains(FFD2_UUID) -> handleCtrlNotify(value)
-            charUuid.contains(FFD4_UUID) -> handleDataNotify(value)
-        }
-    }
-
-    private fun handleCtrlNotify(data: ByteArray) {
-        // L1 frame: parse from raw bytes
         var idx = 0
-        while (idx < data.size) {
-            if (data[idx] != 0xAB.toByte()) { idx++; continue }
-            if (idx + 8 > data.size) break
-            val ctrl = data[idx + 1].toInt() and 0xFF
-            val len = ((data[idx + 2].toInt() and 0xFF) shl 8) or (data[idx + 3].toInt() and 0xFF)
-            if (len > 32 * 1024 || idx + 8 + len > data.size) { idx++; continue }
+        while (idx + L1_HDR <= value.size) {
+            if ((value[idx].toInt() and 0xFF) != L1_SYNC) { idx++; continue }
+            val ctrl = value[idx + 1].toInt() and 0xFF
+            val len = ((value[idx + 2].toInt() and 0xFF) shl 8) or
+                (value[idx + 3].toInt() and 0xFF)
+            if (idx + L1_HDR + len > value.size) break
+            val seq = ((value[idx + 6].toInt() and 0xFF) shl 8) or
+                (value[idx + 7].toInt() and 0xFF)
 
-            val payload = data.copyOfRange(idx + 8, idx + 8 + len)
-
-            if (ctrl == L1_CTRL_ACK) {
-                // L1 ACK — no action needed for our outgoing data
-            } else if (ctrl == L1_CTRL_DATA) {
-                // Send L1 ACK back — writeCtrl is now suspend, so launch a coroutine.
-                val seq = ((data[idx + 6].toInt() and 0xFF) shl 8) or (data[idx + 7].toInt() and 0xFF)
-                val ackFrame = buildL1Frame(L1_CTRL_ACK, ByteArray(0), seq)
-                scope.launch { VehicleBleManager.writeCtrl(ackFrame) }
-
-                // Parse L2
-                if (payload.size >= 5 && (payload[0].toInt() and 0xFF) == CMD_NAVI) {
-                    val key = payload[2].toInt() and 0xFF
-                    val vLen = ((payload[3].toInt() and 0xFF) shl 8) or (payload[4].toInt() and 0xFF)
-                    val v = payload.copyOfRange(5, (5 + vLen).coerceAtMost(payload.size))
-                    when (key) {
-                        KEY_ACK -> handleAck(v)
-                        KEY_ERROR -> {
-                            val code = if (v.isNotEmpty()) v[0].toInt() and 0xFF else 0
-                            Log.w(TAG, "← NAVI_ERROR code=0x${Integer.toHexString(code)}")
-                        }
-                    }
+            if ((ctrl and L1_BIT_ACK) != 0) {
+                if ((ctrl and L1_BIT_ERR) != 0) {
+                    Log.w(TAG, "← L1 NAK seq=$seq")
+                } else {
+                    lastAckSeq = seq
                 }
+            } else if ((ctrl and L1_ACK_REQ) != 0) {
+                // Device never asks for ACKs on responses today, but honour it.
+                val ack = buildL1Frame(L1_CTRL_ACK, ByteArray(0), seq)
+                scope.launch { VehicleBleManager.writeCtrl(ack) }
             }
-            idx += 8 + len
+
+            if (len >= 5) {
+                val payload = value.copyOfRange(idx + L1_HDR, idx + L1_HDR + len)
+                parseL2(payload)
+            }
+            idx += L1_HDR + len
         }
     }
 
-    private fun handleDataNotify(data: ByteArray) {
-        if (data.size < 5 || (data[0].toInt() and 0xFF) != CMD_NAVI) return
-        val key = data[2].toInt() and 0xFF
-        val vLen = ((data[3].toInt() and 0xFF) shl 8) or (data[4].toInt() and 0xFF)
-        val v = data.copyOfRange(5, (5 + vLen).coerceAtMost(data.size))
-        when (key) {
-            KEY_CREDIT -> {
-                if (v.size >= 2) {
-                    val n = ((v[0].toInt() and 0xFF) shl 8) or (v[1].toInt() and 0xFF)
-                    credits.addAndGet(n)
-                    Log.d(TAG, "← CREDIT +$n → ${credits.get()}")
-                }
-            }
-            KEY_REPORT -> {
-                if (v.size < 3) return
-                val repSeq = ((v[0].toInt() and 0xFF) shl 8) or (v[1].toInt() and 0xFF)
-                val gapCount = v[2].toInt() and 0xFF
+    private fun parseL2(payload: ByteArray) {
+        if (payload.size < 5) return
+        if ((payload[0].toInt() and 0xFF) != CMD_XFER) return
+        val key = payload[2].toInt() and 0xFF
+        val vLen = ((payload[3].toInt() and 0xFF) shl 8) or (payload[4].toInt() and 0xFF)
+        if (5 + vLen > payload.size) return
+        val v = payload.copyOfRange(5, 5 + vLen)
 
-                val retx = synchronized(retxBufs) { retxBufs[repSeq] } ?: return
-                if (gapCount == 0) {
-                    synchronized(retxBufs) { retxBufs.remove(repSeq) }
-                    return
-                }
-
-                val gaps = buildList {
-                    for (i in 0 until gapCount) {
-                        val base = 3 + i * 6
-                        if (base + 6 > v.size) break
-                        val start = ((v[base].toInt() and 0xFF) shl 16) or
-                            ((v[base + 1].toInt() and 0xFF) shl 8) or
-                            (v[base + 2].toInt() and 0xFF)
-                        val end = ((v[base + 3].toInt() and 0xFF) shl 16) or
-                            ((v[base + 4].toInt() and 0xFF) shl 8) or
-                            (v[base + 5].toInt() and 0xFF)
-                        add(start until end)
-                    }
-                }
-                val packetsToRetry = retx.packets.filter { (off, chunk) ->
-                    gaps.any { gap -> off < gap.last + 1 && off + chunk.size > gap.first }
-                }
-                val newlyRefunded = synchronized(retx) {
-                    val fresh = packetsToRetry.keys.filter { retx.refundedOffsets.add(it) }
-                    fresh.size
-                }
-                if (newlyRefunded > 0) credits.addAndGet(newlyRefunded)
-
-                Log.d(TAG,
-                    "← REPORT seq=$repSeq gaps=$gapCount total=${retx.total} refund=$newlyRefunded")
-                scope.launch {
-                    packetsToRetry.forEach { (boff, chunk) ->
-                        val packet = buildNaviPacket(
-                            repSeq, boff, retx.total, retx.crc32, chunk)
-                        sendMutex.withLock { VehicleBleManager.writeData(packet) }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun handleAck(v: ByteArray) {
-        if (v.isEmpty()) return
-        val result = v[0].toInt() and 0xFF
-        if (result != ACK_RESULT_OK) {
-            onStatus("设备拒绝投屏: result=0x${Integer.toHexString(result)}")
-            state = State.ERROR
+        if (key == KEY_ABORT) {
+            abortReason = if (v.isNotEmpty()) v[0].toInt() and 0xFF else 0
+            Log.w(TAG, "← XFER_ABORT reason=$abortReason")
             return
         }
-        if (v.size >= 3) {
-            maxPacket = ((v[1].toInt() and 0xFF) or
-                ((v[2].toInt() and 0xFF) shl 8)).coerceAtLeast(1)
+        when (key) {
+            KEY_BEGIN_RSP -> {
+                // Only the first frame waits; anything later just needs to be
+                // watched for a rejection so the DATA burst can bail out early.
+                if (v.isNotEmpty() && (v[0].toInt() and 0xFF) != 0) beginRejected = true
+                synchronized(rspLock) {
+                    rspKey = key
+                    rspValue = v
+                }
+            }
+            KEY_END_RSP -> {
+                run {
+                    val status = if (v.isNotEmpty()) v[0].toInt() and 0xFF else 0xFF
+                    if (status == 0) {
+                        val ms = (System.nanoTime() - frameStartNs) / 1_000_000L
+                        NaviPerfStats.onSendThroughput(
+                            if (ms > 0) frameBytes * 1_000L / ms else frameBytes.toLong(),
+                        )
+                        NaviPerfStats.onSent(frameIdx, ms, 0)
+                    } else {
+                        val err = if (v.size > 1) v[1].toInt() and 0xFF else 0
+                        Log.w(TAG, "END_RSP failed status=$status err=$err")
+                    }
+                }
+            }
+            else -> Log.d(TAG, "← 0x10 key=0x${Integer.toHexString(key)} ignored")
         }
-        val ic = if (v.size >= 5)
-            ((v[3].toInt() and 0xFF) or ((v[4].toInt() and 0xFF) shl 8))
-        else 0
+    }
 
-        waitCredits = ic != 0xFFFF
-        credits.set(if (waitCredits) ic else Int.MAX_VALUE / 2)
-        state = State.SENDING
-        onStatus("BLE 投屏已握手 (packet=$maxPacket, credit=${credits.get()})")
-        Log.i(TAG, "← NAVI_ACK v2 OK packet=$maxPacket credit=${credits.get()}")
+    private fun clearRsp() {
+        abortReason = -1
+        synchronized(rspLock) { rspKey = -1; rspValue = null }
+    }
+
+    /** Frames handed to the controller but not yet acknowledged by the device. */
+    private fun inFlight(): Int = (l1Seq.get() - 1) - lastAckSeq
+
+    /**
+     * Waits only while the window is full. Returns false when the wait timed out
+     * (the caller then continues unthrottled instead of dropping the frame).
+     */
+    private suspend fun awaitWindowRoom(): Boolean {
+        if (inFlight() < WINDOW) return true
+        val deadline = System.currentTimeMillis() + WINDOW_TIMEOUT_MS
+        while (running.get() && inFlight() >= WINDOW) {
+            if (abortReason >= 0) return false
+            if (System.currentTimeMillis() >= deadline) return false
+            delay(1)
+        }
+        return true
+    }
+
+    /** Pretend everything outstanding is acknowledged so the window reopens. */
+    private fun resyncWindow() {
+        lastAckSeq = l1Seq.get() - 1
+    }
+
+    private suspend fun awaitRsp(key: Int, timeoutMs: Long): ByteArray? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (running.get() && System.currentTimeMillis() < deadline) {
+            if (abortReason >= 0) return null
+            synchronized(rspLock) {
+                if (rspKey == key) {
+                    val v = rspValue
+                    rspKey = -1
+                    rspValue = null
+                    return v
+                }
+            }
+            delay(4)
+        }
+        return null
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // L1 engine
+    // L1 / L2 builders
     // ═══════════════════════════════════════════════════════════════
 
-    private fun buildL1Frame(ctrl: Int, payload: ByteArray, seqOverride: Int = -1): ByteArray {
-        val seq = if (seqOverride >= 0) seqOverride else l1Seq.getAndIncrement() and 0xFFFF
+    /** Data frame; [requestAck] sets L1 bit6 so the device answers with an ACK. */
+    private suspend fun writeL1Data(payload: ByteArray, requestAck: Boolean = false): Boolean {
+        val ctrl = if (requestAck) L1_ACK_REQ else 0x00
+        val frame = buildL1Frame(ctrl, payload, l1Seq.getAndIncrement() and 0xFFFF)
+        return VehicleBleManager.writeCtrl(frame)
+    }
+
+    private fun buildDataFrame(seq: Int, jpeg: ByteArray, from: Int, to: Int): ByteArray {
+        val n = to - from
+        val out = ByteArray(5 + 2 + n)
+        out[0] = CMD_XFER.toByte()
+        out[1] = 0
+        out[2] = KEY_DATA.toByte()
+        putU16(out, 3, 2 + n)
+        putU16(out, 5, seq)
+        System.arraycopy(jpeg, from, out, 7, n)
+        return out
+    }
+
+    private fun buildL2(key: Int, value: ByteArray): ByteArray {
+        val out = ByteArray(5 + value.size)
+        out[0] = CMD_XFER.toByte()
+        out[1] = 0
+        out[2] = key.toByte()
+        putU16(out, 3, value.size)
+        System.arraycopy(value, 0, out, 5, value.size)
+        return out
+    }
+
+    private fun buildL1Frame(ctrl: Int, payload: ByteArray, seq: Int): ByteArray {
         val crc = crc16(payload)
-        val frame = ByteArray(8 + payload.size)
-        frame[0] = 0xAB.toByte()
+        val frame = ByteArray(L1_HDR + payload.size)
+        frame[0] = L1_SYNC.toByte()
         frame[1] = ctrl.toByte()
-        frame[2] = ((payload.size shr 8) and 0xFF).toByte()
-        frame[3] = (payload.size and 0xFF).toByte()
-        frame[4] = ((crc shr 8) and 0xFF).toByte()
-        frame[5] = (crc and 0xFF).toByte()
-        frame[6] = ((seq shr 8) and 0xFF).toByte()
-        frame[7] = (seq and 0xFF).toByte()
-        System.arraycopy(payload, 0, frame, 8, payload.size)
+        putU16(frame, 2, payload.size)
+        putU16(frame, 4, crc)
+        putU16(frame, 6, seq)
+        System.arraycopy(payload, 0, frame, L1_HDR, payload.size)
         return frame
     }
 
+    /** CRC-16/ARC: poly 0x8005 reflected (0xA001), init 0x0000, xorout 0x0000. */
     private fun crc16(data: ByteArray): Int {
         var crc = 0x0000
         for (b in data) {
@@ -425,64 +462,15 @@ class NaviBleFrameSender(
         return crc and 0xFFFF
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // L2 builders
-    // ═══════════════════════════════════════════════════════════════
-
-    private fun buildL2Frame(key: Int, value: ByteArray): ByteArray {
-        val out = ByteArray(5 + value.size)
-        out[0] = CMD_NAVI.toByte()
-        out[1] = 0
-        out[2] = key.toByte()
-        out[3] = ((value.size shr 8) and 0xFF).toByte()
-        out[4] = (value.size and 0xFF).toByte()
-        System.arraycopy(value, 0, out, 5, value.size)
-        return out
+    private fun putU16(buf: ByteArray, at: Int, v: Int) {
+        buf[at] = ((v shr 8) and 0xFF).toByte()
+        buf[at + 1] = (v and 0xFF).toByte()
     }
 
-    private fun buildNaviOpen(
-        w: Int,
-        h: Int,
-        fps: Int,
-        qual: Int,
-        requestedMaxPacket: Int,
-    ): ByteArray {
-        val v = ByteArray(11)
-        v[0] = (w and 0xFF).toByte(); v[1] = ((w shr 8) and 0xFF).toByte()
-        v[2] = (h and 0xFF).toByte(); v[3] = ((h shr 8) and 0xFF).toByte()
-        v[4] = fps.toByte(); v[5] = qual.toByte()
-        v[6] = 1 // flags: flow_ctrl_enable
-        v[7] = PROTOCOL_VERSION.toByte()
-        v[8] = REQUIRED_FEATURES.toByte()
-        v[9] = (requestedMaxPacket and 0xFF).toByte()
-        v[10] = ((requestedMaxPacket shr 8) and 0xFF).toByte()
-        return buildL2Frame(KEY_OPEN, v)
-    }
-
-    private fun buildNaviClose(reason: Int): ByteArray =
-        buildL2Frame(KEY_CLOSE, byteArrayOf(reason.toByte()))
-
-    private fun buildNaviPacket(
-        seq: Int,
-        off: Int,
-        total: Int,
-        frameCrc32: Long,
-        data: ByteArray,
-    ): ByteArray {
-        val headerSize = if (off == 0) FRAME_FIRST_HEADER_SIZE else FRAME_HEADER_SIZE
-        val out = ByteArray(headerSize + data.size)
-        out[0] = ((seq shr 8) and 0xFF).toByte(); out[1] = (seq and 0xFF).toByte()
-        out[2] = ((off shr 16) and 0xFF).toByte(); out[3] = ((off shr 8) and 0xFF).toByte()
-        out[4] = (off and 0xFF).toByte()
-        out[5] = ((total shr 16) and 0xFF).toByte(); out[6] = ((total shr 8) and 0xFF).toByte()
-        out[7] = (total and 0xFF).toByte()
-        if (off == 0) {
-            out[8] = ((frameCrc32 shr 24) and 0xFF).toByte()
-            out[9] = ((frameCrc32 shr 16) and 0xFF).toByte()
-            out[10] = ((frameCrc32 shr 8) and 0xFF).toByte()
-            out[11] = (frameCrc32 and 0xFF).toByte()
-        }
-        System.arraycopy(data, 0, out, headerSize, data.size)
-        return out
+    private fun putU32(buf: ByteArray, at: Int, v: Long) {
+        buf[at] = ((v shr 24) and 0xFF).toByte()
+        buf[at + 1] = ((v shr 16) and 0xFF).toByte()
+        buf[at + 2] = ((v shr 8) and 0xFF).toByte()
+        buf[at + 3] = (v and 0xFF).toByte()
     }
 }

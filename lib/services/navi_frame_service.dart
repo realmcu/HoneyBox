@@ -1,3 +1,10 @@
+// =============================================================================
+// DEPRECATED — 仪表盘投屏已改为原生实现（`honeybox/map` → MapHomeActivity，
+// HoneyProtocol 0x10 over HMIS）。启动器对 dashboard 直接拉起原生页面，
+// 不会再 push DashboardAppRoot，因此本文件及其下游在现行流程中不可达，
+// 仅作为历史参考保留。不要在此基础上新增功能。
+// =============================================================================
+
 import 'package:flutter/services.dart';
 
 /// 导航帧数据（从原生 NaviCaptureService 获取）。
@@ -30,6 +37,7 @@ class NaviFrameService {
     int width = 400,
     int height = 480,
     int fps = 5,
+    int quality = 45,
     int speed = 60,
     double startLat = 31.314,
     double startLng = 120.728,
@@ -40,6 +48,7 @@ class NaviFrameService {
       'width': width,
       'height': height,
       'fps': fps,
+      'quality': quality,
       'speed': speed,
       'startLat': startLat,
       'startLng': startLng,

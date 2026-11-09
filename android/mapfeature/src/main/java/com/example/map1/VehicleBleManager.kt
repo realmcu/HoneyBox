@@ -22,11 +22,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
-/** GATT session for RTL8773G/E with navi projection profile (FFD0 + FFD1-FFD4). */
+/** GATT session for RTL8773G/E — HoneyProtocol 2.2 "BLE HMIS private service":
+ *  service 484D4953-0000-1000-8000-00805F9B34FB, write 0xFFC1, notify 0xFFC2. */
 object VehicleBleManager {
     private const val TAG = "VehicleBleManager"
+
+    /** HoneyProtocol 2.2.1 HMIS service UUID (full 128-bit form). */
+    private const val HMIS_SERVICE_UUID = "484D4953-0000-1000-8000-00805F9B34FB"
 
     sealed interface State {
         data object Idle : State
@@ -43,16 +48,14 @@ object VehicleBleManager {
     private var gatt: BluetoothGatt? = null
     @Volatile private var generation = 0L
 
-    // Navi projection characteristics
-    @Volatile var naviCtrlTx: BluetoothGattCharacteristic? = null  // FFD1
-    @Volatile var naviCtrlRx: BluetoothGattCharacteristic? = null  // FFD2
-    @Volatile var naviDataTx: BluetoothGattCharacteristic? = null  // FFD3
-    @Volatile var naviDataRx: BluetoothGattCharacteristic? = null  // FFD4
+    // HoneyProtocol HMIS characteristics
+    @Volatile var naviCtrlTx: BluetoothGattCharacteristic? = null  // 0xFFC1 write
+    @Volatile var naviCtrlRx: BluetoothGattCharacteristic? = null  // 0xFFC2 notify
+    @Volatile var naviRead: BluetoothGattCharacteristic? = null     // 0xFFC3 read (status only)
 
-    val isNaviReady get() = naviCtrlTx != null && naviCtrlRx != null &&
-        naviDataTx != null && naviDataRx != null
+    val isNaviReady get() = naviCtrlTx != null && naviCtrlRx != null
 
-    /** FFD2/FFD4 notify forwarder. Set by [NaviBleFrameSender] when projection starts. */
+    /** 0xFFC2 notify forwarder. Set by [NaviBleFrameSender] when projection starts. */
     @Volatile var onNaviNotify: ((String, ByteArray) -> Unit)? = null
 
     // ── GATT operation serializer ──────────────────────────────────────────────
@@ -215,6 +218,10 @@ object VehicleBleManager {
                 characteristic: BluetoothGattCharacteristic,
                 status: Int,
             ) {
+                // Write Command (no response) still reports here once the PDU has
+                // left the controller: that is the real "ready for the next write"
+                // edge, and it replaces sleep-polling on a busy stack.
+                writeSignal.trySend(status)
                 pendingOp?.let { op ->
                     pendingOp = null
                     op.complete(status == BluetoothGatt.GATT_SUCCESS)
@@ -309,82 +316,59 @@ object VehicleBleManager {
     }
 
     /**
-     * Enables CCCDs for FFD2 then FFD4 sequentially (each write waits for its onDescriptorWrite
-     * callback before starting the next) to comply with the Android GATT serialization rule.
-     *
-     * Returns `true` only when **both** descriptor writes complete with GATT_SUCCESS.
-     * Returns `false` on any failure (missing descriptor, write error, generation mismatch, or
-     * unexpected exception); the caller must treat `false` as a fatal setup error and must NOT
-     * publish [State.NaviReady].
+     * Enables the CCCD of the HMIS notify characteristic (0xFFC2). HoneyProtocol only needs this
+     * single subscription: write and notify are parallel carriers of the same L2 frames.
      */
     @SuppressLint("MissingPermission")
     private suspend fun enableNaviNotifiesSeq(gatt: BluetoothGatt, expectedGen: Long): Boolean {
         val cccdUuid = UUID.fromString("00002902-0000-1000-8000-00805F9B34FB")
-        for (char in listOf(naviCtrlRx, naviDataRx)) {
-            if (char == null) {
-                Log.e(TAG, "enableNaviNotifiesSeq: notify characteristic unexpectedly null")
-                return false
-            }
-            if (generation != expectedGen) return false
-            try {
-                gatt.setCharacteristicNotification(char, true)
-                val desc = char.getDescriptor(cccdUuid)
-                if (desc == null) {
-                    Log.e(TAG, "CCCD descriptor missing for ${char.uuid}")
-                    return false
-                }
-                val ok = doDescriptorWrite(gatt, desc,
-                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                Log.i(TAG, "CCCD ${char.uuid.toString().uppercase().takeLast(8)} enabled=$ok")
-                if (!ok) return false
-            } catch (e: Exception) {
-                Log.e(TAG, "enableNaviNotifiesSeq: ${char.uuid} → $e")
-                return false
-            }
+        val char = naviCtrlRx ?: run {
+            Log.e(TAG, "enableNaviNotifiesSeq: 0xFFC2 notify characteristic missing")
+            return false
         }
-        return true
+        if (generation != expectedGen) return false
+        return try {
+            gatt.setCharacteristicNotification(char, true)
+            val desc = char.getDescriptor(cccdUuid)
+            if (desc == null) {
+                Log.e(TAG, "CCCD descriptor missing for ${char.uuid}")
+                return false
+            }
+            val ok = doDescriptorWrite(gatt, desc,
+                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            Log.i(TAG, "CCCD 0xFFC2 enabled=$ok")
+            ok
+        } catch (e: Exception) {
+            Log.e(TAG, "enableNaviNotifiesSeq: ${char.uuid} → $e")
+            false
+        }
     }
+
+    /** Fires from onCharacteristicWrite: one slot per completed ATT write. */
+    private val writeSignal = kotlinx.coroutines.channels.Channel<Int>(
+        kotlinx.coroutines.channels.Channel.CONFLATED)
 
     // ── Public write API (suspend; serialized via gattMutex) ───────────────────
 
     /**
-     * Writes [bytes] to FFD1 (WRITE_WITH_RESPONSE), splitting into [attPayload]-byte ATT
-     * fragments. Each fragment waits for its onCharacteristicWrite callback before proceeding.
+     * Writes [bytes] to the HMIS write characteristic (0xFFC1), splitting into ATT-sized
+     * fragments. HoneyProtocol 2.2 declares 0xFFC1 as "Write / Write No Rsp"; streaming uses
+     * Write Command so that several L1 frames can share one connection event. Reliability is the
+     * protocol's business (L1 CRC16 + 0x10 CRC32), not ATT's.
      */
     @SuppressLint("MissingPermission")
     suspend fun writeCtrl(bytes: ByteArray): Boolean {
-        val char = naviCtrlTx ?: run {
-            Log.w(TAG, "writeCtrl: FFD1 not ready"); return false
+        if (naviCtrlTx == null) {
+            Log.w(TAG, "writeCtrl: 0xFFC1 not ready"); return false
         }
+        if (bytes.isEmpty()) return true
         val payload = attPayload
         var off = 0
         while (off < bytes.size) {
             val end = minOf(off + payload, bytes.size)
-            // Each fragment's value is set fresh — never reuse a stale char.value length.
-            val fragment = bytes.copyOfRange(off, end)
-            val ok = gattMutex.withLock {
-                val deferred = CompletableDeferred<Boolean>()
-                pendingOp = deferred
-                // API 33+: writeCharacteristic(char, value, writeType) returns Int; 0 == SUCCESS.
-                // Pre-33: assign value to characteristic then call the deprecated overload.
-                val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt?.writeCharacteristic(char, fragment,
-                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == 0
-                } else {
-                    @Suppress("DEPRECATION")
-                    char.value = fragment
-                    @Suppress("DEPRECATION")
-                    gatt?.writeCharacteristic(char) == true
-                }
-                if (!started) {
-                    pendingOp = null
-                    false
-                } else {
-                    deferred.await()
-                }
-            }
-            if (!ok) {
-                Log.w(TAG, "writeCtrl: ATT fragment off=$off/${bytes.size} failed")
+            // Each fragment's value is set fresh - never reuse a stale char.value length.
+            if (!writeFragment(bytes.copyOfRange(off, end))) {
+                Log.w(TAG, "writeCtrl: fragment off=$off/${bytes.size} failed")
                 return false
             }
             off = end
@@ -393,40 +377,40 @@ object VehicleBleManager {
     }
 
     /**
-     * Writes exactly one protocol-v2 packet to FFD3. Packets are never fragmented here: one
-     * writeCharacteristic call must map to one independently parseable ATT Write Command.
+     * Sends one ATT Write Command. Android's Java GATT layer keeps a single write in
+     * flight, so a rejected call means "wait for the previous onCharacteristicWrite
+     * before retrying" -- waiting on that callback instead of sleeping is what keeps
+     * the pipeline at one packet per event instead of paying a 2-16 ms backoff tax.
      */
     @SuppressLint("MissingPermission")
-    suspend fun writeData(bytes: ByteArray): Boolean {
-        val char = naviDataTx ?: run {
-            Log.w(TAG, "writeData: FFD3 not ready"); return false
+    private suspend fun writeFragment(fragment: ByteArray): Boolean {
+        val char = naviCtrlTx ?: return false
+        var attempt = 0
+        while (attempt < 8) {
+            val ok = gattMutex.withLock { rawWrite(char, fragment) }
+            if (ok) return true
+            attempt++
+            val signalled = withTimeoutOrNull(30L) {
+                writeSignal.receive()
+                true
+            } ?: false
+            if (!signalled) delay(1)
         }
-        if (bytes.isEmpty() || bytes.size > attPayload) {
-            Log.e(TAG, "writeData: packet=${bytes.size} exceeds ATT payload=$attPayload")
-            return false
-        }
-
-        for (attempt in 0 until 8) {
-            val result = gattMutex.withLock {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt?.writeCharacteristic(char, bytes,
-                        BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) == 0
-                } else {
-                    @Suppress("DEPRECATION")
-                    char.value = bytes
-                    char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                    @Suppress("DEPRECATION")
-                    gatt?.writeCharacteristic(char) == true
-                }
-            }
-            if (result) return true
-
-            val backoffMs = (2L shl attempt).coerceAtMost(50L)
-            delay(backoffMs)
-        }
-
-        Log.w(TAG, "writeData: packet=${bytes.size} failed after retries")
         return false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun rawWrite(char: BluetoothGattCharacteristic, fragment: ByteArray): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt?.writeCharacteristic(char, fragment,
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) == 0
+        } else {
+            @Suppress("DEPRECATION")
+            char.value = fragment
+            char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            @Suppress("DEPRECATION")
+            gatt?.writeCharacteristic(char) == true
+        }
     }
 
     // ── Misc ───────────────────────────────────────────────────────────────────
@@ -463,31 +447,40 @@ object VehicleBleManager {
     private fun discoverNaviChars(gatt: BluetoothGatt) {
         clearChars()
         for (service in gatt.services) {
+            val serviceUuid = service.uuid.toString().uppercase()
+            val isHmis = serviceUuid == HMIS_SERVICE_UUID ||
+                serviceUuid.startsWith("0000FF") && serviceUuid.contains("484D4953")
             for (char in service.characteristics) {
                 val uuid = char.uuid.toString().uppercase()
-                if (uuid.contains("FFD1") &&
+                // 16-bit UUIDs surface as "0000FFC1-0000-1000-8000-00805F9B34FB".
+                val short = uuid.take(8)
+                if (short == "0000FFC1" &&
                     (char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) {
-                    naviCtrlTx = char; Log.i(TAG, "found FFD1")
+                    naviCtrlTx = char
+                    val noRsp = (char.properties and
+                        BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
+                    Log.i(TAG, "found 0xFFC1 (HMIS write) props=0x${char.properties.toString(16)} " +
+                        "writeNoRsp=$noRsp in $serviceUuid")
                 }
-                if (uuid.contains("FFD2") &&
+                if (short == "0000FFC2" &&
                     (char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) {
-                    naviCtrlRx = char; Log.i(TAG, "found FFD2")
+                    naviCtrlRx = char
+                    Log.i(TAG, "found 0xFFC2 (HMIS notify)")
                 }
-                if (uuid.contains("FFD3") &&
-                    (char.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
-                    naviDataTx = char; Log.i(TAG, "found FFD3")
-                }
-                if (uuid.contains("FFD4") &&
-                    (char.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) {
-                    naviDataRx = char; Log.i(TAG, "found FFD4")
+                if (short == "0000FFC3" &&
+                    (char.properties and BluetoothGattCharacteristic.PROPERTY_READ) != 0) {
+                    naviRead = char
+                    Log.i(TAG, "found 0xFFC3 (HMIS read)")
                 }
             }
+        }
+        if (naviCtrlTx != null && naviCtrlRx != null) {
+            Log.i(TAG, "HoneyProtocol L0 ready: service=$HMIS_SERVICE_UUID write=FFC1 notify=FFC2")
         }
     }
 
     private fun clearChars() {
-        naviCtrlTx = null; naviCtrlRx = null
-        naviDataTx = null; naviDataRx = null
+        naviCtrlTx = null; naviCtrlRx = null; naviRead = null
     }
 
     @SuppressLint("MissingPermission")

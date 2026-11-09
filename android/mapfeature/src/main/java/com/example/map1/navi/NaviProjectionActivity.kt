@@ -73,6 +73,10 @@ class NaviProjectionActivity : Activity() {
                 NaviCaptureService.EXTRA_HEIGHT,
                 NaviCaptureService.DEFAULT_JPG_HEIGHT,
             ),
+            quality = intent.getIntExtra(
+                NaviCaptureService.EXTRA_QUALITY,
+                NaviCaptureService.DEFAULT_JPG_QUALITY,
+            ),
             startLat = intent.getDoubleExtra(NaviActivity.EXTRA_START_LAT, 31.314),
             startLng = intent.getDoubleExtra(NaviActivity.EXTRA_START_LNG, 120.728),
             endLat = intent.getDoubleExtra(NaviActivity.EXTRA_END_LAT, 31.325),

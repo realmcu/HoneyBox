@@ -101,7 +101,7 @@ class MapHomeActivity : ComponentActivity() {
 
 /** 常用投屏分辨率预设（宽 to 高，像素）。 */
 private val RESOLUTION_PRESETS = listOf(
-    400 to 480,
+    410 to 370,
     480 to 800,
     600 to 1024,
     720 to 1280,
@@ -510,8 +510,8 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         ) {
             NaviJpgPreviewWindow(
                 aspectRatio = run {
-                    val w = castWidth.toIntOrNull()?.takeIf { it > 0 } ?: 400
-                    val h = castHeight.toIntOrNull()?.takeIf { it > 0 } ?: 480
+                    val w = castWidth.toIntOrNull()?.takeIf { it > 0 } ?: 410
+                    val h = castHeight.toIntOrNull()?.takeIf { it > 0 } ?: 370
                     w.toFloat() / h.toFloat()
                 },
                 modifier = Modifier

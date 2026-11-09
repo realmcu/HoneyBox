@@ -81,6 +81,9 @@ class NaviCaptureService : Service() {
     // 投屏分辨率（可由启动方通过 EXTRA_WIDTH / EXTRA_HEIGHT 指定），默认 400×480。
     private var jpgWidth = DEFAULT_JPG_WIDTH
     private var jpgHeight = DEFAULT_JPG_HEIGHT
+    // JPEG 质量（可由启动方通过 EXTRA_QUALITY 指定）。BLE 链路带宽有限，
+    // 质量直接决定单帧字节数，因此比分辨率更容易调。
+    private var jpgQuality = DEFAULT_JPG_QUALITY
     private var renderWidth = DEFAULT_JPG_WIDTH
     private var renderHeight = DEFAULT_JPG_HEIGHT
     private var uiRenderScale = 1f
@@ -128,6 +131,7 @@ class NaviCaptureService : Service() {
             .coerceIn(MIN_DIMENSION, MAX_DIMENSION) and 1.inv()
         jpgHeight = intent.getIntExtra(EXTRA_HEIGHT, DEFAULT_JPG_HEIGHT)
             .coerceIn(MIN_DIMENSION, MAX_DIMENSION) and 1.inv()
+        jpgQuality = intent.getIntExtra(EXTRA_QUALITY, DEFAULT_JPG_QUALITY).coerceIn(10, 100)
         val host = intent.getStringExtra(EXTRA_TCP_HOST).orEmpty().trim()
         val port = intent.getIntExtra(EXTRA_TCP_PORT, DEFAULT_TCP_PORT)
 
@@ -301,7 +305,7 @@ class NaviCaptureService : Service() {
             width = image.width,
             height = image.height,
             rowStride = plane.rowStride,
-            quality = JPG_QUALITY,
+            quality = jpgQuality,
         ) ?: return null
         val encodeMs = (System.nanoTime() - encodeStartNs) / 1_000_000L
         NaviPerfStats.onEncoded(encodeMs)
@@ -312,9 +316,9 @@ class NaviCaptureService : Service() {
         compressExecutor.execute {
             try {
                 val encodeStartNs = System.nanoTime()
-                val jpeg = TurboJpegEncoder.encode(bitmap, JPG_QUALITY)
+                val jpeg = TurboJpegEncoder.encode(bitmap, jpgQuality)
                     ?: ByteArrayOutputStream().use { stream ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, JPG_QUALITY, stream)
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, jpgQuality, stream)
                         stream.toByteArray()
                     }
                 val encodeMs = (System.nanoTime() - encodeStartNs) / 1_000_000L
@@ -592,11 +596,15 @@ class NaviCaptureService : Service() {
         private const val VIRTUAL_DISPLAY_NAME = "NaviVirtualDisplay"
 
         // 投屏分辨率默认值与允许范围。宽/高可由 UI 通过 EXTRA_WIDTH / EXTRA_HEIGHT 指定。
-        const val DEFAULT_JPG_WIDTH = 400
-        const val DEFAULT_JPG_HEIGHT = 480
+        // Dashboard projection defaults: match the map widget (410 x 370) so the
+        // JPEG has the same aspect ratio as the on-device view.
+        const val DEFAULT_JPG_WIDTH = 410
+        const val DEFAULT_JPG_HEIGHT = 370
         private const val MIN_DIMENSION = 160
         private const val MAX_DIMENSION = 1920
-        private const val JPG_QUALITY = 60
+        // BLE 投屏默认质量：45（可通过 EXTRA_QUALITY 覆盖）
+        const val DEFAULT_JPG_QUALITY = 45
+        const val EXTRA_QUALITY = "extra_quality"
         // UI 缩放默认值（语义：渲染倍率 = 值/160）。160 = 1.0 倍，直接渲染 400×480，
         // 无需缩放，帧率最高（优化 1）。值越大渲染画布越大、UI 越小但帧率越低。
         const val DEFAULT_VIRTUAL_DISPLAY_DPI = 160
@@ -629,6 +637,7 @@ class NaviCaptureService : Service() {
             dpi: Int,
             width: Int,
             height: Int,
+            quality: Int,
             startLat: Double,
             startLng: Double,
             endLat: Double,
@@ -641,6 +650,7 @@ class NaviCaptureService : Service() {
             putExtra(EXTRA_DPI, dpi)
             putExtra(EXTRA_WIDTH, width)
             putExtra(EXTRA_HEIGHT, height)
+            putExtra(EXTRA_QUALITY, quality)
             putExtra(EXTRA_START_LAT, startLat)
             putExtra(EXTRA_START_LNG, startLng)
             putExtra(EXTRA_END_LAT, endLat)

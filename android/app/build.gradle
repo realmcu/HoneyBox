@@ -23,6 +23,11 @@ final String releaseStoreFile = localProperties.getProperty("RELEASE_STORE_FILE"
 final String releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
 final String releaseKeyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")?.trim()
 final String releaseKeyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+// Optional local override: some machines have a different NDK installed than the
+// one Flutter defaults to. Keep it in local.properties (git-ignored) instead of
+// hard-coding a version into the build script.
+final String localNdkVersion = localProperties.getProperty("ndk.version")?.trim()
+
 final boolean hasReleaseSigning = [
     releaseStoreFile,
     releaseStorePassword,
@@ -33,7 +38,11 @@ final boolean hasReleaseSigning = [
 android {
     namespace = "com.honeygui.honeybox"
     compileSdk = 36
-    ndkVersion = "28.2.13676358"
+    // Prefer an NDK pinned in local.properties (ndk.version); otherwise use the
+    // version the app is built with here, which matches mapfeature's toolchain.
+    ndkVersion = (localNdkVersion != null && !localNdkVersion.isEmpty())
+        ? localNdkVersion
+        : "28.2.13676358"
 
     externalNativeBuild {
         cmake {

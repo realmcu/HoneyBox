@@ -268,6 +268,15 @@ class FileTransferSession {
   int _fileType = TYPE.raw;
   String _filename = '';
 
+  /// Number of DATA frames allowed in flight before an L1 ACK advances the
+  /// window. `1` keeps the original stop-and-wait behaviour (one frame, one
+  /// ACK, then the next); larger values pipeline the data phase, which is
+  /// mandatory for anything above ~1 fps.
+  final int window;
+
+  /// DATA frames sent but not yet acknowledged (window mode only).
+  int _inflight = 0;
+
   /// Injected timer provider for timeouts. Falls back to a default dart:async
   /// provider when not injected.
   final TimerProvider _timerProvider;
@@ -299,6 +308,7 @@ class FileTransferSession {
     this.onComplete,
     this.onError,
     this.onLog,
+    this.window = 1,
     TimerProvider? timerProvider,
   }) : _timerProvider = timerProvider ?? _DefaultTimerProvider();
 
@@ -340,6 +350,7 @@ class FileTransferSession {
     _dataSeq = 0;
     _pendingL1Seq = -1;
     _lastChunkLen = 0;
+    _inflight = 0;
     _crc32Val = crc32(buffer);
 
     // Attach to L1 engine so onL2Frame callbacks arrive.
@@ -389,14 +400,30 @@ class FileTransferSession {
 
   /// Called by the L1 engine when an ACK/NAK for our sent frame arrives.
   void onL1Ack(int seq, bool ok) {
-    if (seq != _pendingL1Seq) return;
     if (_state == L2State.idle) return;
 
     if (!ok) {
+      if (window <= 1 && seq != _pendingL1Seq) return;
       _log('← L1 NAK  seq=$seq (state=$_state)');
       _fail('NAK for seq $seq');
       return;
     }
+
+    if (window > 1) {
+      // Pipelined mode: any ACK retires one in-flight DATA frame and lets the
+      // window slide. END_REQ is matched by sequence number as usual.
+      if (_state == L2State.transferring && _inflight > 0) {
+        _inflight--;
+        _sendWindow();
+        _startTimer(_dataAckTimeout, 'DATA ACK timed out');
+      } else if (_state == L2State.verifying && seq == _pendingL1Seq) {
+        _log('← L1 ACK  END_REQ delivered (seq=$seq), awaiting END_RSP');
+        _startTimer(_verifyTimeout, 'Wait for END_RSP timed out');
+      }
+      return;
+    }
+
+    if (seq != _pendingL1Seq) return;
 
     if (_state == L2State.negotiating) {
       // L1-level ACK confirming BEGIN_REQ was delivered; the data phase still
@@ -449,6 +476,38 @@ class FileTransferSession {
     _startTimer(_dataAckTimeout, 'DATA ACK timed out');
   }
 
+  /// Pipelined data phase: keep up to [window] DATA frames in flight and let
+  /// each L1 ACK slide the window forward. END_REQ goes out once every chunk
+  /// has been queued *and* acknowledged.
+  void _sendWindow() {
+    while (_state == L2State.transferring &&
+        _inflight < window &&
+        _sentBytes < _totalSize) {
+      final remaining = _totalSize - _sentBytes;
+      final chunkLen = remaining < _chunkSize ? remaining : _chunkSize;
+      final chunk = _buf.sublist(_sentBytes, _sentBytes + chunkLen);
+
+      sendL2(buildDataFrame(_dataSeq, chunk));
+      _dataSeq++;
+      _sentBytes += chunkLen;
+      _lastChunkLen = chunkLen;
+      _inflight++;
+      onProgress?.call(_sentBytes, _totalSize);
+    }
+
+    if (_state == L2State.transferring &&
+        _sentBytes >= _totalSize &&
+        _inflight == 0) {
+      _state = L2State.verifying;
+      final l2 = buildEndReq(_crc32Val);
+      _pendingL1Seq = sendL2(l2);
+      _log('→ END_REQ  crc=${_hex(_crc32Val, 8)} '
+          '($_dataSeq data frames / $_sentBytes bytes sent) '
+          '(L1 seq=$_pendingL1Seq)');
+      _startTimer(_verifyTimeout, 'Wait for END_RSP timed out');
+    }
+  }
+
   void _onBeginRsp(Uint8List value) {
     if (_state != L2State.negotiating) {
       _log('← BEGIN_RSP ignored (unexpected in state=$_state)');
@@ -473,9 +532,17 @@ class FileTransferSession {
       if (agreedChunkSize > 0) _chunkSize = agreedChunkSize;
     }
 
-    _log('← BEGIN_RSP ACCEPTED, agreed chunk=$_chunkSize — begin data phase');
+    _log('← BEGIN_RSP ACCEPTED, agreed chunk=$_chunkSize '
+        '(window=$window) — begin data phase');
     _state = L2State.transferring;
-    _sendNextChunk();
+
+    if (window > 1) {
+      _inflight = 0;
+      _sendWindow();
+      _startTimer(_dataAckTimeout, 'DATA ACK timed out');
+    } else {
+      _sendNextChunk();
+    }
   }
 
   void _onEndRsp(Uint8List value) {
@@ -529,6 +596,7 @@ class FileTransferSession {
     _dataSeq = 0;
     _pendingL1Seq = -1;
     _lastChunkLen = 0;
+    _inflight = 0;
     _crc32Val = 0;
     _fileType = TYPE.raw;
     _filename = '';
