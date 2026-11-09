@@ -19,13 +19,26 @@ abstract final class JWWatchDebugLog {
   static void apiIn(String symbol, [String? detail]) {
     if (!enabled) return;
     final suffix = detail == null || detail.isEmpty ? '' : ' $detail';
-    developer.log('API→ $symbol$suffix', name: logName);
+    _log('API→ $symbol$suffix');
   }
 
   static void apiOut(String symbol, [String? detail]) {
     if (!enabled) return;
     final suffix = detail == null || detail.isEmpty ? '' : ' $detail';
-    developer.log('API← $symbol$suffix', name: logName);
+    _log('API← $symbol$suffix');
+  }
+
+  static void _log(String message) {
+    developer.log('${_timestamp()} $message', name: logName);
+  }
+
+  static String _timestamp() {
+    final now = DateTime.now();
+    final h = now.hour.toString().padLeft(2, '0');
+    final m = now.minute.toString().padLeft(2, '0');
+    final s = now.second.toString().padLeft(2, '0');
+    final ms = now.millisecond.toString().padLeft(3, '0');
+    return '$h:$m:$s.$ms';
   }
 
   static void wireFrame(WatchFrameEvent event, {int? awaitingAckSeq}) {
@@ -41,10 +54,7 @@ abstract final class JWWatchDebugLog {
       if (event.direction != WatchFrameDirection.tx) return;
       final raw = Uint8List.fromList(event.raw);
       if (raw.isEmpty || raw[0] != 0xab) {
-        developer.log(
-          'WIRE tx seq=${event.seq ?? '?'} len=${raw.length} ${_hex(raw)}',
-          name: logName,
-        );
+        _log('WIRE tx seq=${event.seq ?? '?'} len=${raw.length} ${_hex(raw)}');
         return;
       }
       if (_isAckFrame(raw)) return;
@@ -59,10 +69,7 @@ abstract final class JWWatchDebugLog {
     if (event.raw.isEmpty) return;
     final raw = Uint8List.fromList(event.raw);
     if (raw[0] != 0xab || raw.length < 8) {
-      developer.log(
-        'WIRE ${event.direction.name} seq=${event.seq ?? '?'} ${_hex(raw)}',
-        name: logName,
-      );
+      _log('WIRE ${event.direction.name} seq=${event.seq ?? '?'} ${_hex(raw)}');
       return;
     }
 
@@ -107,7 +114,7 @@ abstract final class JWWatchDebugLog {
     }
 
     buf.write(' ${_hex(raw)}');
-    developer.log(buf.toString(), name: logName);
+    _log(buf.toString());
   }
 
   static bool _isAckFrame(Uint8List raw) {
@@ -117,9 +124,8 @@ abstract final class JWWatchDebugLog {
 
   static void l2DecodeFailed(Uint8List l2Bytes, Object error, {int? l1Seq}) {
     if (!enabled) return;
-    developer.log(
+    _log(
       'WIRE decode FAILED l1Seq=${l1Seq ?? '?'} l2=${_hex(l2Bytes)} error=$error',
-      name: logName,
     );
   }
 
@@ -129,11 +135,10 @@ abstract final class JWWatchDebugLog {
     int? outboundSeq,
   }) {
     if (!enabled) return;
-    developer.log(
+    _log(
       'API← JWLink.request matched outboundSeq=${outboundSeq ?? '?'} '
       'sent=${describeRequest(request)} '
       'reply=${describeMessage(reply)}',
-      name: logName,
     );
   }
 

@@ -220,9 +220,9 @@ final class JWHistoryStore {
         }
       });
 
-  /// Persists one decoded wire batch before the synchronizer admits the next
-  /// one.  Each call is transactional; a failed transaction prevents the JW
-  /// device confirmation for the whole round.
+  /// Persists decoded records in one transaction. The synchronizer may merge
+  /// multiple wire batches into a single call. A failed transaction prevents the
+  /// JW device confirmation for the whole round.
   Future<void> writeRecords(
       JWHistoryScope scope, Iterable<JWHistoryRecord> records) async {
     final activities = <JWActivity>[];
@@ -259,115 +259,197 @@ final class JWHistoryStore {
           glucoses.add(record);
       }
     }
+    for (final row in rates) {
+      _positive(row.heartRate, 'heartRate');
+    }
+    for (final row in pressures) {
+      _positive(row.systolic, 'systolic');
+      _positive(row.diastolic, 'diastolic');
+    }
+    for (final row in oxygens) {
+      _positive(row.value, 'blood oxygen');
+    }
+    for (final row in hrvs) {
+      _positive(row.sdnn, 'sdnn');
+    }
+    for (final row in stress) {
+      _positive(row.value, 'pressure');
+    }
+    for (final row in glucoses) {
+      _positive(row.value, 'blood glucose');
+    }
     await _database.transaction(() async {
-      // Keeping all public record types from one incoming field in one Drift
-      // transaction avoids a half-persisted decoded payload.
-      for (final row in activities) {
-        await _database.into(_database.jwActivities).insertOnConflictUpdate(
-            JwActivitiesCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                steps: row.steps,
-                distance: row.distance,
-                energy: row.energy,
-                activeTime: row.activeTime,
-                mode: row.mode));
-      }
-      for (final row in sleeps) {
-        await _database.into(_database.jwSleeps).insertOnConflictUpdate(
-            JwSleepsCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                mode: row.mode));
-      }
-      for (final row in rates) {
-        _positive(row.heartRate, 'heartRate');
-        await _database.into(_database.jwHeartRates).insertOnConflictUpdate(
-            JwHeartRatesCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                heartRate: row.heartRate));
-      }
-      for (final row in pressures) {
-        _positive(row.systolic, 'systolic');
-        _positive(row.diastolic, 'diastolic');
-        await _database.into(_database.jwBloodPressures).insertOnConflictUpdate(
-            JwBloodPressuresCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                systolic: row.systolic,
-                diastolic: row.diastolic));
-      }
-      for (final row in oxygens) {
-        _positive(row.value, 'blood oxygen');
-        await _database.into(_database.jwBloodOxygens).insertOnConflictUpdate(
-            JwBloodOxygensCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                value: row.value,
-                high: Value(row.high),
-                low: Value(row.low)));
-      }
-      for (final row in hrvs) {
-        _positive(row.sdnn, 'sdnn');
-        await _database.into(_database.jwHrvs).insertOnConflictUpdate(
-            JwHrvsCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                sdnn: row.sdnn));
-      }
-      for (final row in stress) {
-        _positive(row.value, 'pressure');
-        await _database.into(_database.jwPressures).insertOnConflictUpdate(
-            JwPressuresCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                value: row.value));
-      }
-      for (final row in temperatures) {
-        await _database.into(_database.jwTemperatures).insertOnConflictUpdate(
-            JwTemperaturesCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                skinTemperature: row.skinTemperature,
-                heatStress: row.heatStress,
-                worn: row.worn,
-                compensated: row.compensated));
-      }
-      for (final row in glucoses) {
-        _positive(row.value, 'blood glucose');
-        await _database.into(_database.jwBloodGlucoses).insertOnConflictUpdate(
-            JwBloodGlucosesCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                value: row.value));
-      }
-      for (final row in sports) {
-        await _database.into(_database.jwSports).insertOnConflictUpdate(
-            JwSportsCompanion.insert(
-                userId: scope.userId,
-                deviceMac: scope.deviceMac,
-                time: _time(row.time),
-                mode: row.mode,
-                duration: row.duration,
-                pauseCount: row.pauseCount,
-                pauseDuration: row.pauseDuration,
-                steps: row.steps,
-                distance: row.distance,
-                energy: row.energy,
-                heartRateMax: Value(row.heartRateMax),
-                heartRateAverage: Value(row.heartRateAverage),
-                heartRateMin: Value(row.heartRateMin)));
-      }
+      await _database.batch((batch) {
+        if (activities.isNotEmpty) {
+          batch.insertAll(
+            _database.jwActivities,
+            [
+              for (final row in activities)
+                JwActivitiesCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  steps: row.steps,
+                  distance: row.distance,
+                  energy: row.energy,
+                  activeTime: row.activeTime,
+                  mode: row.mode,
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (sleeps.isNotEmpty) {
+          batch.insertAll(
+            _database.jwSleeps,
+            [
+              for (final row in sleeps)
+                JwSleepsCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  mode: row.mode,
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (rates.isNotEmpty) {
+          batch.insertAll(
+            _database.jwHeartRates,
+            [
+              for (final row in rates)
+                JwHeartRatesCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  heartRate: row.heartRate,
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (pressures.isNotEmpty) {
+          batch.insertAll(
+            _database.jwBloodPressures,
+            [
+              for (final row in pressures)
+                JwBloodPressuresCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  systolic: row.systolic,
+                  diastolic: row.diastolic,
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (oxygens.isNotEmpty) {
+          batch.insertAll(
+            _database.jwBloodOxygens,
+            [
+              for (final row in oxygens)
+                JwBloodOxygensCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  value: row.value,
+                  high: Value(row.high),
+                  low: Value(row.low),
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (hrvs.isNotEmpty) {
+          batch.insertAll(
+            _database.jwHrvs,
+            [
+              for (final row in hrvs)
+                JwHrvsCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  sdnn: row.sdnn,
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (stress.isNotEmpty) {
+          batch.insertAll(
+            _database.jwPressures,
+            [
+              for (final row in stress)
+                JwPressuresCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  value: row.value,
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (temperatures.isNotEmpty) {
+          batch.insertAll(
+            _database.jwTemperatures,
+            [
+              for (final row in temperatures)
+                JwTemperaturesCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  skinTemperature: row.skinTemperature,
+                  heatStress: row.heatStress,
+                  worn: row.worn,
+                  compensated: row.compensated,
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (glucoses.isNotEmpty) {
+          batch.insertAll(
+            _database.jwBloodGlucoses,
+            [
+              for (final row in glucoses)
+                JwBloodGlucosesCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  value: row.value,
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+        if (sports.isNotEmpty) {
+          batch.insertAll(
+            _database.jwSports,
+            [
+              for (final row in sports)
+                JwSportsCompanion.insert(
+                  userId: scope.userId,
+                  deviceMac: scope.deviceMac,
+                  time: _time(row.time),
+                  mode: row.mode,
+                  duration: row.duration,
+                  pauseCount: row.pauseCount,
+                  pauseDuration: row.pauseDuration,
+                  steps: row.steps,
+                  distance: row.distance,
+                  energy: row.energy,
+                  heartRateMax: Value(row.heartRateMax),
+                  heartRateAverage: Value(row.heartRateAverage),
+                  heartRateMin: Value(row.heartRateMin),
+                ),
+            ],
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+      });
     });
   }
 

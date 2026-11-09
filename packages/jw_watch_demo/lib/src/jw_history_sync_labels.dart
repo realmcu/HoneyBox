@@ -87,7 +87,7 @@ int jwDemoTemperatureParsedCount(Map<JWHistorySyncCategory, int> rows) =>
 String describeJwHistorySyncFailure(JWHistorySyncFailure failure) {
   return switch (failure.code) {
     JWErrorCode.historySyncIdleTimeout =>
-      '超过 10 秒未收到设备数据，本轮同步已结束；若仍连接可重新发起。',
+      '超过 ${kJWHistorySyncIdleTimeout.inSeconds} 秒无同步进展，本轮同步已结束；若仍连接可重新发起。',
     JWErrorCode.transportDisconnected => '设备连接已断开，同步失败。',
     _ => failure.message.isNotEmpty
         ? failure.message

@@ -104,8 +104,8 @@ final class JWWatchSession {
 
   /// Synchronizes JW health history for the authenticated session.
   ///
-  /// Delivers decoded batches through [listener], persists each batch to
-  /// [historyStore], and confirms the device only after a full successful round.
+  /// Delivers decoded batches through [listener], persists through a background
+  /// writer, and confirms the device only after wire completion and storage drain.
   /// There is no cancel API; link loss fails through [JWHistorySyncListener.onSyncFailed].
   Future<void> syncHealthData(
     JWHistorySyncListener listener, {

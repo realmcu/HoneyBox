@@ -24,7 +24,7 @@ String describeJWDemoError(Object error) {
         '本次蓝牙写入失败；当前连接仍保持，可重试。',
       JWErrorCode.transportDisconnected => '设备连接已断开。',
       JWErrorCode.historySyncIdleTimeout =>
-        '同步超过 10 秒未收到设备数据；本轮已结束，连接可能仍保持。',
+        '同步超过 ${kJWHistorySyncIdleTimeout.inSeconds} 秒无进展；本轮已结束，连接可能仍保持。',
       _ => 'SDK error [${error.code.name}]: ${error.msg}',
     };
   }

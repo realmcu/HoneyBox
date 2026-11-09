@@ -1,6 +1,10 @@
 import '../model/jw_error.dart';
 import 'jw_history_models.dart';
 
+/// Idle budget while waiting for the next incoming `cmd 0x05` history frame.
+/// Decoding and background persistence do not extend this timer.
+const kJWHistorySyncIdleTimeout = Duration(seconds: 30);
+
 /// HL §5.7 START payload type (`HISTORY_DATA_*`), not the message key `0x07`.
 enum JWHistorySyncCategory {
   activity,

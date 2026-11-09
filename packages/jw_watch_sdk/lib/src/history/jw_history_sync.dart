@@ -3,11 +3,13 @@ import 'dart:typed_data';
 
 import '../connection/jw_link.dart';
 import '../connection/jw_protocol.dart';
+import '../debug/jw_debug_log.dart';
 import '../model/jw_error.dart';
 import '../storage/jw_history_store.dart';
 import 'jw_history_models.dart';
 import 'jw_history_sync_frame.dart';
 import 'jw_history_sync_listener.dart';
+import 'jw_history_write_queue.dart';
 
 /// Internal HL private-protocol (`cmd 0x05`) health-history engine.
 ///
@@ -27,7 +29,7 @@ final class JWHealthHistorySync {
         _listener = listener,
         _onHistoryFrame = onHistoryFrame;
 
-  static const idleTimeout = Duration(seconds: 10);
+  static const idleTimeout = kJWHistorySyncIdleTimeout;
 
   final JWLink _link;
   final JWHistoryStore _store;
@@ -45,13 +47,20 @@ final class JWHealthHistorySync {
   bool _started = false;
   bool _traditionalEnd = false;
   bool _finished = false;
+  bool _roundCompleteQueued = false;
   int _totalWire = 0;
+  JWHistoryWriteQueue? _writeQueue;
 
   Future<void> run() async {
     if (_done != null) {
       throw StateError('JW health sync is already active on this engine');
     }
     _done = Completer<void>();
+    _writeQueue = JWHistoryWriteQueue(
+      store: _store,
+      scope: _scope,
+      onError: _fail,
+    );
     _events = _link.events.listen(_onMessage);
     _failures = _link.failures.listen(_onLinkFailure);
     _armIdleTimer();
@@ -76,9 +85,10 @@ final class JWHealthHistorySync {
   void _armIdleTimer() {
     _idleTimer?.cancel();
     _idleTimer = Timer(idleTimeout, () {
-      _failSync(const JWHistorySyncFailure(
+      _failSync(JWHistorySyncFailure(
         code: JWErrorCode.historySyncIdleTimeout,
-        message: 'JW health sync idle timeout (10s without 0x05 progress)',
+        message:
+            'JW health sync idle timeout (${idleTimeout.inSeconds}s without incoming 0x05)',
       ));
     });
   }
@@ -156,8 +166,9 @@ final class JWHealthHistorySync {
     final decoded = _decode(key, value);
     _received[type] = _received[type]! + decoded.wireCount;
     if (decoded.records.isNotEmpty) {
-      await _store.writeRecords(_scope, decoded.records);
-      _invoke(() => _deliverRecords(decoded.records));
+      final records = decoded.records;
+      _writeQueue!.enqueueRecords(records);
+      scheduleMicrotask(() => _invoke(() => _deliverRecords(records)));
     }
     _emitProgress();
   }
@@ -169,7 +180,9 @@ final class JWHealthHistorySync {
   }
 
   Future<void> _completeIfReady() async {
-    if (!_started || !_traditionalEnd || _finished) return;
+    if (!_started || !_traditionalEnd || _finished || _roundCompleteQueued) {
+      return;
+    }
     for (final entry in _declared.entries) {
       if (_markerStreamTypes.contains(entry.key) &&
           !_markerStreamsEnded.contains(entry.key)) {
@@ -180,6 +193,24 @@ final class JWHealthHistorySync {
             'JW history count mismatch for type ${entry.key}: ${_received[entry.key]}/${entry.value}');
       }
     }
+    _roundCompleteQueued = true;
+    final queue = _writeQueue;
+    if (queue == null) {
+      throw StateError('JW health sync writer is unavailable');
+    }
+    JWWatchDebugLog.apiIn(
+      'JWHealthHistorySync.persist',
+      'pendingRecords=${queue.pendingRecordCount} '
+      'chunk=$kJWHistoryWriteChunkRecords',
+    );
+    queue.enqueueRoundCompleteSentinel();
+    try {
+      await queue.waitForRoundDrain();
+    } catch (error, stackTrace) {
+      _fail(error, stackTrace);
+      return;
+    }
+    JWWatchDebugLog.apiOut('JWHealthHistorySync.persist');
     await _link.send(JWProtocolCommands.confirmHistorySync());
     _finished = true;
     _idleTimer?.cancel();
@@ -300,6 +331,8 @@ final class JWHealthHistorySync {
     _events = null;
     _failures = null;
     _done = null;
+    _writeQueue = null;
+    _roundCompleteQueued = false;
   }
 }
 

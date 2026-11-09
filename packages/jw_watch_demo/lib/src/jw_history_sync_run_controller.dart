@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
+import 'jw_demo_log.dart';
 import 'jw_history_sync_labels.dart';
 import 'jw_history_sync_state.dart';
 
@@ -9,6 +10,8 @@ final class JwHistorySyncRunController extends ChangeNotifier
     implements JWHistorySyncListener {
   JwHistorySyncRunState _state = const JwHistorySyncRunState.idle();
   Future<void>? _active;
+  bool _wireCompleteLogged = false;
+  int _lastProgressLogWire = -1;
 
   JwHistorySyncRunState get state => _state;
 
@@ -17,6 +20,8 @@ final class JwHistorySyncRunController extends ChangeNotifier
       return Future.error(StateError('JW health sync is already active'));
     }
     final startedAt = DateTime.now();
+    _wireCompleteLogged = false;
+    _lastProgressLogWire = -1;
     _state = JwHistorySyncRunState(
       phase: JwHistorySyncPhase.syncing,
       receivedWire: 0,
@@ -70,11 +75,7 @@ final class JwHistorySyncRunController extends ChangeNotifier
     notifyListeners();
   }
 
-  void _log(String message) {
-    if (kDebugMode) {
-      debugPrint('[JwDemoSync] $message');
-    }
-  }
+  void _log(String message) => JwDemoLog.sync(message);
 
   @override
   void onSyncStart(JWHistorySyncPlan plan) {
@@ -106,7 +107,20 @@ final class JwHistorySyncRunController extends ChangeNotifier
       totalWire: totalWireRecords,
     );
     if (receivedWireRecords != prev) {
-      _log('传输进度 $receivedWireRecords / $totalWireRecords');
+      final shouldLog = receivedWireRecords == totalWireRecords ||
+          _lastProgressLogWire < 0 ||
+          receivedWireRecords - _lastProgressLogWire >= 200 ||
+          totalWireRecords <= 200;
+      if (shouldLog) {
+        _lastProgressLogWire = receivedWireRecords;
+        _log('传输进度 $receivedWireRecords / $totalWireRecords');
+      }
+      if (totalWireRecords > 0 &&
+          receivedWireRecords >= totalWireRecords &&
+          !_wireCompleteLogged) {
+        _wireCompleteLogged = true;
+        _log('蓝牙传输完成，正在写入本地数据库…');
+      }
     }
     notifyListeners();
   }
@@ -185,7 +199,9 @@ final class JwHistorySyncRunController extends ChangeNotifier
     final next = (rows[category] ?? 0) + added;
     rows[category] = next;
     _state = _state.copyWith(receivedRowsByCategory: rows);
-    _log('收到 ${jwHistorySyncCategoryLabel(category)} $added 条（累计 $next）');
+    if (next <= 50 || next % 200 == 0) {
+      _log('收到 ${jwHistorySyncCategoryLabel(category)} $added 条（累计 $next）');
+    }
     notifyListeners();
   }
 }
