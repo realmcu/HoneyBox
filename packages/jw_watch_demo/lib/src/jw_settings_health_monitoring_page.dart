@@ -110,6 +110,10 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
       _spo2Enabled = cfg.enabled;
     });
     await _loadOne(() async {
+      if (_deviceSupport([JWDeviceFunction.hypoxia]) == false) return;
+      _lowSpo2Enabled = await controller.readLowSpO2Reminder();
+    });
+    await _loadOne(() async {
       final cfg = await controller.readBloodSugarAutoMeasure();
       _bloodSugarEnabled = cfg.enabled;
     });
@@ -272,9 +276,18 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
     );
   }
 
-  void _setLowSpO2(bool enabled) {
+  Future<void> _setLowSpO2(bool enabled) async {
+    final previous = _lowSpo2Enabled;
     setState(() => _lowSpo2Enabled = enabled);
-    _sdkUnsupportedSnack('低血氧报警');
+    await _apply(
+      id: 'low_spo2',
+      revert: () {
+        if (mounted) setState(() => _lowSpo2Enabled = previous);
+      },
+      op: () async {
+        await controller.setLowSpO2Reminder(enabled);
+      },
+    );
   }
 
   Future<void> _setBloodSugar(bool enabled) async {
@@ -556,9 +569,10 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
                 keyName: 'jw.demo.health.low_spo2',
                 iconAsset: JwSettingsIcons.lowSpo2,
                 title: '低血氧报警',
+                apiCode: JwSettingsApiExamples.lowSpo2Reminder,
                 value: _lowSpo2Enabled,
                 tag: _statusTag(
-                  sdkReady: false,
+                  sdkReady: true,
                   requiredFunctions: const [JWDeviceFunction.hypoxia],
                 ),
                 onChanged: _setLowSpO2,

@@ -22,6 +22,7 @@ export 'src/model/jw_error.dart';
 export 'src/model/jw_identity.dart';
 export 'src/model/jw_identity_store.dart';
 export 'src/model/jw_session_state.dart';
+export 'src/settings/jw_address_book_models.dart';
 export 'src/settings/jw_settings_models.dart';
 export 'src/storage/jw_history_store.dart';
 export 'src/today/jw_today_activity_models.dart';

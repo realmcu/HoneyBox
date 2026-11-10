@@ -7,6 +7,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'jw_demo_last_device_store.dart';
+
 /// Turns public SDK errors into short, actionable UI copy.
 ///
 /// The SDK deliberately keeps [JWException.msg] in English for
@@ -82,6 +84,38 @@ class JWDemoController extends ChangeNotifier {
       Listenable.merge([scanDevices, scanActive, sheetError]);
 
   JWScanDevice? get connectingDevice => _connectingDevice;
+
+  JwDemoLastDevice? _lastDevice;
+
+  /// Last device that connected successfully in this Demo install.
+  JwDemoLastDevice? get lastDevice => _lastDevice;
+
+  Future<void> loadLastDevice() async {
+    _lastDevice = await JwDemoLastDeviceStore.read();
+    _notifyUi();
+  }
+
+  /// Connects using [lastDevice] without opening the scan page.
+  Future<bool> connectLastDevice() async {
+    final last = _lastDevice;
+    if (last == null) return false;
+    await _ensurePermissions();
+    return connect(JWScanDevice(
+      deviceMac: last.deviceMac,
+      name: last.name,
+      rssi: 0,
+    ));
+  }
+
+  Future<void> _rememberConnectedDevice(JWScanDevice device) async {
+    final snapshot = JwDemoLastDevice(
+      name: device.name.trim().isEmpty ? 'JW 设备' : device.name.trim(),
+      deviceMac: device.deviceMac,
+    );
+    _lastDevice = snapshot;
+    await JwDemoLastDeviceStore.write(snapshot);
+    _notifyUi();
+  }
 
   /// Clears stale scan rows when opening the connection page.
   void resetConnectionScanUi() {
@@ -190,6 +224,9 @@ class JWDemoController extends ChangeNotifier {
     _notifyUi();
     try {
       await _session!.connect();
+      if (_state.isConnected) {
+        unawaited(_rememberConnectedDevice(device));
+      }
       return _state.isConnected;
     } catch (error) {
       _error = error;
@@ -261,11 +298,21 @@ class JWDemoController extends ChangeNotifier {
       _runSessionValue(
           (session) => session.setHighHeartRateReminderVerified(value));
 
+  Future<bool> readLowSpO2Reminder() =>
+      _runSessionValue((session) => session.readLowSpO2Reminder());
+
+  Future<JWSettingSubmission> setLowSpO2Reminder(bool enabled) =>
+      _runSessionValue((session) => session.setLowSpO2Reminder(enabled));
+
   Future<JWSettingSubmission> syncTime() =>
       _runSessionValue((session) => session.setTime(DateTime.now()));
 
   Future<JWSettingSubmission> findDevice(bool enabled) =>
       _runSessionValue((session) => session.findDevice(enabled));
+
+  Future<JWSettingSubmission> setAddressBook(
+          List<JWAddressBookEntry> entries) =>
+      _runSessionValue((session) => session.setAddressBook(entries));
 
   Future<JWNotifySettings> readNotifySettings() =>
       _runSessionValue((session) => session.readNotifySettings());

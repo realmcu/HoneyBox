@@ -614,9 +614,9 @@ final class JWHistoryStore {
     return predicate;
   }
 
-  static int _time(DateTime value) => value.toUtc().millisecondsSinceEpoch;
+  static int _time(DateTime value) => value.millisecondsSinceEpoch;
   static DateTime _date(int value) =>
-      DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+      DateTime.fromMillisecondsSinceEpoch(value);
   static void _positive(int value, String name) {
     if (value <= 0) throw ArgumentError.value(value, name, 'must be positive');
   }

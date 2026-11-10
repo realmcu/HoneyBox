@@ -43,6 +43,18 @@ final class JWHistoryQuery {
   final bool descending;
 }
 
+/// Firmware calendar fields (Y-M-D and minutes-from-midnight) are device-local
+/// wall time, matching Android `DateUtil.getTime` / `HomeSpo2Bean` — not UTC.
+DateTime jwDeviceLocalDateTime(
+  int year,
+  int month,
+  int day, [
+  int hour = 0,
+  int minute = 0,
+  int second = 0,
+]) =>
+    DateTime(year, month, day, hour, minute, second);
+
 /// Base contract shared by all persisted JW health records.
 abstract interface class JWHistoryRecord {
   DateTime get time;

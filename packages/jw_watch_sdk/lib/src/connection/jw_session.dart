@@ -15,6 +15,8 @@ import '../model/jw_device_function_info.dart';
 import '../model/jw_error.dart';
 import '../model/jw_identity.dart';
 import '../model/jw_session_state.dart';
+import '../settings/jw_address_book_codec.dart';
+import '../settings/jw_address_book_models.dart';
 import '../settings/jw_settings_models.dart';
 import '../settings/jw_settings_codec.dart';
 import '../control/jw_control.dart';
@@ -563,6 +565,43 @@ final class JWWatchSession {
     return const JWSettingSubmission('find device');
   }
 
+  /// Replaces the on-device address book (V2 `setAddressBook`).
+  ///
+  /// Pass an empty list to clear. At most [kJwMaxAddressBookEntries] contacts.
+  Future<JWSettingSubmission> setAddressBook(
+      List<JWAddressBookEntry> entries) async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.addressBook, 'address book');
+    final list = List<JWAddressBookEntry>.unmodifiable(entries);
+    if (list.length > kJwMaxAddressBookEntries) {
+      throw ArgumentError.value(list.length, 'entries',
+          'must not exceed $kJwMaxAddressBookEntries');
+    }
+    final count = list.length;
+    if (count == 0) {
+      await _link.send(JWProtocolCommands.setAddressBookValue(
+          encodeAddressBookPhase(status: 0, size: 0)));
+      return const JWSettingSubmission('address book');
+    }
+    await _link.send(JWProtocolCommands.setAddressBookValue(
+        encodeAddressBookPhase(status: 0, size: count)));
+    for (final entry in list) {
+      final reply = await _link.sendAndAwaitUnsolicited(
+        request: JWProtocolCommands.setAddressBookValue(
+            encodeAddressBookEntry(entry)),
+        responseCommand: 2,
+        responseKey: JWProtocolCommands.addressBookResponseKey,
+      );
+      if (!decodeAddressBookEntryAck(reply.value)) {
+        throw const JWException(
+            JWErrorCode.protocol, 'JW address book entry rejected by device');
+      }
+    }
+    await _link.send(JWProtocolCommands.setAddressBookValue(
+        encodeAddressBookPhase(status: 1, size: count)));
+    return const JWSettingSubmission('address book');
+  }
+
   Future<JWDoNotDisturb> readDoNotDisturb() async {
     _requireReadyForSettings();
     return JWSettingsCodec.decodeDoNotDisturb(
@@ -607,6 +646,38 @@ final class JWWatchSession {
     return JWSettingsCodec.decodeHighHeartRateReminder(
         (await _link.request(JWProtocolCommands.readHighHeartRateReminder()))
             .value);
+  }
+
+  /// Low blood-oxygen alert (`cmd 0x02` / `0x72`–`0x74`), aligned with App
+  /// `CSFunctionManager.setLowSpO2Reminder` and V2 `setHypoxiaSwitch`.
+  Future<bool> readLowSpO2Reminder() async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.hypoxia, 'low SpO2 reminder');
+    return JWSettingsCodec.decodeLowSpO2Reminder(
+        (await _link.request(JWProtocolCommands.readLowSpO2Reminder())).value);
+  }
+
+  Future<JWSettingSubmission> setLowSpO2Reminder(bool enabled) async {
+    _requireReadyForSettings();
+    _requireDeviceFunction(JWDeviceFunction.hypoxia, 'low SpO2 reminder');
+    await _link.send(JWProtocolCommands.setLowSpO2Reminder(enabled));
+    return const JWSettingSubmission('low SpO2 reminder');
+  }
+
+  Future<JWVerifiedSetting<bool>> setLowSpO2ReminderVerified(
+      bool enabled) async {
+    _requireDeviceFunction(JWDeviceFunction.hypoxia, 'low SpO2 reminder');
+    final previous = await readLowSpO2Reminder();
+    await _link.send(JWProtocolCommands.setLowSpO2Reminder(enabled));
+    final actual = await readLowSpO2Reminder();
+    if (actual != enabled) {
+      throw JWException(
+        JWErrorCode.protocol,
+        'JW low SpO2 reminder read-back mismatch '
+        '(expected $enabled, got $actual)',
+      );
+    }
+    return JWVerifiedSetting(previous: previous, value: actual);
   }
 
   Future<JWVerifiedSetting<JWHighHeartRateReminder>>

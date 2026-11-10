@@ -80,6 +80,34 @@ final class JWLink {
       _enqueue(() async => _execute(request, expectResponse: false));
 
   /// Sends [trigger] and collects unsolicited setting responses on [events].
+  /// Sends a fire-and-forget SETTINGS command and awaits the next matching
+  /// unsolicited business reply on [events] (address book `0x6E`, etc.).
+  Future<JWProtocolMessage> sendAndAwaitUnsolicited({
+    required JWProtocolRequest request,
+    required int responseCommand,
+    required int responseKey,
+    Duration timeout = const Duration(seconds: 8),
+  }) {
+    return _enqueue(() async {
+      final completer = Completer<JWProtocolMessage>();
+      late final StreamSubscription<JWProtocolMessage> subscription;
+      subscription = events.listen((message) {
+        if (message.command == responseCommand && message.key == responseKey) {
+          if (!completer.isCompleted) completer.complete(message);
+        }
+      });
+      try {
+        await _execute(request, expectResponse: false);
+        return await completer.future.timeout(timeout);
+      } on TimeoutException {
+        throw const JWException(JWErrorCode.businessReplyTimeout,
+            'JW unsolicited settings reply timed out');
+      } finally {
+        await subscription.cancel();
+      }
+    });
+  }
+
   Future<List<JWProtocolMessage>> collectSettingResponses({
     required JWProtocolRequest trigger,
     required int responseCommand,

@@ -162,6 +162,15 @@ abstract final class JWProtocolCommands {
           replyTimeout: _settingsProbeTimeout);
   static JWProtocolRequest setHighHeartRateReminder(Uint8List value) =>
       JWProtocolRequest(command: 2, key: 0x75, responseKey: null, value: value);
+
+  /// Low SpO₂ reminder (V2 `setHypoxiaSwitch`): set `0x72`, read `0x73` → `0x74`.
+  static JWProtocolRequest readLowSpO2Reminder() => const JWProtocolRequest(
+      command: 2,
+      key: 0x73,
+      responseKey: 0x74,
+      replyTimeout: _settingsProbeTimeout);
+  static JWProtocolRequest setLowSpO2Reminder(bool enabled) =>
+      _setting(0x72, enabled ? 1 : 0);
   static JWProtocolRequest readSedentaryReminder() => const JWProtocolRequest(
       command: 2,
       key: 0x26,
@@ -200,6 +209,17 @@ abstract final class JWProtocolCommands {
   /// App message alert (`cmd 0x04` / `key 0x04`).
   static JWProtocolRequest sendNotifyMessage(Uint8List value) =>
       JWProtocolRequest(command: 4, key: 0x04, responseKey: null, value: value);
+
+  /// Address book sync (`0x6D` req / `0x6E` rsp per entry).
+  static const int addressBookRequestKey = 0x6d;
+  static const int addressBookResponseKey = 0x6e;
+
+  static JWProtocolRequest setAddressBookValue(Uint8List value) =>
+      JWProtocolRequest(
+          command: 2,
+          key: addressBookRequestKey,
+          responseKey: null,
+          value: value);
 
   static JWProtocolRequest _setting(int key, int value) => JWProtocolRequest(
       command: 2,

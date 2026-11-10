@@ -79,6 +79,17 @@ abstract final class JWSettingsCodec {
     ]);
   }
 
+  /// Android `prepareSetHypoxiaSwitchPacket` / `HYPOXIA_SWITCH_RSP`.
+  static Uint8List encodeLowSpO2Reminder(bool enabled) =>
+      Uint8List.fromList([enabled ? 0x01 : 0x00]);
+
+  static bool decodeLowSpO2Reminder(Uint8List value) {
+    if (value.isEmpty) {
+      throw const FormatException('JW low SpO2 reminder response is empty');
+    }
+    return (value[0] & 0xff) == 0x01;
+  }
+
   static JWHighHeartRateReminder decodeHighHeartRateReminder(Uint8List value) {
     _length(value, 2, 'high heart rate reminder');
     // 固件关闭态可能回 0；读回时钳到有效阈值，避免抛错。

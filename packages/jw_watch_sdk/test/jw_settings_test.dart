@@ -106,6 +106,13 @@ void main() {
       highHr,
     );
 
+    expect(JWSettingsCodec.encodeLowSpO2Reminder(true), [0x01]);
+    expect(JWSettingsCodec.encodeLowSpO2Reminder(false), [0x00]);
+    expect(JWSettingsCodec.decodeLowSpO2Reminder(Uint8List.fromList([0x01])),
+        isTrue);
+    expect(JWSettingsCodec.decodeLowSpO2Reminder(Uint8List.fromList([0x00])),
+        isFalse);
+
     const sedentary = JWSedentaryReminder(
       enabled: true,
       thresholdMinutes: 60,

@@ -6,6 +6,7 @@ import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 import 'jw_data_home_page.dart';
 import 'jw_demo_content_sheet.dart';
 import 'jw_demo_controller.dart';
+import 'jw_demo_last_device_store.dart';
 import 'jw_device_pages.dart';
 import 'jw_settings_home_page.dart';
 
@@ -188,6 +189,7 @@ class _HomePage extends StatefulWidget {
 
 class _HomePageState extends State<_HomePage> {
   late final TextEditingController _userIdController;
+  var _quickConnecting = false;
 
   JWDemoController get controller => widget.controller;
 
@@ -197,7 +199,37 @@ class _HomePageState extends State<_HomePage> {
     if (controller.userId.isEmpty) {
       controller.rememberUserId('123456');
     }
+    unawaited(controller.loadLastDevice());
     _userIdController = TextEditingController(text: controller.userId);
+  }
+
+  Future<void> _quickConnectLast() async {
+    if (_quickConnecting ||
+        !controller.isInitialized ||
+        controller.state.isConnected ||
+        controller.isConnecting) {
+      return;
+    }
+    setState(() => _quickConnecting = true);
+    try {
+      final ok = await controller.connectLastDevice();
+      if (!mounted) return;
+      if (!ok) {
+        final message = controller.error == null
+            ? '连接失败，请确认手表在附近后重试。'
+            : describeJWDemoError(controller.error!);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(describeJWDemoError(error))),
+      );
+    } finally {
+      if (mounted) setState(() => _quickConnecting = false);
+    }
   }
 
   @override
@@ -248,19 +280,32 @@ class _HomePageState extends State<_HomePage> {
             !controller.isInitialized
                 ? '请先初始化 SDK。'
                 : controller.state.isConnected
-                    ? '已连接 ${controller.state.device?.name ?? 'JW 设备'}。'
-                    : '扫描并连接设备；连接不等同于登录。',
+                    ? '已连接 ${controller.state.device?.name ?? controller.lastDevice?.name ?? 'JW 设备'}。'
+                    : controller.lastDevice != null
+                        ? '可连接最近设备，或扫描新设备。'
+                        : '扫描并连接设备；连接不等同于登录。',
             keyName: 'jw.demo.guide.connect',
-            actionLabel: controller.state.isConnected ? '已连接' : '连接设备',
-            onAction: controller.state.isConnected
-                ? null
-                : () async {
-                    widget.onConnect();
-                  },
+            showTrailingAction:
+                !controller.isInitialized || controller.state.isConnected,
+            actionLabel: controller.state.isConnected
+                ? '已连接'
+                : '等待',
+            onAction: null,
             completed: controller.state.isConnected,
             code: '''await watch.startScan();
 final session = watch.createSession(device.deviceMac);
 await session.connect();''',
+            detailPanel: controller.isInitialized
+                ? _ConnectDeviceStepPanel(
+                    lastDevice: controller.lastDevice,
+                    connected: controller.state.isConnected,
+                    connecting: controller.isConnecting || _quickConnecting,
+                    connectedName: controller.state.device?.name,
+                    connectedMac: controller.state.device?.deviceMac,
+                    onConnectLast: _quickConnectLast,
+                    onScan: widget.onConnect,
+                  )
+                : null,
           ),
           _GuideTile(
             '3',
@@ -434,6 +479,7 @@ class _GuideTile extends StatelessWidget {
     required this.code,
     this.detailPanel,
     this.loading = false,
+    this.showTrailingAction = true,
   });
   final String number;
   final String title;
@@ -445,6 +491,7 @@ class _GuideTile extends StatelessWidget {
   final String code;
   final Widget? detailPanel;
   final bool loading;
+  final bool showTrailingAction;
 
   static ButtonStyle _compactFilledStyle(BuildContext context) =>
       FilledButton.styleFrom(
@@ -515,8 +562,10 @@ class _GuideTile extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    action,
+                    if (showTrailingAction) ...[
+                      const SizedBox(width: 8),
+                      action,
+                    ],
                   ],
                 ),
               ),
@@ -552,6 +601,109 @@ class _SessionLogPanel extends StatelessWidget {
             ),
         ],
       );
+}
+
+class _ConnectDeviceStepPanel extends StatelessWidget {
+  const _ConnectDeviceStepPanel({
+    required this.lastDevice,
+    required this.connected,
+    required this.connecting,
+    required this.connectedName,
+    required this.connectedMac,
+    required this.onConnectLast,
+    required this.onScan,
+  });
+
+  final JwDemoLastDevice? lastDevice;
+  final bool connected;
+  final bool connecting;
+  final String? connectedName;
+  final String? connectedMac;
+  final Future<void> Function() onConnectLast;
+  final VoidCallback onScan;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (connected) {
+      final name = connectedName ?? lastDevice?.name ?? 'JW 设备';
+      final mac = connectedMac ?? lastDevice?.deviceMac;
+      return Column(
+        key: const Key('jw.demo.connect_device.connected'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(name, style: theme.textTheme.titleSmall),
+          if (mac != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              mac,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
+    final canAct = !connecting;
+    final canConnectLast = lastDevice != null && canAct;
+
+    return Column(
+      key: const Key('jw.demo.connect_device.disconnected'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (lastDevice != null) ...[
+          Text('最近连接的设备', style: theme.textTheme.labelLarge),
+          const SizedBox(height: 6),
+          Text(lastDevice!.name, style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            lastDevice!.deviceMac,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontFamily: 'monospace',
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  key: const Key('jw.demo.last_device.connect'),
+                  onPressed:
+                      canConnectLast ? () => unawaited(onConnectLast()) : null,
+                  child: Text(connecting ? '连接中…' : '连接'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton(
+                  key: const Key('jw.demo.last_device.scan'),
+                  onPressed: canAct ? onScan : null,
+                  child: const Text('扫描'),
+                ),
+              ),
+            ],
+          ),
+        ] else ...[
+          Text(
+            '暂无最近设备记录，请扫描附近设备。',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('jw.demo.last_device.scan'),
+            onPressed: canAct ? onScan : null,
+            child: const Text('扫描'),
+          ),
+        ],
+      ],
+    );
+  }
 }
 
 class _ConnectionPage extends StatefulWidget {

@@ -81,7 +81,7 @@ void main() {
     final root = await Directory.systemTemp.createTemp('jw-history-db-');
     addTearDown(() => root.delete(recursive: true));
     final file = File('${root.path}${Platform.pathSeparator}jw_watch.db');
-    final time = DateTime.utc(2026, 11, 5, 9);
+    final time = DateTime(2026, 11, 5, 9);
     final first = JWHistoryStore.forDatabase(JWDatabase(NativeDatabase(file)));
     await first
         .writeHeartRates(scope, [JWHeartRate(time: time, heartRate: 71)]);

@@ -427,8 +427,13 @@ List<JWHistoryRecord>? _decodeOne(int key, Uint8List raw) {
   final data = ByteData.sublistView(raw);
   DateTime calendar(int minute, [int second = 0]) {
     final word = data.getUint16(0);
-    final date = DateTime.utc(2000 + (word >> 9 & 63), word >> 5 & 15,
-        word & 31, minute ~/ 60, minute % 60, second);
+    final date = jwDeviceLocalDateTime(
+        2000 + (word >> 9 & 63),
+        word >> 5 & 15,
+        word & 31,
+        minute ~/ 60,
+        minute % 60,
+        second);
     if (date.year != 2000 + (word >> 9 & 63) || minute >= 1440 || second > 59) {
       throw const FormatException('Invalid JW history calendar time');
     }
@@ -510,7 +515,7 @@ List<JWHistoryRecord>? _decodeOne(int key, Uint8List raw) {
       final word = _be(raw, 0, 8);
       final value = nonzero(_bits(word, 16, 8));
       if (value == null) return const [];
-      final time = DateTime.utc(
+      final time = jwDeviceLocalDateTime(
           2000 + _bits(word, 57, 6),
           _bits(word, 53, 4),
           _bits(word, 48, 5),
@@ -565,3 +570,7 @@ BigInt _be(Uint8List bytes, int offset, int length) {
 
 int _bits(BigInt word, int shift, int width) =>
     ((word >> shift) & ((BigInt.one << width) - BigInt.one)).toInt();
+
+/// Mirrors production sync decode; for unit tests only.
+List<JWHistoryRecord> jwDecodeHistoryFieldForTest(int key, Uint8List bytes) =>
+    _decode(key, bytes).records;

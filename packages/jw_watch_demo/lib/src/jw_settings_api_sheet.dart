@@ -51,6 +51,14 @@ final alarms = await session.readAlarms();
 await session.setAlarms(alarms); // replaces full table
 ''';
 
+  static const addressBook = '''
+await session.setAddressBook([
+  JWAddressBookEntry(name: '张三', phone: '13800138000'),
+  JWAddressBookEntry(name: '李四', phone: '13900139000'),
+]);
+// 传空列表可清空手表通讯录
+''';
+
   static const doNotDisturb = '''
 final dnd = await session.readDoNotDisturb();
 await session.setDoNotDisturbVerified(dnd);
@@ -187,6 +195,11 @@ final cfg = await session.measure.readSpO2AutoMeasure();
 await session.measure.setSpO2AutoMeasure(
   JWAutoMeasureConfig(enabled: true, intervalMinutes: 1),
 );
+''';
+
+  static const lowSpo2Reminder = '''
+final on = await session.readLowSpO2Reminder();
+await session.setLowSpO2Reminder(!on);
 ''';
 
   static const bloodPressureAuto = '''
