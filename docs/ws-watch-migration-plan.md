@@ -1,10 +1,10 @@
 # 手表工程迁移：连接、帧通信与 SDK 组合
 
-> 2026-11-03，按本轮讨论修订。JW / WS 两个 SDK 独立，拆分连接方式与当前共用的 L0/L1 帧通信；不再建立 `watch_core`。本文记录目标边界与实施结果。T1/T2 已由用户提交推送；本轮 T3 提取公共帧通道并接入现有 JW、WS 和 WS 模拟设备，实际交付与验证见第 19 节。master 合并提交 `3443802`，验证修复 `1ae57ab`。
+> 2026-11-10 修订。JW / WS 两个 SDK 独立，拆分连接方式与当前共用的 L0/L1 帧通信；不再建立 `watch_core`。本文记录**目标边界、已落地结果与当前收尾态**（非仅计划草案）。
 
-阅读顺序：第 1–6 节确定整体边界；第 7–12 节说明接口与各批迁移；第 13–16 节说明兼容、验收、回退和首次实施清单。源码路径默认相对 HoneyBox 根目录；目录与接口草案表示目标，不表示已创建。
+阅读顺序：第 1–6 节确定整体边界；第 7–12 节说明接口与各批迁移；第 13–16 节说明兼容、验收、回退和清单；§17–§19 为 T1–T3 实施记录；**§20 为 T4 与 Demo 当前态**。源码路径默认相对 HoneyBox 根目录。
 
-当前 T1/T2 已完成；T3 代码已落地，验证见 §19。Windows 编译与设备验收仍待 Windows 环境执行；T4 尚未开始。主线是 T1–T3 通信基础 → T4 完整 JW SDK 与真机闭环。WS M7 等待固件，不阻塞主线；OTA/采集/七牛单列为独立工作流。T1 的实际改动与验证结果见第 17 节，T2 见第 18 节，T3 见第 19 节。
+**当前进度（2026-11）**：T1–T3 **已完成**（见 §17–§19）。**T4.0–T4.5 已在分支 `feat/ws-watch-sdk-skeleton` 交付主体能力**（`jw_watch_sdk` + `jw_watch_demo`，HoneyBox 已挂载 JW 入口）；JW SDK **接近完成**，后续以**真机观察与按需 bugfix** 为主。原码云 **T4.6 / T4.7 子任务已删除**（独立 example、全量切换不再单列里程碑，能力并入当前 Demo 与迭代验证）。WS M7 仍等固件；OTA/采集/七牛为并列工作流。Windows 等平台项按环境补验。
 
 **码云总任务**：[【HoneyBox】【WS Watch SDK】基于 HoneyBox 搭建 Flutter SDK 与 Demo 工程（第一阶段）](https://e.gitee.com/priodigit/dashboard?issue=IKKGIB)（正文含 WS M1–M6 与下方主线/并列任务索引）。各批次对应 issue 见 §5、§12.1、§12.3。
 
@@ -43,12 +43,12 @@ JW、WS 当前 L0/L1 按同一套机制收敛，提取时用两套现有测试/�
 | `watch_transport_ble` | 实现 transport；BLE 扫描、连接、GATT/profile、订阅、MTU/写入上限、断连清理与设备资源协调；依赖 `watch_transport` 与 FlutterBluePlus，必要原生 BLE 桥随自身交付 |
 | `watch_transport_simulation` | 实现 transport；虚拟设备发现、双向内存字节通道、连接生命周期、连接/写入失败及延迟/丢失等通用故障注入；依赖 `watch_transport`，不依赖 WS/JW 或其数据库 |
 | `watch_frame_channel` | 当前共用 L0/L1 帧机制，依赖 `watch_transport`；不直接依赖 BLE/simulation，实现实例各自维护队列、seq、ACK 与组包状态 |
-| `jw_watch_sdk`（后续新增） | JW L2、业务请求/回应匹配、设置/同步、公开模型与存储；组合当前帧通道与默认 BLE，可注入其他 transport；不依赖 WS SDK |
+| `jw_watch_sdk`（**已有**） | JW L2、业务请求/回应匹配、设置/同步/测量/控制、公开模型与 `jw_watch.db`；组合公共帧通道与 BLE；不依赖 WS SDK |
 | `ws_watch_sdk`（已有） | WS L2、业务请求/回应匹配、设置/同步、公开模型与存储；组合当前帧通道、BLE/simulation；不依赖 JW SDK |
 | `watch_ota`（后续新增） | 独立升级核心与芯片后端；按需要使用 BLE 能力/原生厂商 SDK，不被迫经过 JW/WS 的日常帧协议 |
 | `ws_watch_demo`（已有） | WS 专用示例和 Raw 联调；保持可独立运行，不强制引入 JW/七牛/采集 |
 | `watch_lab_ui` | 共享 Watch Lab UI：传输诊断、能力页组件、JW transport 探针；WS/JW demo 与 HoneyBox 共用 |
-| `jw_watch_demo` | JW Watch Lab 能力菜单；T4 前以 L0/L1 传输诊断为主 |
+| `jw_watch_demo`（**已有**） | **JW 完整 Demo**（连接、设置、数据首页与详情图表、控制/测量实验室等）；HoneyBox 日常真机走此包；`example/` 仍用于 path 依赖与集成测试 |
 | `watch_debug_demo`（可选后续） | 若需 OTA/采集/七牛统一入口，可再合并进 Watch Lab 或独立 Tab；当前由 `watch_lab_ui` + 两 demo 包承担 |
 
 初期只实现 BLE 与 simulation；UART/TCP 仅保留接口适配能力，不提前创建空包。SDK 默认组合由内部工厂提供，普通用户直接使用 JW 或 WS API；高级接入/测试可注入连接工厂。未来 WS 改 L0/L1 时新增独立帧机制实现，必要时调整 WS 内部 adapter，JW 继续使用当前实现，不把不兼容格式堆成一个大开关。
@@ -96,9 +96,9 @@ WS SDK → 主机帧通道 → simulation 主机端
 | **T1 连接抽象与 simulation** | [IKSKQV](https://e.gitee.com/priodigit/dashboard?issue=IKSKQV) | 新建 `watch_transport` / `watch_transport_simulation`，迁内存通道，WS 通过薄 adapter 接回现有 Link；默认身份/数据库/业务 API 不动。验证字节双向传输、主动推送、小包、断开/释放、跨重连设备状态，以及现有 WS M2–M6 回归（**已完成**，见 §17） |
 | **T2 BLE transport** | [IKSKQX](https://e.gitee.com/priodigit/dashboard?issue=IKSKQX) | 新建 `watch_transport_ble`，提取已有真实连接能力、profile 和资源协调；迁 WS 真实扫描并提供真实连接 adapter，以现有 JW 真机做连接/命令冒烟。宿主/Capture/原生 OTA 的过渡入口加入同一设备占用协调；无 WS 固件时只验证 transport，不宣称完成 WS M7 |
 | **T3 公共帧通道** | [IKSKQY](https://e.gitee.com/priodigit/dashboard?issue=IKSKQY) | 比对 JW/WS 当前 L0/L1，提取 `watch_frame_channel`，接两套 SDK 和 WS 模拟设备。验证前 8 字节、CRC/ACK/seq、重传/去重、跨分片、整帧不交错、断链清队列及双方现有行为（**已实现**，见 §19） |
-| **T4 完整 JW SDK（主线）** | 总 [IKSKW1](https://e.gitee.com/priodigit/dashboard?issue=IKSKW1)，子任务 §12.1 | 以现有 Android JW API 和量产设备为基准，实现独立 SDK、业务模型、JW 数据库、设置/同步/测量/控制/通知及真机 Demo；逐阶段通过真实设备检验 T1–T3，详见第 12 节及专项计划。不是仅把当前 Flutter JW 目录搬成包 |
+| **T4 完整 JW SDK（主线）** | 总 [IKSKW1](https://e.gitee.com/priodigit/dashboard?issue=IKSKW1)，子任务 §12.1 | **T4.0–T4.5 已落地**（2026-11，见 §20）；独立 SDK、JW 数据库、设置/同步/测量/控制及 `jw_watch_demo`。非「搬目录即完成」；覆盖表缺口与型号差异仍按需补齐。**不再单列 T4.6/T4.7** |
 
-实施顺序为 **T1 → T2 → T3 → T4.0–T4.7**。T1 只提取现有 simulation 并保持回归，不新增 JW 模拟设备或扩大 WS 模拟场景；T2/T3 立即使用 JW 真机验证，随后资源优先投入完整 JW SDK。现有 WS Link/Session 的超时/重传参数在 T3 映射到公共实现，保持外部 API 兼容。
+实施顺序为 **T1 → T2 → T3 → T4.0–T4.5**（**T4.6/T4.7 已取消**，见 §12.1）。T1 只提取现有 simulation；T2/T3 使用 JW 真机验证；T4 在 `jw_watch_sdk` / `jw_watch_demo` 闭环。WS Link/Session 超时/重传在 T3 映射到公共实现，外部 API 保持兼容。
 
 **WS M7 暂不作为近期交付目标**（跟踪 [IKSABE](https://e.gitee.com/priodigit/dashboard?issue=IKSABE)）。固件到位后，重点核对 WS UART/profile、L2/业务、能力与时序差异；JW 已验证的 transport/frame 基础可直接复用，但不能据此提前宣布 WS 真机已通过。并列业务不串在主线尾部，也不成为 T4 的验收前提，见第 12.3 节。
 
@@ -113,16 +113,16 @@ WS SDK → 主机帧通道 → simulation 主机端
 
 ### 6.1 调试 UI 单一来源（Watch Lab）
 
-HoneyBox **Watch Lab** 为 **JW / WS 两个独立按钮**（非 Tab），分别 push 全屏 Lab；当前 **仅 JW Lab** 可用。共享 UI 在 **`watch_lab_ui`**。
+HoneyBox **JW Watch** 入口挂载 **`jw_watch_demo`**（连接向导、设置、数据、控制等完整流程）。**Watch Lab / `watch_lab_ui`** 仍承担扫描过滤、连接条与部分**传输/能力探针** UI，与 Demo 包分工而非重复造第二套业务 App。
 
 | 包 | 职责 |
 | --- | --- |
-| `watch_lab_ui` | JW 扫描过滤（`000001ff…` + `fd50`）、连接条、分组验收 UI、`JwConnectedToolsPage` |
-| `jw_watch_demo` | JW Lab：连接后展示分组占位验收项（`jw_lab_test_catalog.dart`） |
-| `ws_watch_demo` | WS SDK 能力页（待重构接入 Hub 第二按钮） |
-| HoneyBox `WatchLabHubPage` | 双按钮入口；`JWWatchLabAppRoot` 全屏 JW |
+| `watch_lab_ui` | JW 扫描过滤、连接条、分组验收/探针组件 |
+| `jw_watch_demo` | **主线 Demo**：`JWDemoController` + 设置/数据/测量/控制页；数据首页顶区对齐 `docs/jw-data-home-header-prototype.html` v0.4 |
+| `ws_watch_demo` | WS SDK 能力页；Hub 第二按钮（WS Lab） |
+| HoneyBox | `jw_watch_demo` path 依赖 + JW 入口路由 |
 
-各 package 的 `example/` 仍用于外部 path 依赖与 `integration_test`，**日常真机调试走 HoneyBox Watch Lab**，避免第二套完整 App UI。
+各 package 的 `example/` 与 `watch_transport_ble/example` 仍用于 **path 依赖、CI 与 BLE/帧 smoke**；**业务与设置/同步验收以 `jw_watch_demo` + 真机为主**。
 
 ## 7. 目标目录与依赖方向
 
@@ -146,9 +146,12 @@ packages/
     lib/watch_frame_channel.dart
     lib/src/{frame,codec,assembler,channel,queue,config,events}/
     test/{vectors,channel,assembler}/
-  jw_watch_sdk/
+  jw_watch_sdk/                         # 已存在：connection/settings/history/measure/control/today/storage
     lib/jw_watch_sdk.dart
-    lib/src/{connection,protocol,session,features,model,storage,debug}/
+    lib/src/{connection,settings,history,measure,control,today,storage,model,capability,debug}/
+    test/
+  jw_watch_demo/                        # 已存在：完整 JW Demo UI
+    lib/src/
     test/
   ws_watch_sdk/                       保留现有包，按批次替换内部基础实现
     lib/src/simulation/               保留 WS 设备行为及场景
@@ -322,22 +325,31 @@ BLE profile 通过配置明确服务 UUID、收/发特征、属性与写入模�
 
 码云总任务：[IKSKW1](https://e.gitee.com/priodigit/dashboard?issue=IKSKW1)（【HoneyBox】【WS Watch SDK】JW SDK 完整实现与真机验收（T4））。
 
-目标是实现可独立接入的完整 JW Flutter SDK，不止搬迁现有代码。使用 `Cavo-Ble-SourceCode-Android/UkProtocolLibary` 的现有 V2 能力作为对照，结合现有 Flutter JW 实现及真实设备行为逐项落实。完整的接口、数据库、验收方案见 [JW SDK 专项实施计划](jw-watch-sdk-implementation-plan.md)。
+JW Flutter SDK 以 `packages/jw_watch_sdk` 交付，对照 Android `UkProtocolLibary` V2 与量产真机；**不是**把 `lib/services/jw/` 原样搬包即结束。接口、数据库、Measure 透明缓存等细则见 [JW SDK 专项实施计划](jw-watch-sdk-implementation-plan.md)（含 §8.0）。**§20** 记录当前落地与初稿差异。
 
-### 12.1 阶段拆分
+### 12.1 阶段拆分（T4.0–T4.5；T4.6/T4.7 已取消）
 
-| 阶段 | 码云任务 | 交付内容 | 验收重点 |
+| 阶段 | 码云任务 | 交付内容 | 当前态（2026-11） |
 | --- | --- | --- | --- |
-| **T4.0 能力基线与 API** | [IKSKR0](https://e.gitee.com/priodigit/dashboard?issue=IKSKR0) | 建立 Android/Flutter/固件功能覆盖表；设计 `JWWatch` 门面、JW 公开类型、能力/错误及 SDK 配置 | 连接、设置、数据、功能、通知全部入表；缺失功能进入任务，不以“搬完已有目录”替代完整性 |
-| **T4.1 真机连接与包闭环** | [IKSKR2](https://e.gitee.com/priodigit/dashboard?issue=IKSKR2) | `jw_watch_sdk` 组合 T1–T3；独立扫描/连接、登录/绑定/初始化、设备信息、身份、断连重连；薄真机验收页同步提供 | 离开 HoneyBox 能操作现有真机；真实收发经过公共 BLE 与帧通道，不能暗中走旧 Session/ACK 实现 |
-| **T4.2 设置与设备配置** | [IKSKR4](https://e.gitee.com/priodigit/dashboard?issue=IKSKR4) | 用户资料、时间、单位/语言、显示、闹钟/提醒、自动测量等；迁现有配置准入并补 Android 对照缺口 | 支持读取的写入项做真机读回；发送、ACK、已验证变更区分；未知能力/不支持状态准确 |
-| **T4.3 JW 模型与数据库** | [IKSKR5](https://e.gitee.com/priodigit/dashboard?issue=IKSKR5) | 全新 JW 独立类型与 drift/SQLite `jw_watch.db`；以 `user_id + device_mac + time` 关联十类类型化历史 | 持久化/重启查询、UTC 时间、无效值、去重、事务与 schema 升级；不使用或迁移 WS、旧 Flutter journal 的模型、表或库 |
-| **T4.4 历史同步闭环** | [IKSKR7](https://e.gitee.com/priodigit/dashboard?issue=IKSKR7) | 协议识别/解析→类型化数据→事务提交→按 JW 协议确认→离线查询；覆盖数据清单各类型与进度/取消/恢复 | 真机重复同步、取消/断链、数据库失败不误确认、ACK 不确定、重启后查询；验证完整公共链路与 JW 存储 |
-| **T4.5 测量、控制与通知补齐** | [IKSKR9](https://e.gitee.com/priodigit/dashboard?issue=IKSKR9) | 实时测量/主动上报、运动状态机、控制与通知发送；对照 Android 扩展功能逐项补齐 | 命令与上报分流、开始/停止/取消、断链清理；不支持型号返回明确结果；不将手机通知采集服务当作协议发送接口 |
-| **T4.6 JW Demo 与独立接入** | [IKSKRA](https://e.gitee.com/priodigit/dashboard?issue=IKSKRA) | 真机功能页、数据库/同步查看、Raw/帧诊断、独立 example、接入文档和 CI | 页面只调用 SDK 公开 API，离开 HoneyBox 可安装验收；只接 JW、只接 WS、同时接两者的工程依赖和数据隔离通过 |
-| **T4.7 完整真机回归与切换** | [IKSKRB](https://e.gitee.com/priodigit/dashboard?issue=IKSKRB) | 覆盖表闭环、故障/稳定性回归、宿主切到新 JW SDK并移除重复实现，形成验证记录 | 正常主路径无旧链路旁路；列明型号/固件/平台及剩余设备证据，不用单测或不支持判断代替真实功能实现 |
+| **T4.0 能力基线与 API** | [IKSKR0](https://e.gitee.com/priodigit/dashboard?issue=IKSKR0) | 覆盖表、`JWWatch` 门面与公开类型 | 已建表并随实现更新 |
+| **T4.1 真机连接与包闭环** | [IKSKR2](https://e.gitee.com/priodigit/dashboard?issue=IKSKR2) | `jw_watch_sdk` 组合 T1–T3；扫描/连接/身份/ready | **已交付**；经公共 BLE + frame channel |
+| **T4.2 设置与设备配置** | [IKSKR4](https://e.gitee.com/priodigit/dashboard?issue=IKSKR4) | 设置 codec、通讯录等主要配置项 | **主体已交付**；缺口按覆盖表/issue 补 |
+| **T4.3 JW 模型与数据库** | [IKSKR5](https://e.gitee.com/priodigit/dashboard?issue=IKSKR5) | `jw_watch.db` + 类型化历史表 | **已交付**；与 WS 库隔离 |
+| **T4.4 历史同步闭环** | [IKSKR7](https://e.gitee.com/priodigit/dashboard?issue=IKSKR7) | 同步→写库→确认→查询；异步写队列 | **已交付**；Demo 数据首页与同步 UX 见 §20 |
+| **T4.5 测量、控制与通知** | [IKSKR9](https://e.gitee.com/priodigit/dashboard?issue=IKSKR9) | 点测/自动控制/控制实验室等 | **主体已交付**；心率 auto measure **透明缓存**先落地 |
 
-依赖为 T4.0→T4.1→T4.2/T4.3→T4.4/T4.5→T4.6→T4.7。薄验收页从 T4.1 开始逐步加入，不等最后才接 UI；设置和数据库可在接口稳定后独立推进。T4.6 是演示与接入收口，不是第一次连接真机。
+**已取消（码云删除）**：**T4.6** 独立 example 收口、**T4.7** 全量宿主切换——改为 **`jw_watch_demo` 在 HoneyBox 内迭代 + 多轮真机联调**；宿主 `lib/services/jw/` 仍可能并存作过渡，**不以单独里程碑阻塞 JW SDK 收尾**。
+
+依赖：**T4.0→T4.1→T4.2/T4.3→T4.4/T4.5**。Demo UI 从 T4.1 起随阶段叠加，最终集中在 `jw_watch_demo`，而非最后再建 T4.6 工程。
+
+### 12.1.1 与初稿设计的主要差异
+
+| 主题 | 初稿/旧迁移叙述 | 当前约定 |
+| --- | --- | --- |
+| Demo 收口 | T4.6 独立 `watch_debug_demo` + T4.7 宿主切换 | **`jw_watch_demo` 即主 Demo**；调试 smoke 保留在 BLE `example` / 集成测试 |
+| Measure 读配置 | 部分叙述隐含「每次 read 都打设备」或可 `forceRefresh` | **§8.0 透明缓存**：会话内 merge 主动上报；不完整才 pull；**无** `forceRefresh`；重连清空 |
+| 数据首页 | 步数目标环或同步坞长说明 | **v0.4**：标题下说明+条数+进度；KPI 仅单位；同步无「等计划」单独 UI |
+| T4 完成定义 | T4.7 才宣布切换 | **T4.5 后主路径可用**；剩余为覆盖表缺口与 bugfix，见总任务 [IKKGIB](https://e.gitee.com/priodigit/dashboard?issue=IKKGIB) |
 
 ### 12.2 范围与数据库决定
 
@@ -354,7 +366,7 @@ BLE profile 通过配置明确服务 UUID、收/发特征、属性与写入模�
 | [IKSKRD](https://e.gitee.com/priodigit/dashboard?issue=IKSKRD) 多设备 BLE 原始数据采集 | 多设备原始录制、Polar、重连续录、后台保活、文件导出及独立工具 UI | 依赖公共 transport/资源协调或 SDK 观测；不依赖健康数据库，不能另抢 SDK 已有连接 |
 | [IKSKRG](https://e.gitee.com/priodigit/dashboard?issue=IKSKRG) 七牛云配置与采集文件上传 | 凭据配置、云端文件管理、压缩上传、取消与分享 | 云/文件工作流可独立；上传采集记录时依赖稳定的记录文件接口，不依赖 JW/WS 协议 |
 
-三条工作流按实际需求独立安排，不能因顺序表编号而被迫等到 JW 完成，也不能成为宣布 JW SDK 完成的阻塞项。统一 `watch_debug_demo` 可以先承载 JW 真机页面；OTA/采集/七牛以后按模块接入，不要求同时搬完。
+三条工作流按实际需求独立安排，不能成为宣布 JW SDK **第一阶段可用**的阻塞项。JW 真机页面由 **`jw_watch_demo`** 承载；`watch_debug_demo` 仍为可选后续统一调试壳，**非 T4 关单前置**。
 
 ## 13. 数据、文件与兼容策略
 
@@ -390,11 +402,11 @@ BLE profile 通过配置明确服务 UUID、收/发特征、属性与写入模�
 2. 每次切换记录旧路径、新路径、最后同步 commit、受影响入口、测试及待实机项；迁完的模块只在 package 修改，旧宿主实现删除或变为薄 adapter。
 3. T1 回退只替换 WS transport 装配；T2 按整个连接入口回退 BLE backend；T3 按整个连接栈回退，不能两套帧通道同时监听/ACK 同一连接。回退前结束当前连接与待执行任务。
 4. 旧实现仅在有明确回退需要的过渡批次保留；不无限期维护双实现。不将旧目录的新改动凭手工记忆同步，切换前核对源 commit 到当前的增量。
-5. 迁移不包含 push、发布 SDK 或清理用户历史数据；各批代码与文档可本地 review，发布方式另行确定。当前 T1 两个基础包和 T2 BLE 包已实现并接入 WS，其余新包仍为计划。JW T4 为后续主线，独立工具工作流自行安排，不把 WS M7 当成进入 T4 的前置条件。
+5. 迁移不包含对外发布 SDK 或清理用户历史数据。T1–T3 与 **`jw_watch_sdk` / `jw_watch_demo` 已存在**；JW T4 **进入收尾与 bugfix**，独立工具工作流自行安排；WS M7 仍不阻塞 JW 收尾。
 
 ## 16. 首次实施任务清单
 
-T1 已按以下清单完成，T2 本轮已实施，后续进入 T3，随后以 T4 JW 真机为主线；无需等待新 WS 固件。T1 仅提取现有模拟能力及基础契约所需测试，不把新增模拟器功能当作进入真机开发的前置：
+T1–T3 与 T4 主体已按下列及 §20 推进；无需等待 WS 固件。T1 清单（已完成）：
 
 - [x] 建立 `watch_transport` 的连接、目标、状态、写入限制与错误契约。
 - [x] 建立 `watch_transport_simulation`，提取双向内存通道、现有 WS 设备工厂/注册及必要确定性故障钩子；不新增 JW 模拟设备。
@@ -545,7 +557,62 @@ JW provider 的重复点击测试增加一次异步调度等待，等待初始�
 ### 19.4 后续
 
 T3 不迁移健康模型、数据库或 OTA/采集/七牛，不新增 JW 模拟设备；这些边界未变。
-下一主线为 T4.0，再按专项计划逐步形成完整 `jw_watch_sdk` 和真实设备业务闭环。
-WS 固件和 Windows 环境验证仍单独跟踪，不把共享帧测试通过视为它们已经验收。
 
-**调试 UI 纠偏（§6.1）**：T4 启动后优先规划 `watch_debug_demo`（或等价 export）承接 T2/T3 的 BLE/帧诊断页与 smoke 入口，HoneyBox 挂载同一组件；避免 JW T4.6 再写第二套真机 Demo。Android **2616_GHDBSC** 集成脚本验收见 §19.3 更新记录。
+**后续（2026-11）**：T4 见 **§20**；BLE/帧 smoke 仍可走 `watch_transport_ble/example` 与集成测试，业务 Demo 走 **`jw_watch_demo`**（§6.1 已更新，不再等待 T4.6 统一壳）。
+
+---
+
+## 20. T4 与 JW Demo 实施记录（2026-11）
+
+### 20.1 已落地包与入口
+
+- **`jw_watch_sdk`**：连接与会话、`JWSettings`、`JWHistorySync` + `jw_watch.db`、今日活动 `0x0B`、控制/测量门面、`JWMeasure`（含配置 ingest）。
+- **`jw_watch_demo`**：HoneyBox JW 入口；连接向导、设置（含健康与监测）、数据首页（类型卡片 + App 风格图表）、控制实验室、点测等。
+- **分支**：`feat/ws-watch-sdk-skeleton`（与 GitHub `realmcu/HoneyBox` 同步策略以仓库为准）。
+
+### 20.2 子阶段与真机范围（摘要）
+
+| 子阶段 | 典型真机/工程证据 |
+| --- | --- |
+| T4.1–T4.2 | FF 服务连接、绑定/初始化、主要设置读写、通讯录等 |
+| T4.3–T4.4 | 历史同步写库、异步队列、数据首页同步进度、各类型详情页图表 |
+| T4.5 | 点测与自动监测（心率透明缓存 + 间隔选项）、控制项联调 |
+
+覆盖表未清零项、特定型号能力缺口 **不阻塞** 宣布「JW SDK 第一阶段可用」；以 issue / 覆盖表跟踪。
+
+### 20.3 流程与 UX 变更（相对本文初稿）
+
+1. **同步 UI**：数据顶区 v0.4——「今日活动」下说明文案 + `received/total` + 进度条；点同步后 loading，**不单独展示等设备同步计划**；详见 `docs/jw-data-home-header-prototype.html`。
+2. **健康与监测**：Demo 心率间隔列表走 `readHeartRateIntervalOptions()`；SDK 侧见实施计划 **§8.0**（`JWMeasureConfigCache` / `JWMeasureConfigIngest`，重连清空）。
+3. **里程碑裁剪**：删除 T4.6/T4.7；不再等待「独立 example 收口」或「全量切换」才使用新 SDK——**当前 HoneyBox + `jw_watch_demo` 即验收面**。
+4. **收尾模式**：多轮真机已在迭代中完成；后续 **观察使用 + bugfix**，总任务 [IKKGIB](https://e.gitee.com/priodigit/dashboard?issue=IKKGIB) 已同步表述。
+
+### 20.4 仍开放 / 非 JW SDK 主线
+
+- 宿主 `lib/services/jw/` 与 package SDK **可能并存**；完全删除旧链路由业务切换节奏决定，**非当前关单条件**。
+- `watch_debug_demo`、宿主全面移除旧 JW UI：可选工程，不列入 T4 必须项。
+- WS M7、Windows BLE 全平台声明、OTA/采集/七牛：仍按并列 issue 跟踪。
+
+### 20.5 建议回归（维护期）
+
+1. HoneyBox → JW Watch：连接 → 设置（含健康与监测心率读写）→ 数据首页同步与顶区进度 → 任选类型详情。
+2. 断连重连后 `readHeartRateAutoMeasure` 应触发 pull（缓存已清空）。
+3. `flutter test`：`jw_watch_sdk`、`jw_watch_demo` 包内与 workspace 相关用例。
+
+---
+
+## 21. WS 第二阶段（W5，2026-11 起）
+
+与 JW T4 **并行**：JW 收尾/bugfix；WS 按 **[ws-watch-implementation-plan.md](ws-watch-implementation-plan.md)** 推进。
+
+| 要点 | 说明 |
+| --- | --- |
+| 门面 | **`WSWatch` + `WSWatchSession`**，对齐 `JWWatch` + `JWWatchSession` |
+| L2 | HoneyProtocol；**全量 `0x05` 历史类型** |
+| 无真机 | Sim 为主验收，至 **W5.5** |
+| 数据 | **W5.3**：0x01–0x1F 一次 codec+表+同步 |
+| 业务 | **W5.4**：设置+测量+控制+通知 |
+| Demo | **W5.5** · `ws_watch_demo` |
+| 真机 | **W5.6** · IKSABE，不阻塞 W5.0–5.5 |
+
+码云总任务：[IKUCE2](https://e.gitee.com/priodigit/dashboard?issue=IKUCE2)（【HoneyBox】【WS Watch SDK】W5 完整实现与模拟器验收）；子任务索引见 [实施计划 §9](ws-watch-implementation-plan.md#9-码云范围)。

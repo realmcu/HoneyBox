@@ -1,13 +1,11 @@
 # WS Watch SDK 与 Demo 设计文档
 
-> 状态：以 HoneyProtocol 为准，本文描述 SDK/Demo 工程与实现约定；2026-11-02 架构评审修订，M3–M6 已实现：连接、设置、历史持久化与 Demo 联调工具；真实 BLE UART 连接在 M7 验收
-> 范围：WS 手表 BLE SDK 的 Flutter 实现（`ws_watch_sdk`）及其 Demo（`ws_watch_demo`），在 HoneyBox 的 `packages/` 内开发；包边界清晰，将来可整体迁出
-> 协议依据：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/)（仓库 `realmcu/HoneyProtocol`，下文简称**协议规范**）。条目引用格式：`0xNN` Command + Key（设置类另含**操作码**，见 `0x02-settings.rst`）
-> 参考实现：Java SDK v2、HoneyBox JW 模块（`lib/services/jw/`）**仅作对照**，WS SDK 不依赖 JW 代码；JW 仍走 Realtek FF 服务，WS SDK 走协议规范的 **BLE UART Profile**（固件切换前用内置模拟设备联调）
-> 联调顺序：先在**虚拟设备**上跑通连接与协议，固件就绪后同一套 SDK 连真机，仅底层传输分支不同
-> 共用能力：2026-11-03 确认 JW 与 WS 分别交付独立 SDK，模型和数据库各自维护；连接接口、BLE/simulation 实现与当前 L0/L1 帧通信分别提取，OTA 独立组合。不建立聚合 `watch_core`。包边界与 T1–T4 顺序见[迁移计划](ws-watch-migration-plan.md)，本文现有目录表示迁移前实现，不据此将 JW/采集/七牛纳入 WS SDK。
-> 当前优先级：T1–T3 完成后，以[完整 JW SDK 与真机闭环](jw-watch-sdk-implementation-plan.md)为主线，验证公共通信基础和 JW 独立数据库。WS 保持 M2–M6 回归，M7 等待固件；OTA、采集、七牛按独立模块安排，不作为 JW 主线的串行前置。
-> T2 进展：公共 BLE scanner/UART transport 已装配，原有模拟连接保留。公共 BLE 底层已由 GHW-01D 在 macOS 验证真实字节收发/重连；WS 固件业务和 Windows 平台仍需分别验收，详见迁移计划第 18 节。
+> 状态：以 HoneyProtocol 为准；**M1–M6 已完成**（连接、设置、步数/心率同步、M6 联调）。**W5** 见[完整 WS SDK 实施计划](ws-watch-implementation-plan.md)：门面 **Watch + Session（对齐 JW）**、**0x05 全量历史**、模拟器主力验收；真机 **M7** 不阻塞 W5 模拟器关单。
+> 范围：`ws_watch_sdk` 与 **`ws_watch_demo` 独立分包**；HoneyBox 仅挂载入口。
+> 协议依据：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/)（**协议规范**）。L2 与 JW 不同；规范由 JW 精简，**对外 API 语义与 `jw_watch_sdk` 同构**（`WS*` 类型）。
+> 传输：L0/L1 共用 **`watch_frame_channel`** + BLE/simulation（[迁移计划](ws-watch-migration-plan.md)）。WS 走 **UART Profile**；无固件用 **SimWatchDevice**。
+> 参考：Java v2、`jw_watch_sdk` **仅门面/行为对照**，禁止 package 依赖。
+> **并行主线（2026-11）**：JW T4 收尾；**WS W5 为新投入**。OTA、采集、七牛仍为独立模块。
 
 ---
 
@@ -677,6 +675,8 @@ class WSCapabilities {
 
 ## 9. 对外接口
 
+> **W5.0（2026-11）**：下文仍为 **M3–M6 单 `WSWatch` 实现说明**。**目标契约**见 [ws-watch-public-api-freeze.md](ws-watch-public-api-freeze.md)；逐项能力见 [ws-watch-api-coverage.md](ws-watch-api-coverage.md)。**W5.1** 按冻结文改本节与 `lib/ws_watch_sdk.dart`。
+
 ### 9.1 入口
 
 `WSConfig` 包含 `link`（ACK/重传/组包）、`session`（请求队列/回应超时）、`sync`（同步空闲超时/待写缓冲）、`connectTimeouts`、`autoReconnect`、`databasePath`、`logger/logLevel` 与 `simulationEnabled`（默认 false）。各参数在所属模块消费；M1 中原先放在 link 的 replyTimeout、queueCapacity 已随 M2 Session 实现迁移。
@@ -1152,7 +1152,7 @@ dependencies:
 | M6 Demo 联调工具 | 帧日志、Raw、协议表、设备上报、独立 example | 已实现；各页面浮动入口、过滤/暂停/清空/导出、trace 结果卡片；Android/macOS 独立运行，Simulator 完整操作脚本与文件导出测试覆盖；Demo 仅使用 SDK 公开 API |
 | M7 真机与发布准备（等待 WS 固件） | 复用公共 transport/frame channel，验收固件 UART、L2/业务与平台差异 | 固件到位后相同业务用例真机通过；验证固件重传去重/断链清理和实际 Payload 上限。不是 JW T4 的前置条件 |
 
-M1–M6 按“模拟连接 → 登录 → 设置读写 → 历史入库”贯通。当前不再以扩大模拟器或等待 WS M7 为主线，后续按迁移计划先完成公共通信基础，再实现完整 JW SDK，以现有真机验证连接、业务与独立数据库。WS M7 完成前不承诺 WS 真机和平台兼容性已验证；JW 真机结果不替代 WS 固件验收。
+M1–M6 按“模拟连接 → 登录 → 设置读写 → 历史入库（步数/心率）”贯通。**下一阶段 W5**：门面迁 **Watch + Session**、模拟器扩全类型、**0x05 全量历史**与 `ws_watch_demo` 产品化，见 [ws-watch-implementation-plan.md](ws-watch-implementation-plan.md)。M7 固件到位后补真机差异，不阻塞 W5 模拟器关单。
 
 ---
 
