@@ -6,7 +6,7 @@ import '../dashboard/dashboard_app_root.dart';
 import '../ebadge/ebadge_app_root.dart';
 import '../shared/update_flow.dart';
 import '../watch/watch_app_root.dart';
-import '../ws_watch/ws_watch_app_root.dart';
+import '../watch_lab/watch_lab_app_root.dart';
 import '../capture/capture_page.dart';
 import '../ota/ota_chip_page.dart';
 import 'app_catalog.dart';
@@ -106,8 +106,8 @@ class AppLauncherPage extends ConsumerWidget {
         return const WatchAppRoot();
       case AppId.dashboard:
         return const DashboardAppRoot();
-      case AppId.wsWatch:
-        return const WSWatchAppRoot();
+      case AppId.watchLab:
+        return const WatchLabAppRoot();
       case AppId.capture:
         return const CapturePage();
       case AppId.ota:

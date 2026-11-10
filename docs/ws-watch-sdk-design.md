@@ -1,7 +1,7 @@
 # WS Watch SDK 与 Demo 设计文档
 
 > 状态：以 HoneyProtocol 为准；**M1–M6 已完成**（连接、设置、步数/心率同步、M6 联调）。**W5** 见[完整 WS SDK 实施计划](ws-watch-implementation-plan.md)：门面 **Watch + Session（对齐 JW）**、**0x05 全量历史**、模拟器主力验收；真机 **M7** 不阻塞 W5 模拟器关单。
-> 范围：`ws_watch_sdk` 与 **`ws_watch_demo` 独立分包**；HoneyBox 仅挂载入口。
+> 范围：`ws_watch_sdk` 与 **`ws_watch_demo` 独立分包**（Greenfield 重建中）；**HoneyBox 在 W5.5 前不挂载 WS Demo**，Watch Lab 仅 JW。
 > 协议依据：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/)（**协议规范**）。L2 与 JW 不同；规范由 JW 精简，**对外 API 语义与 `jw_watch_sdk` 同构**（`WS*` 类型）。
 > 传输：L0/L1 共用 **`watch_frame_channel`** + BLE/simulation（[迁移计划](ws-watch-migration-plan.md)）。WS 走 **UART Profile**；无固件用 **SimWatchDevice**。
 > 参考：Java v2、`jw_watch_sdk` **仅门面/行为对照**，禁止 package 依赖。
@@ -675,7 +675,7 @@ class WSCapabilities {
 
 ## 9. 对外接口
 
-> **W5.0（2026-11）**：下文仍为 **M3–M6 单 `WSWatch` 实现说明**。**目标契约**见 [ws-watch-public-api-freeze.md](ws-watch-public-api-freeze.md)；逐项能力见 [ws-watch-api-coverage.md](ws-watch-api-coverage.md)。**W5.1** 按冻结文改本节与 `lib/ws_watch_sdk.dart`。
+> **Historical（M3–M6，已废止 2026-11）**：下文为 **已删除仓库** 时期的单 `WSWatch` 设计说明，**仅供协议/字段考古**。**现行契约**见 [ws-watch-public-api-freeze.md](ws-watch-public-api-freeze.md)；排期见 [ws-watch-implementation-plan.md §0](ws-watch-implementation-plan.md)。**W5.1** 从 `jw_watch_sdk` 复制骨架后重写门面章节，**不**沿用下文 API 列表。
 
 ### 9.1 入口
 

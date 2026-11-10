@@ -1,9 +1,10 @@
 # WS Watch SDK 能力覆盖表（W5.0）
 
-> **状态**：W5.0 基线（2026-11）。与 [jw-watch-sdk-implementation-plan.md](jw-watch-sdk-implementation-plan.md) §2.2 **三态分离** 同构。  
+> **状态**：W5.0 基线（2026-11）；**Greenfield 后无 SDK 源码**，表中既有 **impl/device/evidence** 仅作排期与协议对照，**不表示仓库内仍有实现**（待 W5.1 复制 JW 骨架后重填）。  
+> 与 [jw-watch-sdk-implementation-plan.md](jw-watch-sdk-implementation-plan.md) §2.2 **三态分离** 同构。  
 > **规范真源**：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/)（仓库 `HoneyProtocol/docs/protocol/*.rst`）。  
-> **机器可读清单**：`packages/ws_watch_sdk/lib/src/protocol/catalog.dart`（`tool/generate_protocol_catalog.py` 生成元数据）。  
-> **门面冻结**：[ws-watch-public-api-freeze.md](ws-watch-public-api-freeze.md)（W5.1 实施对照）。  
+> **机器可读清单**：W5.1 起在 `packages/ws_watch_sdk` 重建 `tool/generate_protocol_catalog.py` + `catalog.dart`。  
+> **门面冻结**：[ws-watch-public-api-freeze.md](ws-watch-public-api-freeze.md)。  
 > **码云**：[IKUCE5](https://e.gitee.com/priodigit/dashboard?issue=IKUCE5)
 
 ---

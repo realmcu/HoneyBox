@@ -15,9 +15,6 @@ workspace:
   - packages/watch_transport_ble
   - packages/watch_transport_ble/example
   - packages/watch_transport_simulation
-  - packages/ws_watch_sdk
-  - packages/ws_watch_demo
-  - packages/ws_watch_demo/example
 
 dependencies:
   watch_frame_channel:
@@ -45,8 +42,6 @@ dependencies:
     path: packages/watch_transport_ble
   jw_watch_demo:
     path: packages/jw_watch_demo
-  ws_watch_demo:
-    path: packages/ws_watch_demo
   archive: ^4.5.2
   share_plus: ^12.0.2
 

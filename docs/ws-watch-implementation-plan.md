@@ -1,9 +1,25 @@
 # W5：完整 WS Flutter SDK 实施计划
 
-> 状态：**W5.0 基线已落档**（[覆盖表](ws-watch-api-coverage.md)、[API 冻结](ws-watch-public-api-freeze.md)）；码云 Epic **[IKUCE2](https://e.gitee.com/priodigit/dashboard?issue=IKUCE2)**，子任务 §9。前置 **T1–T3 已完成**；JW **T4.0–T4.5 已闭环**（见 [jw-watch-sdk-implementation-plan.md](jw-watch-sdk-implementation-plan.md)、[迁移计划 §20](ws-watch-migration-plan.md)）。  
-> 工程约定：**门面与生命周期对齐 JW**（`Watch` + `Session`）；**L2 与公开类型独立**（`WS*`）；**L0/L1 共用** `watch_frame_channel` + transport；**SDK 与 Demo 分包**，逻辑不写在 HoneyBox 里。  
-> 协议：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/) `0x05-data` 等；设计细节见 [ws-watch-sdk-design.md](ws-watch-sdk-design.md)。  
-> **当前无 WS 真机**：**W5.0–W5.5** 以模拟器 + 单测/集成测为验收面；**W5.6** 对应 M7 真机 UART（[IKSABE](https://e.gitee.com/priodigit/dashboard?issue=IKSABE)），不阻塞 W5.0–5.5 关单。
+> 状态：**W5.0 基线已落档**（[覆盖表](ws-watch-api-coverage.md)、[API 冻结](ws-watch-public-api-freeze.md)）；**Greenfield 重置已执行**（见 §0）。码云 Epic **[IKUCE2](https://e.gitee.com/priodigit/dashboard?issue=IKUCE2)**，子任务 §9。前置 **T1–T3 已完成**；JW **T4.0–T4.5 已闭环**（见 [jw-watch-sdk-implementation-plan.md](jw-watch-sdk-implementation-plan.md)、[迁移计划 §20](ws-watch-migration-plan.md)）。  
+> 工程约定：**公开 API / Session 形态 / Demo 信息架构完全对齐 `jw_watch_sdk` + `jw_watch_demo`**（仅 `JW*` → `WS*`、L2 为 HoneyProtocol）；**不从旧 M1–M6 代码 port**；**L0/L1 共用** `watch_frame_channel` + transport trio；**SDK 与 Demo 分包**，业务不进 HoneyBox。  
+> 协议：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/) `0x05-data` 等；设计细节见 [ws-watch-sdk-design.md](ws-watch-sdk-design.md)（M 系实现章节为 **historical**）。  
+> **当前无 WS 真机**：**W5.1–W5.5** 以模拟器 + 单测/集成测为验收面；**W5.6** 对应 M7 真机 UART（[IKSABE](https://e.gitee.com/priodigit/dashboard?issue=IKSABE)），不阻塞 W5.1–5.5 关单。
+
+---
+
+## 0. Greenfield 重置（2026-11，W5.1 前置）
+
+| 步骤 | 状态 | 说明 |
+| --- | --- | --- |
+| 0.1 文档 | ✅ | 本文 §0、API 冻结文、覆盖表顶注；`ws-watch-sdk-design` M3–M6 标 historical |
+| 0.2 删包 | ✅ | 移除 `packages/ws_watch_sdk`、`packages/ws_watch_demo` **整目录**（含 example/integration_test） |
+| 0.3 HoneyBox | ✅ | `pubspec` / CI 去 WS workspace 与依赖；**不**挂载 `ws_watch_demo`；Watch Lab 仅 JW |
+| 0.4 宿主编译 | ⏳ | **由你本地 `flutter pub get` + 构建验证** |
+| 0.5 骨架复制 | ⏸️ | **0.4 通过后**：从 `jw_watch_sdk` / `jw_watch_demo` **复制目录骨架** → 改包名与 Honey L2；**零兼容**旧 `ws_watch.db` M 表 |
+
+**废止：** 码云 **M1–M6** 在 WS 侧视为 **superseded**（JW 线 T4 仍有效）；W5.1 验收项改为「JW 镜像骨架 + Honey 协议接线」，**不再**要求「M3–M5 测试迁移通过」。
+
+**数据库：** 仍用文件名 `ws_watch.db`，schema 按 [jw-watch-database-design.md](jw-watch-database-design.md) **WS 化重写**，与旧 M5 drift **不迁移**。
 
 ---
 
@@ -177,11 +193,11 @@ SimWatchDevice（设备端 HoneyProtocol 行为，W5.2 扩全）
 | 阶段 | 名称 | 交付摘要 | 验收（默认 Sim） |
 | --- | --- | --- | --- |
 | **W5.0** | 覆盖表 + API 冻结 | HoneyProtocol 全表；JW↔WS 门面对照 | 文档 + 评审 |
-| **W5.1** | Watch + Session 门面 | `WSWatch`/`WSWatchSession`；去掉 Lab/connect 互斥 | M3–M5 测试迁移通过 |
+| **W5.1** | Greenfield 骨架 | 从 JW 复制包结构；`WS*` 公开 API 与 JW 同构；Honey L2 占位 + Sim 连通 | `flutter analyze` + 最小连接单测 |
 | **W5.2** | 模拟器 v2 | 设备态、异常路径；为 W5.3 历史打底 | integration_test 基础链路 |
 | **W5.3** | 数据：存储与全量历史同步 | **0x01–0x1F codec+表** + `WSHistoryStore` + `syncHealthData` | 全量同步 2 轮去重 |
 | **W5.4** | 业务能力 | 设置 + 点测/监测 + 控制/通知 | Sim 读写 + 点测/上报 |
-| **W5.5** | 产品 Demo | `ws_watch_demo` 对齐 JW 主路径 | HoneyBox WS 入口 |
+| **W5.5** | 产品 Demo | `ws_watch_demo` 对齐 JW 主路径 | 独立 example + integration_test（**暂不**要求 HoneyBox 卡片） |
 | **W5.6** | M7 真机 | UART；跟踪 [IKSABE](https://e.gitee.com/priodigit/dashboard?issue=IKSABE) | 固件记录 |
 
 **依赖：** `W5.0 → W5.1 → W5.2 → W5.3 → W5.4 → W5.5 → W5.6`（W5.2 与 W5.3 开发期可并行，**W5.3 关单须 Sim 历史齐**）。

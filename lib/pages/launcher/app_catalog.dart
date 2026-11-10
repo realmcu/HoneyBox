@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 /// 应用启动器内可选的应用标识。新增应用时：先扩展本枚举，然后在
 /// [kAppCatalog] 追加一条对应记录，最后在 lib/app.dart 的路由分发里
 /// 增加对应 <App>AppRoot 的构造。
-enum AppId { ebadge, watch, dashboard, wsWatch, capture, ota }
+enum AppId { ebadge, watch, dashboard, watchLab, capture, ota }
 
 @immutable
 class AppEntry {
@@ -55,9 +55,9 @@ const List<AppEntry> kAppCatalog = <AppEntry>[
     implemented: true,
   ),
   AppEntry(
-    id: AppId.wsWatch,
+    id: AppId.watchLab,
     title: 'Watch Lab',
-    subtitle: 'JW / WS 独立实验室入口',
+    subtitle: 'JW 协议实验室（独立全屏 Demo）',
     icon: Icons.watch_later_outlined,
     accent: Color(0xFF5B4B9A),
     deviceFilter: 'Watch Lab',
@@ -91,8 +91,8 @@ String routeNameFor(AppId id) {
       return '/watch-root';
     case AppId.dashboard:
       return '/dashboard-root';
-    case AppId.wsWatch:
-      return '/ws-watch-root';
+    case AppId.watchLab:
+      return '/watch-lab-root';
     case AppId.capture:
       return '/capture-root';
     case AppId.ota:

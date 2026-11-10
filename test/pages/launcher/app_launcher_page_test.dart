@@ -5,7 +5,7 @@ import 'package:honeybox/pages/launcher/app_launcher_page.dart';
 import 'package:honeybox/pages/launcher/app_catalog.dart';
 import 'package:honeybox/pages/launcher/widgets/app_card.dart';
 import 'package:honeybox/providers/current_app_provider.dart';
-import 'package:ws_watch_demo/ws_watch_demo.dart';
+import 'package:jw_watch_demo/jw_watch_demo.dart';
 
 void main() {
   Widget wrap(Widget child) => ProviderScope(
@@ -47,7 +47,7 @@ void main() {
     expect(find.text('缓存管理'), findsNothing);
   });
 
-  testWidgets('WS Watch 入口打开 Demo 首页，返回后清空当前应用', (tester) async {
+  testWidgets('Watch Lab 入口打开 JW Demo 根，返回后清空当前应用', (tester) async {
     final container = ProviderContainer();
     addTearDown(container.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
@@ -55,17 +55,17 @@ void main() {
       child: const MaterialApp(home: AppLauncherPage()),
     ));
 
-    await tester.ensureVisible(find.text('WS Watch'));
-    await tester.tap(find.text('WS Watch'));
+    await tester.ensureVisible(find.text('Watch Lab'));
+    await tester.tap(find.text('Watch Lab'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(WSWatchDemoHome), findsOneWidget);
-    expect(container.read(currentAppProvider), AppId.wsWatch);
+    expect(find.byType(JWWatchLabAppRoot), findsOneWidget);
+    expect(container.read(currentAppProvider), AppId.watchLab);
 
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    expect(find.byType(WSWatchDemoHome), findsNothing);
+    expect(find.byType(JWWatchLabAppRoot), findsNothing);
     expect(container.read(currentAppProvider), isNull);
   });
 }

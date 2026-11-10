@@ -4,7 +4,7 @@
 
 阅读顺序：第 1–6 节确定整体边界；第 7–12 节说明接口与各批迁移；第 13–16 节说明兼容、验收、回退和清单；§17–§19 为 T1–T3 实施记录；**§20 为 T4 与 Demo 当前态**。源码路径默认相对 HoneyBox 根目录。
 
-**当前进度（2026-11）**：T1–T3 **已完成**（见 §17–§19）。**T4.0–T4.5 已在分支 `feat/ws-watch-sdk-skeleton` 交付主体能力**（`jw_watch_sdk` + `jw_watch_demo`，HoneyBox 已挂载 JW 入口）；JW SDK **接近完成**，后续以**真机观察与按需 bugfix** 为主。原码云 **T4.6 / T4.7 子任务已删除**（独立 example、全量切换不再单列里程碑，能力并入当前 Demo 与迭代验证）。WS M7 仍等固件；OTA/采集/七牛为并列工作流。Windows 等平台项按环境补验。
+**当前进度（2026-11）**：T1–T3 **已完成**（见 §17–§19）。**T4.0–T4.5 已在分支 `feat/ws-watch-sdk-skeleton` 交付主体能力**（`jw_watch_sdk` + `jw_watch_demo`，HoneyBox 已挂载 JW 入口）；JW SDK **接近完成**，后续以**真机观察与按需 bugfix** 为主。原码云 **T4.6 / T4.7 子任务已删除**（独立 example、全量切换不再单列里程碑，能力并入当前 Demo 与迭代验证）。**WS 侧 M1–M6 已废止**：`ws_watch_sdk` / `ws_watch_demo` 整包删除，**W5.1 Greenfield 自 JW 复制**（见 [ws-watch-implementation-plan.md §0](ws-watch-implementation-plan.md)）。WS M7 仍等固件；OTA/采集/七牛为并列工作流。Windows 等平台项按环境补验。
 
 **码云总任务**：[【HoneyBox】【WS Watch SDK】基于 HoneyBox 搭建 Flutter SDK 与 Demo 工程（第一阶段）](https://e.gitee.com/priodigit/dashboard?issue=IKKGIB)（正文含 WS M1–M6 与下方主线/并列任务索引）。各批次对应 issue 见 §5、§12.1、§12.3。
 

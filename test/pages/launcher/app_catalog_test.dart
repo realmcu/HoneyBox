@@ -9,7 +9,7 @@ void main() {
         AppId.ebadge,
         AppId.watch,
         AppId.dashboard,
-        AppId.wsWatch,
+        AppId.watchLab,
         AppId.capture,
         AppId.ota,
       ]);
@@ -27,7 +27,7 @@ void main() {
     test('uses the product names from both branches', () {
       expect(
         kAppCatalog.map((e) => e.title).toList(),
-        ['eBadge', 'Watch', 'Dashboard', 'WS Watch', '数据采集', 'OTA'],
+        ['eBadge', 'Watch', 'Dashboard', 'Watch Lab', '数据采集', 'OTA'],
       );
     });
 
@@ -40,7 +40,7 @@ void main() {
       expect(byId[AppId.ebadge], 'eBadge');
       expect(byId[AppId.watch], 'Watch');
       expect(byId[AppId.dashboard], 'Dashboard');
-      expect(byId[AppId.wsWatch], 'WS Watch');
+      expect(byId[AppId.watchLab], 'Watch Lab');
       expect(byId[AppId.capture], '*');
       expect(byId[AppId.ota], '*');
     });
@@ -51,7 +51,7 @@ void main() {
       expect(routeNameFor(AppId.ebadge), '/ebadge-root');
       expect(routeNameFor(AppId.watch), '/watch-root');
       expect(routeNameFor(AppId.dashboard), '/dashboard-root');
-      expect(routeNameFor(AppId.wsWatch), '/ws-watch-root');
+      expect(routeNameFor(AppId.watchLab), '/watch-lab-root');
       expect(routeNameFor(AppId.capture), '/capture-root');
       expect(routeNameFor(AppId.ota), '/ota-root');
     });
