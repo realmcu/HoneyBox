@@ -105,7 +105,8 @@ class AppLauncherPage extends ConsumerWidget {
       case AppId.dashboard:
         // Dashboard is opened as a native Activity through the 'honeybox/map'
         // channel (see _launch), so this widget route is never taken.
-        throw StateError('dashboard is opened natively, not as a Flutter route');
+        throw StateError(
+            'dashboard is opened natively, not as a Flutter route');
       case AppId.capture:
         return const CapturePage();
       case AppId.ota:
