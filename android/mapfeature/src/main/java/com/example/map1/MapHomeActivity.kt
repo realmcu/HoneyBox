@@ -502,28 +502,37 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
 
     // 导航进行中：投屏 JPG 预览铺满整屏，隐藏其余控件，仅保留底部「结束虚拟屏导航」按钮。
     if (virtualNaviRunning || bleProjecting) {
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            NaviJpgPreviewWindow(
-                aspectRatio = run {
-                    val w = castWidth.toIntOrNull()?.takeIf { it > 0 } ?: 410
-                    val h = castHeight.toIntOrNull()?.takeIf { it > 0 } ?: 370
-                    w.toFloat() / h.toFloat()
-                },
+        // The projection screen returns before the main Scaffold, so it needs its
+        // own SnackbarHost -- otherwise showSnackbar() (e.g. "投屏异常…") has no
+        // host to render into and the message is silently dropped.
+        Scaffold(
+            modifier = modifier.fillMaxSize(),
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+        ) { contentPadding ->
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { stopVirtualNavi() },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (bleProjecting) "结束 BLE 投屏" else "结束虚拟屏导航")
+                    .fillMaxSize()
+                    .padding(contentPadding)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                NaviJpgPreviewWindow(
+                    aspectRatio = run {
+                        val w = castWidth.toIntOrNull()?.takeIf { it > 0 } ?: 410
+                        val h = castHeight.toIntOrNull()?.takeIf { it > 0 } ?: 370
+                        w.toFloat() / h.toFloat()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { stopVirtualNavi() },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (bleProjecting) "结束 BLE 投屏" else "结束虚拟屏导航")
+                    }
                 }
             }
         }

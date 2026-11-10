@@ -59,6 +59,8 @@ class NaviBleFrameSender(
         private const val CHUNK_REQUEST = 512
         /** Consecutive uncommitted frames before the failure becomes user-visible. */
         private const val FAIL_VISIBLE_AFTER = 3
+        /** No END_RSP within this window means the device is gone or wedged. */
+        private const val END_RSP_TIMEOUT_MS = 1500L
         private const val BEGIN_TIMEOUT_MS = 3000L
 
         /* Sliding window: keep up to WINDOW L1 frames unacknowledged and never
@@ -108,6 +110,10 @@ class NaviBleFrameSender(
     @Volatile private var retriedSeq = -1
     /** Frame to resend once before taking a newer one. */
     @Volatile private var retryJpeg: ByteArray? = null
+
+    /** Set when END_REQ goes out, cleared by any END_RSP; guards a dead device. */
+    @Volatile private var endPending = false
+    @Volatile private var endSentMs = 0L
 
     private var fps = 5
     private var width = 400
@@ -166,6 +172,26 @@ class NaviBleFrameSender(
         // transient outage can recover on its own instead of dying silently.
         while (running.get()) {
             val cycleStartMs = System.currentTimeMillis()
+
+            // Link gone: say so instead of spinning on write failures forever.
+            when (val link = VehicleBleManager.state.value) {
+                is VehicleBleManager.State.Disconnected, is VehicleBleManager.State.Error -> {
+                    onStatus("设备已断开，投屏中断")
+                    running.set(false)
+                    state = State.IDLE
+                    onState(state)
+                    return
+                }
+                else -> Unit
+            }
+
+            // END_REQ delivered but the device never answered: it either died or the
+            // notify was lost. Count it so the failure surfaces like any other.
+            if (endPending && System.currentTimeMillis() - endSentMs > END_RSP_TIMEOUT_MS) {
+                endPending = false
+                noteFailure("设备未回确认")
+            }
+
             val retry = retryJpeg
             if (retry != null) {
                 retryJpeg = null
@@ -198,6 +224,11 @@ class NaviBleFrameSender(
             val chunkMax = (attMax - DATA_OVERHEAD).coerceAtMost(2048)
             if (chunkMax <= 0) return@withLock false
 
+            // Record the frame up front so any failure path below (BEGIN/DATA/END
+            // write failures) can schedule a resend of *this* frame.
+            frameIdx = lastNaviSeq
+            frameJpeg = jpeg
+
             // ── BEGIN ──────────────────────────────────────────────────────
             clearRsp()
             val beginValue = ByteArray(8)
@@ -209,6 +240,7 @@ class NaviBleFrameSender(
             beginRejected = false
             if (!writeL1Data(buildL2(KEY_BEGIN_REQ, beginValue))) {
                 Log.w(TAG, "BEGIN write failed total=$total")
+                noteFailure("BEGIN 写入失败")
                 return@withLock false
             }
             // The chunk size only depends on the negotiated MTU, so it is learned
@@ -265,6 +297,7 @@ class NaviBleFrameSender(
                 val wantAck = (end == total)
                 if (!writeL1Data(buildDataFrame(seq, jpeg, off, end), requestAck = wantAck)) {
                     Log.w(TAG, "DATA write failed seq=$seq off=$off/$total")
+                    noteFailure("DATA 写入失败")
                     clearRsp()
                     sendAbort(0x01)
                     return@withLock false
@@ -283,12 +316,13 @@ class NaviBleFrameSender(
             // ── END + CRC32 ────────────────────────────────────────────────
             frameStartNs = sendStartNs
             frameBytes = total
-            frameIdx = lastNaviSeq
-            frameJpeg = jpeg
             val endValue = ByteArray(4)
             putU32(endValue, 0, crc)
+            endPending = true
+            endSentMs = System.currentTimeMillis()
             if (!writeL1Data(buildL2(KEY_END_REQ, endValue))) {
                 Log.w(TAG, "END write failed")
+                noteFailure("END 写入失败")
                 return@withLock false
             }
             // END_RSP is collected asynchronously (see parseL2): the next frame's
@@ -305,6 +339,7 @@ class NaviBleFrameSender(
      */
     private fun noteFailure(why: String) {
         failStreak++
+        Log.w(TAG, "frame not committed: $why (streak=$failStreak seq=$frameIdx)")
         val idx = frameIdx
         if (idx != retriedSeq && frameJpeg != null) {
             retriedSeq = idx
@@ -393,6 +428,7 @@ class NaviBleFrameSender(
             }
             KEY_END_RSP -> {
                 run {
+                    endPending = false
                     val status = if (v.isNotEmpty()) v[0].toInt() and 0xFF else 0xFF
                     if (status == 0) {
                         val ms = (System.nanoTime() - frameStartNs) / 1_000_000L
