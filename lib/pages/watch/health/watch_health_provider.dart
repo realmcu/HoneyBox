@@ -88,7 +88,7 @@ class WatchHealthNotifier extends StateNotifier<WatchHealthState> {
 
 final watchHealthRepositoryProvider = Provider<WatchHealthRepository>((ref) {
   final bleManager = ref.read(bleManagerProvider);
-  return WatchHealthModelRepository(
+  return WatchHealthBleRepository(
     commandAvailable: () => bleManager.commandAvailable,
     sendCommand: bleManager.sendCommand,
     notifications: bleManager.commandNotifications,

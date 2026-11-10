@@ -34,8 +34,10 @@ int _readU16(List<int> data, int offset) {
 /// L1 frame control byte values.
 class _Ctrl {
   static const int data = 0x00;
+  static const int ackRequest = 0x40;
   static const int ack = 0x10;
-  static const int error = 0x30;
+  static const int error = 0x20;
+  static const int flagMask = 0x70;
 }
 
 /// The L1 engine handles low-level BLE frame framing, CRC validation, ACK
@@ -221,16 +223,18 @@ class L1Engine {
       // 7. Parse header. Per PROTOCOL.md §6.1 the host does NOT validate the
       //    inbound L1 CRC16 — framing relies on the 0xAB sync byte + length
       //    field (only the device validates CRC strictly, on frames we send).
-      final ctrl = frameBytes[1];
+      // Byte 1 is a flag field in the current wire protocol. Older peers used
+      // it as a control byte, so 0x00 data and 0x30 ACK+error remain valid.
+      final flags = frameBytes[1] & _Ctrl.flagMask;
       final frameSeq = _readU16(frameBytes, 6);
 
-      // 8. Dispatch by control byte.
-      if (ctrl == _Ctrl.ack) {
-        onAck?.call(frameSeq, true);
-      } else if (ctrl == _Ctrl.error) {
+      // 8. Dispatch by flags.
+      if ((flags & _Ctrl.ack) != 0) {
+        onAck?.call(frameSeq, (flags & _Ctrl.error) == 0);
+      } else if ((flags & _Ctrl.error) != 0) {
         // The frame's seq field tells the sender which frame was NAK'd.
         onAck?.call(frameSeq, false);
-      } else if (ctrl == _Ctrl.data) {
+      } else if ((flags & _Ctrl.ackRequest) != 0 || flags == _Ctrl.data) {
         // Data frame → send back an ACK.
         _sendAck(frameSeq);
 

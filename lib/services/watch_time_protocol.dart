@@ -4,7 +4,8 @@ import 'ble_cmd_registry.dart';
 
 /// Watch time sync (CMD 0x02) frame builder.
 ///
-/// Value is 4 bytes big-endian wall clock seconds (1970 epoch).
+/// Value is opcode 0x00 followed by 4 bytes big-endian wall clock seconds
+/// (1970 epoch), as defined by HoneyProtocol CMD 0x02 key 0x01.
 /// The caller passes the user's local DateTime; this class folds it with
 /// UTC rules via DateTime.utc() — the strict inverse of gmtime_r on firmware.
 class WatchTimeProtocol {
@@ -51,7 +52,8 @@ class WatchTimeProtocol {
       0x00,
       BleCmdWatchTimeKey.setTime,
       0x00,
-      0x04,
+      0x05,
+      0x00,
       (seconds >> 24) & 0xFF,
       (seconds >> 16) & 0xFF,
       (seconds >> 8) & 0xFF,

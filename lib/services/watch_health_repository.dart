@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import '../pages/watch/health/watch_health_data.dart';
-import 'watch_model_protocol.dart';
+import 'watch_health_protocol.dart';
 
 typedef WatchHealthCommandAvailable = bool Function();
 typedef WatchHealthSendCommand = int? Function(Uint8List frame);
@@ -17,12 +17,13 @@ class WatchHealthSyncException implements Exception {
   String toString() => message;
 }
 
-class WatchHealthModelRepository implements WatchHealthRepository {
-  WatchHealthModelRepository({
+/// Executes the HoneyProtocol 0x05 history + today synchronization sequence.
+class WatchHealthBleRepository implements WatchHealthRepository {
+  WatchHealthBleRepository({
     required WatchHealthCommandAvailable commandAvailable,
     required WatchHealthSendCommand sendCommand,
     required Stream<Uint8List> notifications,
-    this.timeout = const Duration(seconds: 8),
+    this.timeout = const Duration(seconds: 10),
     WatchHealthClock clock = DateTime.now,
   })  : _commandAvailable = commandAvailable,
         _sendCommand = sendCommand,
@@ -48,8 +49,12 @@ class WatchHealthModelRepository implements WatchHealthRepository {
 
     _syncing = true;
     final completer = Completer<WatchHealthSnapshot>();
+    final sportItems = <WatchSportItem>[];
+    final sleepItems = <WatchSleepItem>[];
     StreamSubscription<Uint8List>? subscription;
     Timer? timer;
+    var awaitingToday = false;
+    var syncEnded = false;
 
     void finishError(Object error, [StackTrace? stackTrace]) {
       if (completer.isCompleted) return;
@@ -64,36 +69,85 @@ class WatchHealthModelRepository implements WatchHealthRepository {
     void resetTimeout() {
       timer?.cancel();
       timer = Timer(timeout, () {
-        finishError(TimeoutException('Watch health synchronization timed out'));
+        finishError(TimeoutException(
+          awaitingToday
+              ? 'Watch today-data response timed out'
+              : 'Watch health synchronization timed out',
+        ));
       });
+    }
+
+    int? send(Uint8List frame) {
+      try {
+        return _sendCommand(frame);
+      } catch (error) {
+        finishError(WatchHealthSyncException('Send failed: $error'));
+        return null;
+      }
     }
 
     subscription = _notifications.listen((frame) {
       if (completer.isCompleted) return;
       try {
-        final model = WatchModelProtocol.parseSnapshot(frame);
-        if (model == null) return;
+        final events = WatchHealthProtocol.parseFrame(frame);
+        if (events.isEmpty) return;
         timer?.cancel();
-        completer.complete(WatchHealthSnapshot.fromModel(
-          syncedAt: _clock(),
-          model: model,
-        ));
+
+        for (final event in events) {
+          if (event is WatchSportData) {
+            sportItems.addAll(event.items);
+          } else if (event is WatchSleepData) {
+            sleepItems.addAll(event.items);
+          } else if (event is WatchHealthSyncEnd) {
+            syncEnded = true;
+            if (!event.success) {
+              finishError(WatchHealthSyncException(
+                'Watch reported health sync error ${event.result}',
+              ));
+              return;
+            }
+            if (send(WatchHealthProtocol.buildSyncAck()) == null) return;
+            awaitingToday = true;
+            if (send(WatchHealthProtocol.buildTodayRequest()) == null) return;
+          } else if (event is WatchHealthTodayData && awaitingToday) {
+            completer.complete(WatchHealthSnapshot.fromRecords(
+              syncedAt: _clock(),
+              sportRecords: sportItems
+                  .map((item) => WatchSportRecord(
+                        timestamp: item.timestamp,
+                        mode: item.mode,
+                        steps: item.steps,
+                        caloriesDeciKcal: item.caloriesDeciKcal,
+                        distanceMeters: item.distanceMeters,
+                        heartRate: item.heartRate,
+                        hasHeartRate: item.hasHeartRate,
+                        partialBucket: item.partialBucket,
+                      ))
+                  .toList(growable: false),
+              sleepRecords: sleepItems
+                  .map((item) => WatchSleepRecord(
+                        timestamp: item.timestamp,
+                        state: item.state,
+                        backfilled: item.backfilled,
+                      ))
+                  .toList(growable: false),
+              todaySteps: event.steps,
+              todayDistanceMeters: event.distanceMeters,
+              todayCaloriesDeciKcal: event.caloriesDeciKcal,
+              latestTodayHeartRate: event.latestHeartRate,
+            ));
+            timer?.cancel();
+            return;
+          }
+        }
+
+        if (!syncEnded || awaitingToday) resetTimeout();
       } catch (error, stackTrace) {
         finishError(error, stackTrace);
       }
     }, onError: finishError);
 
-    int? sequence;
-    try {
-      sequence = _sendCommand(WatchModelProtocol.buildGetRequest());
-    } catch (_) {
-      sequence = null;
-    }
-    if (sequence == null) {
-      finishError(const WatchHealthSyncException(
-        'Failed to send the health data request',
-      ));
-    } else {
+    if (send(WatchHealthProtocol.buildRequestAll()) != null) {
       resetTimeout();
     }
 
