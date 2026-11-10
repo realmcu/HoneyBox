@@ -110,4 +110,44 @@ void main() {
     final b = await EBadgeStreamDemoFrames.prepare();
     expect(identical(a, b), isTrue);
   }, timeout: const Timeout(Duration(minutes: 2)));
+
+  // 换了边长就必须重编。缓存的是**编好的字节**,复用旧数组等于推出去的还是原来
+  // 那么大 —— 界面读数变了、设备屏上除了「没变化」看不出任何异常,而「设置没生效」
+  // 是这条链路最难查的一类问题。
+  test('边长变了会重编，且 JPEG 的 SOF 里真是新尺寸', () async {
+    await EBadgeStreamDemoFrames.prepare();
+    expect(EBadgeStreamDemoFrames.cachedSize, 466);
+
+    final frames = await EBadgeStreamDemoFrames.prepare(size: 160);
+    expect(EBadgeStreamDemoFrames.cachedSize, 160);
+    expect(frames.length, EBadgeStreamDemoFrames.count);
+
+    for (var i = 0; i < frames.length; i++) {
+      final size = _sofSize(frames[i]);
+      expect(size, isNotNull, reason: '第 $i 帧读不到 SOF 尺寸');
+      expect(size!.width, 160, reason: '第 $i 帧 SOF 宽度没跟着变');
+      expect(size.height, 160, reason: '第 $i 帧 SOF 高度没跟着变');
+    }
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  // 同一档重复调用不能重编(那会把每 tick 的取帧拖成秒级);换回来时也要重编,
+  // 因为中间那一档已经把缓存覆盖掉了。
+  test('同一尺寸复用结果，换回旧尺寸会重编', () async {
+    final a = await EBadgeStreamDemoFrames.prepare(size: 128);
+    final b = await EBadgeStreamDemoFrames.prepare(size: 128);
+    expect(identical(a, b), isTrue, reason: '同尺寸不该重编');
+
+    final c = await EBadgeStreamDemoFrames.prepare(size: 466);
+    expect(identical(a, c), isFalse, reason: '换回旧尺寸应该重编');
+    expect(_sofSize(c[0])!.width, 466);
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  // at() 只看缓存,不管尺寸 —— 换了尺寸之后再取,拿到的必须是新尺寸的字节,
+  // 否则会话会把旧画面一直推下去。
+  test('换尺寸后 at() 取到的是新尺寸的帧', () async {
+    await EBadgeStreamDemoFrames.prepare(size: 128);
+    final f = EBadgeStreamDemoFrames.at(0);
+    expect(f, isNotNull);
+    expect(_sofSize(f!)!.width, 128);
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }

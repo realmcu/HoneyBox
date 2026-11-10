@@ -49,9 +49,14 @@ class EBadgeStreamCameraSource {
 
   final EncoderService _encoder;
 
-  /// 帧的边长。与传图档位、内置测试帧共用同一个常量 —— §6.2 的流头不带宽高,设备
-  /// 只能按 JPEG 自身的 SOF 解,三条链路发不同尺寸只会多出一个待排除的变量。
+  /// 帧的边长**默认**值。与传图档位、内置测试帧共用同一个常量 —— §6.2 的流头不
+  /// 带宽高,设备只能按 JPEG 自身的 SOF 解,几条链路发不同尺寸只会多出一个待排除的
+  /// 变量。实际用哪一档由调用方经 [open] / [setSize] 给,见 [activeSize]。
   static const int size = kEBadgeDemoImageSize;
+
+  /// 当前生效的边长。
+  int get activeSize => _size;
+  int _size = size;
 
   /// IJG 质量档的**默认值**。80 是原生 JPEG 分支的默认档,466×466 下每帧约
   /// 20–40 KB。实际用哪一档由调用方经 [open] / [setQuality] 给 —— 单帧体积是这条
@@ -140,6 +145,7 @@ class EBadgeStreamCameraSource {
   Future<String?> open({
     required int fps,
     int? jpegQuality,
+    int? size,
     Duration readyTimeout = const Duration(seconds: 10),
   }) async {
     if (_open) return null;
@@ -153,11 +159,12 @@ class EBadgeStreamCameraSource {
     _camera = null;
     _fps = fps;
     _quality = jpegQuality ?? quality;
+    _size = size ?? EBadgeStreamCameraSource.size;
     _resetCounters();
     final ready = Completer<String?>();
     _ready = ready;
 
-    final cfg = _configFor(_fps, _quality);
+    final cfg = _configFor(_fps, _quality, _size);
     _encoder.listen();
     try {
       await _encoder.openCamera(cfg);
@@ -203,10 +210,24 @@ class EBadgeStreamCameraSource {
     _quality = jpegQuality;
     if (!_open) return null;
     try {
-      await _encoder.setConfig(_configFor(_fps, _quality));
+      await _encoder.setConfig(_configFor(_fps, _quality, _size));
     } on PlatformException catch (e) {
       return '调整 JPEG 质量失败：${e.message ?? e.code}';
     }
+    onChanged?.call();
+    return null;
+  }
+
+  /// 记下下次 [open] 要用的边长。**推流中改不了** —— 和帧率同理,但原因不同:
+  ///
+  /// JPEG 走的是原生软件编码器,`CameraEncoder.setConfig` 在软件编码期间只接受
+  /// 画面缩放(`isSoftwareCropOnlyChange`),换宽高会被它直接拒掉并回一条 info 事件。
+  /// 与其发一条注定被拒的配置、让界面以为改了,不如在入口就只记值,由调用方在停流
+  /// 后重开时带上(与 [setQuality] 的「没开就只记值」是同一套约定)。
+  ///
+  /// 返回 null 恒成立 —— 保留 Future 形态是为了将来若原生支持热改尺寸,调用方不用改。
+  Future<String?> setSize(int size) async {
+    _size = size;
     onChanged?.call();
     return null;
   }
@@ -234,10 +255,11 @@ class EBadgeStreamCameraSource {
   }
 
   /// 帧源用的编码配置。**格式必须是 jpeg** —— 见类文档:h264 的单帧解不开。
-  static EncoderConfig _configFor(int fps, [int? jpegQuality]) => EncoderConfig(
+  static EncoderConfig _configFor(int fps, [int? jpegQuality, int? side]) =>
+      EncoderConfig(
         format: EncoderFormat.jpeg,
-        width: size,
-        height: size,
+        width: side ?? size,
+        height: side ?? size,
         fps: fps,
         jpegQuality: jpegQuality ?? quality,
         // 调试台只关心推出去的字节,不落地文件;录文件会额外占 IO 和内存,
@@ -245,7 +267,7 @@ class EBadgeStreamCameraSource {
         recordToFile: false,
       );
 
-  /// 暴露给测试:配置确实是 466×466 的 JPEG。
-  static EncoderConfig debugConfigFor(int fps, [int? jpegQuality]) =>
-      _configFor(fps, jpegQuality);
+  /// 暴露给测试:配置默认是 466×466 的 JPEG,且分辨率随传入的边长走。
+  static EncoderConfig debugConfigFor(int fps, [int? jpegQuality, int? side]) =>
+      _configFor(fps, jpegQuality, side);
 }

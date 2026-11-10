@@ -97,6 +97,85 @@ void main() {
     });
   });
 
+  group('画面尺寸', () {
+    // 需求本身:默认 466×466。466 是设备圆屏的原生分辨率,默认落在它上面,
+    // 「设备自己缩放了」就不会变成一个待排除的变量。
+    test('默认边长 466,且与传图档位的常量同源', () {
+      const cfg = EBadgeDebugConfig();
+      expect(cfg.streamSize, 466);
+      expect(cfg.streamSize, kEBadgeDemoImageSize);
+    });
+
+    test('默认值落在自己的区间里', () {
+      const cfg = EBadgeDebugConfig();
+      expect(cfg.streamSize,
+          inInclusiveRange(kEBadgeStreamSizeMin, kEBadgeStreamSizeMax));
+    });
+
+    // 区间本身要立得住:下界再小图案就糊成一团(卡帧/丢帧就没法肉眼判断),
+    // 上界再大纯 Dart 的 DCT 会让「改个数等十几秒」变成常态。
+    test('区间立得住:小到能看清图案,大到编得动', () {
+      expect(kEBadgeStreamSizeMin, greaterThanOrEqualTo(32));
+      expect(kEBadgeStreamSizeMax, greaterThan(kEBadgeStreamSizeMin));
+      // 设备原生尺寸必须在区间内,否则「恢复默认」按钮会把自己夹掉。
+      expect(kEBadgeDemoImageSize,
+          inInclusiveRange(kEBadgeStreamSizeMin, kEBadgeStreamSizeMax));
+    });
+
+    // 存下来的是像素数本身 —— 它就是用户输进去的那个数,没有别的表示。
+    test('边长存在 streamSize 键里', () {
+      expect(
+          const EBadgeDebugConfig(streamSize: 320).toJson()['streamSize'], 320);
+    });
+
+    test('存读一轮不丢', () {
+      final back = EBadgeDebugConfig.fromJson(
+          const EBadgeDebugConfig(streamSize: 512).toJson());
+      expect(back.streamSize, 512);
+    });
+
+    // 旧配置里没有这个键 —— 必须退回默认,而不是让整份配置失效。缺字段时逐项兜底
+    // 的全部意义就在这里。
+    test('旧配置没有该键时退回默认，不丢其余各项', () {
+      final back = EBadgeDebugConfig.fromJson(const {'autoScroll': false});
+      expect(back.streamSize, 466);
+      expect(back.autoScroll, isFalse, reason: '其余项不该被带走');
+    });
+
+    // 越界值**夹到区间**而不是退回默认 —— 与帧率/质量同一套约定:存下来的是用户
+    // 上次输的值,区间将来若收窄,夹到新边界比跳回 466 更贴近他的本意。
+    //
+    // 而且这一步不是防御性冗余:边长会直接进 Canvas 画布和原生编码器的宽高,
+    // 一个手改出来的 0 会让 picture.toImage 抛异常,点「开始推流」就变崩溃。
+    test('越界的边长被夹到区间内，不退回默认也不产生非法画布', () {
+      expect(EBadgeDebugConfig.fromJson(const {'streamSize': 0}).streamSize,
+          kEBadgeStreamSizeMin);
+      expect(EBadgeDebugConfig.fromJson(const {'streamSize': -100}).streamSize,
+          kEBadgeStreamSizeMin);
+      expect(EBadgeDebugConfig.fromJson(const {'streamSize': 99999}).streamSize,
+          kEBadgeStreamSizeMax);
+    });
+
+    // 手改的配置里可能是小数,或 jsonDecode 把 512 读成 512.0。`as int` 会抛,
+    // 抛出去就是整份配置退回默认。
+    test('小数被截成整数，类型不对则退回默认', () {
+      expect(EBadgeDebugConfig.fromJson(const {'streamSize': 320.9}).streamSize,
+          320);
+      expect(EBadgeDebugConfig.fromJson(const {'streamSize': '320'}).streamSize,
+          466);
+    });
+
+    // 两条旋钮各自独立:改尺寸不能顺带把质量/帧率带回默认 —— 同一次调试里的两个
+    // 自变量互相污染的话,「哪个变化导致跳帧」就没法归因。
+    test('改尺寸不动帧率与质量', () {
+      const base = EBadgeDebugConfig(cameraFps: 30, cameraQuality: 55);
+      final a = base.copyWith(streamSize: 256);
+      expect(a.streamSize, 256);
+      expect(a.cameraFps, 30);
+      expect(a.cameraQuality, 55);
+    });
+  });
+
   group('滑条区间', () {
     // 需求本身:帧率 1–40。
     test('帧率区间是 1–40', () {
@@ -121,7 +200,7 @@ void main() {
   });
 
   group('序列化', () {
-    test('七项都能存能读回', () {
+    test('每一项都能存能读回', () {
       const cfg = EBadgeDebugConfig(
         xferWithHeader: true,
         demoPresetSlug: 'xxl',
@@ -129,6 +208,7 @@ void main() {
         autoScroll: false,
         cameraFps: 25,
         cameraQuality: 45,
+        streamSize: 320,
         otaFilePath: '/data/user/0/app/cache/file_picker/ebadge_fw_v1.2.3.bin',
         otaFileUri: 'content://com.android.externalstorage.documents/document/'
             'primary%3ADownload%2Febadge_fw_v1.2.3.bin',
@@ -141,6 +221,7 @@ void main() {
       expect(back.autoScroll, isFalse);
       expect(back.cameraFps, 25);
       expect(back.cameraQuality, 45);
+      expect(back.streamSize, 320);
       expect(back.otaFilePath,
           '/data/user/0/app/cache/file_picker/ebadge_fw_v1.2.3.bin');
       expect(back.otaFileUri, cfg.otaFileUri);
@@ -164,8 +245,11 @@ void main() {
       expect(json['otaFileName'], 'fw.bin');
       expect(json.keys.where((k) => k.toLowerCase().contains('ota')),
           ['otaFilePath', 'otaFileUri', 'otaFileName']);
+      // 只看 OTA 那几个键:这条钉的是「不记升级包的体积/校验值」。画面边长
+      // (streamSize)名字里带 size 但它和升级包无关 —— 它是调试台自己的编码参数,
+      // 恰恰必须记住(见下面「画面尺寸」那一组)。
       expect(
-        json.keys.where((k) =>
+        json.keys.where((k) => k.toLowerCase().startsWith('ota')).where((k) =>
             k.toLowerCase().contains('size') ||
             k.toLowerCase().contains('crc')),
         isEmpty,

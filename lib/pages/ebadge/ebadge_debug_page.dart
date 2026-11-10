@@ -1279,25 +1279,32 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
 
   /// 按当前帧源做好推流前的准备。返回 null 表示就绪,否则是失败原因。
   Future<String?> _prepareStreamSource() async {
+    final side = _cfg.streamSize;
     switch (_cfg.streamSource) {
       case EBadgeStreamSource.builtin:
-        if (EBadgeStreamDemoFrames.ready) return null;
+        // 尺寸变了也要重编 —— 复用旧尺寸的四帧等于设置没生效,而设备屏上除了
+        // 「画面还是原来那么大」看不出任何异常。
+        if (EBadgeStreamDemoFrames.ready &&
+            EBadgeStreamDemoFrames.cachedSize == side) {
+          return null;
+        }
         setState(() => _streamDetail = '正在编码 '
             '${EBadgeStreamDemoFrames.count} 张 '
-            '${EBadgeStreamDemoFrames.width}×${EBadgeStreamDemoFrames.height} '
-            '测试帧…');
+            '$side×$side 测试帧…');
         try {
-          await EBadgeStreamDemoFrames.prepare();
+          await EBadgeStreamDemoFrames.prepare(size: side);
           return null;
         } catch (e) {
           return '测试帧编码失败：$e';
         }
       case EBadgeStreamSource.camera:
         setState(() => _streamDetail = '正在打开摄像头（'
-            '${EBadgeStreamCameraSource.size}×${EBadgeStreamCameraSource.size} '
-            'JPEG q=${_cfg.cameraQuality}）…');
-        return _ensureCamera()
-            .open(fps: _streamFps, jpegQuality: _cfg.cameraQuality);
+            '$side×$side JPEG q=${_cfg.cameraQuality}）…');
+        return _ensureCamera().open(
+          fps: _streamFps,
+          jpegQuality: _cfg.cameraQuality,
+          size: side,
+        );
     }
   }
 
@@ -1311,6 +1318,16 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
         ..onChanged = () {
           if (mounted) setState(() {});
         };
+
+  /// 改了画面边长。**推流中改不了** —— 两个帧源都要重编(内置帧重跑四张 Canvas,
+  /// 摄像头重开软件编码器),而推流周期在握手时就定了。界面那边输入框在推流中是禁用
+  /// 的(见 [_StreamCameraPanel.sizeEnabled]),这里只是把值记进配置并同步给帧源对象。
+  void _applyStreamSize(int side) {
+    _updateConfig(_cfg.copyWith(streamSize: side));
+    // 摄像头源记下新边长,下次 open / 重开时带上。没开相机时这一步只改内存里的数,
+    // 不碰平台通道。
+    _camera?.setSize(side);
+  }
 
   /// 滑条改了质量:推流中也立刻下发,不用重开会话。
   ///
@@ -1662,6 +1679,16 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
             }
           },
         ),
+        // 画面尺寸对两个帧源都有效,所以独立成一行、不挂在摄像头面板里 ——
+        // 挂在面板里的话选内置测试帧时就没有入口了,而「像素太多」这个变量在
+        // 内置帧下同样要能单独排除(它恰恰是最干净的一次对照:图案和帧率都不变)。
+        _StreamSizeRow(
+          side: _cfg.streamSize,
+          source: _cfg.streamSource,
+          // 推流中(含握手阶段)锁掉:改了要重编,而推流周期已定。
+          enabled: !_busy && _stream == null && !_streamStarting,
+          onChanged: _applyStreamSize,
+        ),
         if (_cfg.streamSource == EBadgeStreamSource.camera && _camera != null)
           _StreamCameraPanel(
             source: _camera!,
@@ -1689,7 +1716,7 @@ class _EBadgeDebugPageState extends ConsumerState<EBadgeDebugPage> {
         _Hint(
           '按 §6.4 时序跑:0x08 OFFER(fps=$_streamFps)→ 0x09 DECISION → '
           '0x13 AP_INFO → 连热点 → TCP 连续推「14B 流头 + '
-          '${EBadgeStreamCameraSource.size}×${EBadgeStreamCameraSource.size} '
+          '${_cfg.streamSize}×${_cfg.streamSize} '
           'JPEG」直到手动停止,设备可回 decision=2 协商成更低的帧率。'
           '与 §5 的区别:流头只有 14 字节且不带文件名,EBXR 应答是可选的,'
           '设备侧帧间隔超 3 s 就会自行清理会话。',
@@ -2263,6 +2290,198 @@ class _StreamSourceRow extends StatelessWidget {
                   onTap: enabled ? () => onChanged(s) : null,
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 画面尺寸(边长,像素)输入行。两个帧源共用一条配置。
+///
+/// **为什么是输入框而不是预设档位**:设备圆屏只有一个原生分辨率(466),但排障时要
+/// 问的是「任意一个更小的值会不会就好了」—— 用 ChoiceChip 摆几档就得替用户猜他想
+/// 试哪几档,而真正有效的那个值往往既不是 466 也不是 256。
+///
+/// **为什么双源共用一行而不是在解析帧源时各自一份**:尺寸是"这一次推流用多大画布"
+/// 这件事的一个属性,与画面从哪来无关。各存一份的话,切一下帧源尺寸就悄悄换了,而
+/// 对照实验的前提正是「只改一个变量」。
+class _StreamSizeRow extends StatefulWidget {
+  const _StreamSizeRow({
+    required this.side,
+    required this.source,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  /// 当前边长(已生效的配置值)。
+  final int side;
+
+  /// 当前帧源,只用来写说明文字(内置帧重编更慢、摄像头重开编码器)。
+  final EBadgeStreamSource source;
+
+  final bool enabled;
+  final ValueChanged<int> onChanged;
+
+  @override
+  State<_StreamSizeRow> createState() => _StreamSizeRowState();
+}
+
+class _StreamSizeRowState extends State<_StreamSizeRow> {
+  late final TextEditingController _ctrl =
+      TextEditingController(text: '${widget.side}');
+
+  /// 输入框里的值不合法时只在框下说一句,不打断输入 —— 用户打字打到一半
+  /// (`4`、`46`)必然落在区间外,那时候把焦点抢走或者弹提示都没法用。
+  String? _error;
+
+  @override
+  void didUpdateWidget(covariant _StreamSizeRow old) {
+    super.didUpdateWidget(old);
+    // 外部改了值(读回存档、另一处调用 onChanged)才回写输入框。**只在不编辑时**:
+    // 边打字边被回写会把光标顶到末尾,数字跟着跳。
+    if (widget.side != old.side && !_focus.hasFocus) {
+      _ctrl.text = '${widget.side}';
+      _error = null;
+    }
+  }
+
+  final _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  /// 校验并提交输入框里的值。**只在回车 / 失焦时调** —— 每敲一个字符就校验的话,
+  /// 输 `256` 的第一个 `2` 就已经越界报错了,而那只是打字打到一半。
+  void _submit(String raw) {
+    final n = int.tryParse(raw.trim());
+    if (n == null) {
+      setState(() => _error = '请输入整数像素数');
+      return;
+    }
+    if (n < kEBadgeStreamSizeMin || n > kEBadgeStreamSizeMax) {
+      // 明确报出区间而不是悄悄夹:夹了输入框显示的和实际用的就不是一个数,
+      // 而「设置没生效」是这条链路最难查的一类问题。
+      setState(
+          () => _error = '需在 $kEBadgeStreamSizeMin–$kEBadgeStreamSizeMax 之间');
+      return;
+    }
+    setState(() => _error = null);
+    if (n != widget.side) widget.onChanged(n);
+  }
+
+  void _resetToDefault() {
+    _ctrl.text = '$kEBadgeDemoImageSize';
+    setState(() => _error = null);
+    if (widget.side != kEBadgeDemoImageSize) {
+      widget.onChanged(kEBadgeDemoImageSize);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Wrap 而不是 Row:这一行有标签、输入框、生效值回显和「恢复」按钮,窄屏
+          // (或系统放大字号)下用 Row 必然溢出。
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              const Text(
+                '画面尺寸',
+                style: TextStyle(fontSize: 11.5, color: AppTheme.textSecondary),
+              ),
+              SizedBox(
+                width: 92,
+                child: TextField(
+                  controller: _ctrl,
+                  focusNode: _focus,
+                  enabled: widget.enabled,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    // 等宽:数字位数变化时不让整行左右跳。
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    suffixText: 'px',
+                    suffixStyle: const TextStyle(
+                        fontSize: 11, color: AppTheme.textSecondary),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    border: const OutlineInputBorder(),
+                    // 不合法时描红框:错误文字在下面一行,眼睛还盯着输入框时
+                    // 就能看出来。
+                    enabledBorder: _error == null
+                        ? null
+                        : const OutlineInputBorder(
+                            borderSide:
+                                BorderSide(color: AppTheme.error, width: 1.2),
+                          ),
+                  ),
+                  onChanged: (_) {
+                    // 打字过程中只清掉旧的错误提示,不校验新值 —— 见 [_submit]。
+                    if (_error != null) setState(() => _error = null);
+                  },
+                  onSubmitted: _submit,
+                  onTapOutside: (_) {
+                    // 点空白处也提交 —— 输完数直接去点「开始推流」是最常见的动作,
+                    // 不提交的话这次的数会被当成没填。
+                    _submit(_ctrl.text);
+                    _focus.unfocus();
+                  },
+                ),
+              ),
+              Text(
+                '${widget.side}×${widget.side}',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              TextButton(
+                onPressed: widget.enabled ? _resetToDefault : null,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 28),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('恢复 $kEBadgeDemoImageSize',
+                    style: TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2, left: 2),
+            child: Text(
+              _error ??
+                  (widget.enabled
+                      ? '两个帧源共用;$kEBadgeStreamSizeMin–'
+                          '$kEBadgeStreamSizeMax 像素,默认 '
+                          '$kEBadgeDemoImageSize(设备圆屏原生分辨率)。'
+                          '改它要重新编码,推流中不能改。'
+                      : '推流中不能改画面尺寸 —— 改了要重编,'
+                          '而推流周期在握手时就定了。'),
+              style: TextStyle(
+                fontSize: 10.5,
+                height: 1.3,
+                color: _error == null ? AppTheme.textSecondary : AppTheme.error,
+              ),
+            ),
           ),
         ],
       ),
