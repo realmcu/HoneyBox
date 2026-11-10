@@ -6,7 +6,8 @@ Central on Linux, speaks L1 over the HMIS service, and records whether each L2
 command gets a transport ACK and/or an L2 response.
 
 Usage:
-    python tools/watch_protocol_probe.py --address 03:22:87:83:87:73
+    python tools/watch_protocol_probe.py --user-id <32-char-id>
+        [--address 03:22:87:83:87:73]
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import struct
-import time
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,7 +26,6 @@ from bleak import BleakClient
 HMIS_TX = "0000ffc1-0000-1000-8000-00805f9b34fb"
 HMIS_RX = "0000ffc2-0000-1000-8000-00805f9b34fb"
 DEFAULT_ADDRESS = "03:22:87:83:87:73"
-DEFAULT_USER_ID = "7c78cd5b6d1ac56d1c6b8784d60b5bf2"
 
 
 def crc16_arc(data: bytes) -> int:
@@ -165,8 +165,7 @@ def starts_with(*prefix: int) -> Callable[[bytes], bool]:
 async def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--address", default=DEFAULT_ADDRESS)
-    parser.add_argument("--user-id", default=DEFAULT_USER_ID)
-    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--user-id", required=True)
     args = parser.parse_args()
 
     user_id = args.user_id.encode("ascii")
@@ -178,6 +177,21 @@ async def main() -> int:
         probe = Probe(client)
         await probe.start()
         print(f"connected {args.address}, mtu={client.mtu_size}")
+        characteristic_ids = {
+            str(char.uuid).lower()
+            for service in client.services
+            for char in service.characteristics
+        }
+        has_stream_service = any(
+            "0000ffc4-" in char or "0000ffc5-" in char
+            for char in characteristic_ids
+        )
+        results.append((
+            "0x0E stream service",
+            "GATT discovery",
+            "PASS" if has_stream_service else "NO SERVICE",
+        ))
+        results.append(("0x0B reserved", "Protocol", "NOT APPLICABLE"))
         try:
             async def check_ack(label: str, payload: bytes) -> bool:
                 ok = await probe.send(payload)
@@ -198,6 +212,11 @@ async def main() -> int:
                 )
                 return matched
 
+            await query(
+                "0x03 login mismatch",
+                l2(0x03, 0, 0x03, b"z" * 32),
+                bytes([0x03, 0x00, 0x04, 0x00, 0x01, 0x01]),
+            )
             await query(
                 "0x03 login",
                 l2(0x03, 0, 0x03, user_id),
@@ -249,6 +268,25 @@ async def main() -> int:
                 bytes([0x10, 0x00, 0x02, 0x00, 0x03]),
             )
             if begin_ok:
+                payload_bytes = b"\xAA\xBB\xCC\xDD"
+                await check_ack(
+                    "0x10 data",
+                    l2(0x10, 0, 0x03, b"\x00\x00" + payload_bytes),
+                )
+                await check_ack(
+                    "0x10 end",
+                    l2(0x10, 0, 0x05, zlib.crc32(payload_bytes).to_bytes(4, "big")),
+                )
+                end_frames = await probe.collect(
+                    starts_with(0x10, 0x00, 0x06), timeout=0.7
+                )
+                results.append((
+                    "0x10 end",
+                    "L2 response",
+                    f"PASS {hex_bytes(end_frames[0])}"
+                    if end_frames
+                    else "NO RESPONSE (storage unavailable)",
+                ))
                 await check_ack("0x10 abort", l2(0x10, 0, 0x07, b"\x01"))
 
             # Registered stubs: transport accepted, but no functional L2 reply.
