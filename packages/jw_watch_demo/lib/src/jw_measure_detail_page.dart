@@ -31,7 +31,7 @@ class _JWMeasureDetailPageState extends State<JWMeasureDetailPage>
 
   bool _autoEnabled = false;
   int _intervalMinutes = 10;
-  List<int> _hrIntervals = kJwDemoHeartRateIntervalsWithOne;
+  List<int> _hrIntervals = kJwDemoFallbackHeartRateIntervals;
 
   bool _tempAdjust = false;
   bool _tempCelsius = true;
@@ -58,7 +58,7 @@ class _JWMeasureDetailPageState extends State<JWMeasureDetailPage>
     // Spot values arrive ~1 Hz; rebuild immediately so UI tracks WIRE/API logs.
     _events.addListener(_onMeasureEvents);
     widget.controller.addListener(_syncSession);
-    _hrIntervals = jwDemoHeartRateSupportIntervals(widget.controller);
+    _hrIntervals = kJwDemoFallbackHeartRateIntervals;
     _intervalMinutes = jwDemoDefaultAutoIntervalMinutes(kind);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -103,6 +103,11 @@ class _JWMeasureDetailPageState extends State<JWMeasureDetailPage>
   Future<void> _refreshAutoConfig() => run(() async {
         switch (kind) {
           case JWMeasureModuleKind.heartRate:
+            final options =
+                await widget.controller.readHeartRateIntervalOptions();
+            if (options.isNotEmpty) {
+              _hrIntervals = options;
+            }
             final cfg = await widget.controller.readHeartRateAutoMeasure();
             _autoEnabled = cfg.enabled;
             _intervalMinutes = jwDemoSnapHeartRateInterval(

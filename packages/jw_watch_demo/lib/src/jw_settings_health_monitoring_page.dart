@@ -44,8 +44,7 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
   bool _pressureEnabled = false;
   bool _highHrAlarmEnabled = false;
   int _highHrAlarmValue = 180;
-
-  List<int> get _hrIntervals => jwDemoHeartRateSupportIntervals(controller);
+  List<int> _hrIntervals = kJwDemoFallbackHeartRateIntervals;
 
   JWDeviceFunctionInfo? get _functions => controller.state.functionInfo;
 
@@ -91,6 +90,14 @@ class _JwHealthMonitoringPageState extends State<JwHealthMonitoringPage> {
       _loading = true;
       _error = null;
       _message = null;
+    });
+    await _loadOne(() async {
+      if (_deviceSupport([JWDeviceFunction.rate]) != false) {
+        final options = await controller.readHeartRateIntervalOptions();
+        if (options.isNotEmpty) {
+          _hrIntervals = options;
+        }
+      }
     });
     await _loadOne(() async {
       final cfg = await controller.readHeartRateAutoMeasure();

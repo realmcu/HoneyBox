@@ -5,11 +5,24 @@ import 'jw_measure_models.dart';
 
 /// HL `cmd 0x05` / `0x08` sport & multiple commands for measure control.
 abstract final class JWMeasureProtocol {
-  static const _sport = 5;
+  static const sportCommand = 5;
+  static const _sport = sportCommand;
   static const _multiple = 8;
+  static const heartRateAutoMeasureRspKey = 0x12;
+  static const heartRateIntervalOptionsRspKey = 0x18;
+  static const deviceSyncSwitchRspKey = 0x1d;
 
   static JWProtocolRequest readHeartRateAutoMeasure() =>
       const JWProtocolRequest(command: _sport, key: 0x11, responseKey: 0x12);
+
+  /// Settings `0x3F` request; interval kinds arrive on sport `0x18`.
+  static JWProtocolRequest readHeartRateIntervalOptions() =>
+      const JWProtocolRequest(
+        command: 2,
+        key: 0x3f,
+        responseKey: heartRateIntervalOptionsRspKey,
+        responseCommand: _sport,
+      );
 
   static JWProtocolRequest setHeartRateAutoMeasure(Uint8List value) =>
       JWProtocolRequest(

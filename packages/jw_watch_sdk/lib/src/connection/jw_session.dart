@@ -22,6 +22,8 @@ import '../settings/jw_settings_codec.dart';
 import '../control/jw_control.dart';
 import '../control/jw_control_coordinator.dart';
 import '../measure/jw_measure.dart';
+import '../measure/jw_measure_config_cache.dart';
+import '../measure/jw_measure_config_ingest.dart';
 import '../measure/jw_measure_coordinator.dart';
 import '../today/jw_today_activity_codec.dart';
 import '../today/jw_today_activity_models.dart';
@@ -76,6 +78,8 @@ final class JWWatchSession {
   /// True while [syncHealthData] is running on this session.
   bool get isHealthSyncActive => _healthSync != null;
 
+  final _measureConfigCache = JWMeasureConfigCache();
+  JWMeasureConfigIngest? _measureConfigIngest;
   JWMeasureCoordinator? _measureCoordinator;
   JWMeasure? _measure;
   JWControlCoordinator? _controlCoordinator;
@@ -84,6 +88,7 @@ final class JWWatchSession {
   /// Measure control and spot-measure listeners for the authenticated session.
   JWMeasure get measure => _measure ??= JWMeasure(
         link: _link,
+        configCache: _measureConfigCache,
         coordinator: _measureCoordinator ??= JWMeasureCoordinator(
           link: _link,
           isHealthSyncActive: () => _healthSync != null,
@@ -186,16 +191,22 @@ final class JWWatchSession {
   Future<void> connect() => _opening ??= _connect();
 
   Future<void> _connect() async {
+    _measureConfigCache.clear();
     _publish(
         _state.copyWith(phase: JWSessionPhase.connecting, clearError: true));
     _linkFailures = _link.failures.listen((error) {
       if (!_disposed) {
+        _measureConfigCache.clear();
+        _measureConfigIngest?.stop();
         _publish(
             _state.copyWith(phase: JWSessionPhase.disconnected, error: error));
       }
     });
     try {
       await _link.open();
+      _measureConfigIngest ??=
+          JWMeasureConfigIngest(link: _link, cache: _measureConfigCache);
+      _measureConfigIngest!.start();
       _publish(_state.copyWith(phase: JWSessionPhase.connected));
     } catch (error) {
       if (!_disposed) {
@@ -994,6 +1005,9 @@ final class JWWatchSession {
     if (_disposed) return;
     _disposed = true;
     _authenticatedUserId = null;
+    _measureConfigIngest?.stop();
+    _measureConfigIngest = null;
+    _measureConfigCache.clear();
     _measureCoordinator?.dispose();
     _measureCoordinator = null;
     _measure = null;

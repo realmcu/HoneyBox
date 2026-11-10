@@ -130,6 +130,57 @@ T4.0 固定 Android/Flutter 源 commit 与首批真机型号/固件；若源码�
 
 ## 8. T4.5：测量、控制、通知和扩展补齐
 
+### 8.0 Measure 自动监测：设备配置与透明缓存（设计约定）
+
+自动监测的**开关、间隔、可选间隔档位**统一归属 **`JWSession.measure`**（`JWMeasure`）。接入方只使用 `read*` / `set*`，**不**感知缓存、设备主动上报、`syncSwitch`、Bootstrap 或 `forceRefresh`。
+
+#### 对外语义
+
+| 规则 | 说明 |
+| --- | --- |
+| 读配置 | 调用 `read*()` 得到当前设备上的配置；SDK 在连接期内可使用会话缓存，**对调用方透明**。 |
+| 读不完整 | 该条目缓存不完整或不存在时，`read*()` **自动**发协议读设备，写满缓存后返回；不暴露 `forceRefresh`。 |
+| 写配置 | `set*()` 成功则**立即**用提交值更新对应缓存；失败则不修改缓存。 |
+| 重连 | `disconnect`、换 `deviceMac` 或新建会话时 **清空** `measure` 下全部设备配置缓存。 |
+| 断线后 | 接入方应再次调用 `read*()`（缓存已清空，会走设备读）。 |
+
+可选间隔与当前配置分 API 表达（学习成本低、与设置页 UI 一致）：
+
+- **当前值**：如 `readHeartRateAutoMeasure()` → `JWAutoMeasureConfig`（`enabled` + `intervalMinutes`）。
+- **可选档位**：如 `readHeartRateIntervalOptions()` → `List<int>`（分钟）；仅当设备支持心率自动监测且协议提供间隔种类时有效。
+
+`settings` 门面的其它项（语言、勿扰等）不适用本节；若日后采用相同「透明缓存」模式，在 T4.2 文档中单独开表，**不**与 `measure` 混用缓存实现。
+
+#### 对内实现（不写入公开 README 的要点）
+
+- 单一会话内组件（建议名 `JWMeasureConfigCache`）按 **缓存 key** 分槽；`JWMeasure.read*` / `set*` 为唯一公开读写路径。
+- 设备**主动上报**（含 `syncSwitch` 单项、运动 `0x12` / `0x18` 等）经 **unsolicited 路由表** merge 进对应槽位；**不**提供「一次读取 syncSwitch 全包」的公开 API。
+- 部分推送只含子字段（例如 `syncSwitch` type=2 仅开关）：合并后若该 key 仍不完整，`read*()` 按上表自动补读设备。
+- WoFit「连上按 App 习惯写回设备」属于 **App 层 Provisioning**，在 `ready` 后自行 `set*`；**不是** SDK 默认行为。
+
+#### Measure 设备配置缓存 key 表
+
+下表为 SDK **内部**缓存槽与协议来源；公开 API 仅「公开读 / 公开写」列。实现状态指 HoneyBox `jw_watch_sdk` 截至本约定起草时。
+
+| 缓存 key | 公开读 | 公开写 | 缓存类型 | 视为「完整」 | 主动读（pull） | 被动更新（push，内部） | 间隔选项 API | 能力位 | 实现状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `heartRate.autoMeasure` | `readHeartRateAutoMeasure` | `setHeartRateAutoMeasure` | `JWAutoMeasureConfig` | `enabled` 与 `intervalMinutes` 均已知 | `cmd 0x05` `0x11` → `0x12` | `0x12` 主动下发；`syncSwitch` type **2** 仅更新 `enabled` | `readHeartRateIntervalOptions` | `JWDeviceFunction.rate` | **已实现**（透明缓存） |
+| `heartRate.intervalOptions` | `readHeartRateIntervalOptions` | — | `List<int>` | 已知（含空列表） | 设置 `cmd 0x02` `0x3F` 请求 → 运动 `0x18` 间隔种类 | 运动 `0x18` 主动下发 | （同上） | `JWDeviceFunction.rate` | **已实现** |
+| `spo2.autoMeasure` | `readSpO2AutoMeasure` | `setSpO2AutoMeasure` | `JWAutoMeasureConfig` | 同上 | `0x34` → `0x35` | `0x35`；`syncSwitch` type **4** 仅 `enabled` | 无独立选项 API（间隔按协议/机型；待覆盖表补） | `JWDeviceFunction.spo2Continuous` | 读写无缓存 |
+| `bloodPressure.autoMeasure` | `readBloodPressureAutoMeasure` | `setBloodPressureAutoMeasure` | `JWAutoMeasureConfig` | 同上 | `0x3e` → `0x3f` | `0x3f`；`syncSwitch` type **3** 仅 `enabled` | 待覆盖表 | `JWDeviceFunction.rtkBp3` | 读写无缓存 |
+| `bloodSugar.autoMeasure` | `readBloodSugarAutoMeasure` | `setBloodSugarAutoMeasure` | `JWBloodSugarAutoMeasureConfig` | `enabled` + `intervalMinutes` | `0x44` → `0x45` | `0x45`；`syncSwitch` type **8** 仅 `enabled` | 待覆盖表 | `JWDeviceFunction.bloodSugar` | 读写无缓存 |
+| `temperature.control` | `readTemperatureControl` | `setTemperatureControl` | `JWTemperatureControlSetting` | 结构内各字段按 codec 定义齐全 | `0x23` → `0x24` | `0x24`；`syncSwitch` type **5**/**6**/**7** 映射部分开关 | — | `JWDeviceFunction.temperature` | 读写无缓存 |
+| `pressure.autoMeasure` | `readPressureAutoMeasure`（待补） | `setPressureAutoMeasure` | `bool` 或扩展配置 | `enabled` 已知 | 待 Android V2 对齐 | `syncSwitch` 待核 | — | `JWDeviceFunction.pressure` | **仅 set** |
+
+`syncSwitch` 解析：`cmd 0x07` key `0x1D`（Android `KEY_CTRL_CUS_RSP`）设备同步开关包；type 定义对齐 `ApplicationLayerSyncSwitchItemPacket`。SDK **仅**用于 merge 上表对应槽位，不对外暴露。
+
+#### 验收与测试（本约定）
+
+- 单元：缓存不完整时 `readHeartRateAutoMeasure` 触发 pull；`set` 成功后不 pull 再 `read` 仍得写入值；`disconnect` 后缓存 miss。
+- 真机：连接后在不手动发读命令的情况下，设备若主动推 `0x18`/`0x12`，随后 `read*` 不额外发包（可用帧日志断言）；重连后第一次 `read*` 走 pull。
+
+---
+
 按功能表逐项完成，而非只保留当前调试控制台已有按钮：
 
 - 实时测量：开始/停止/结果/主动上报，包含对应能力检查、重复调用、测量中断、超时与订阅释放。是否持久化按数据来源与 Android 语义明确，实时结果不能混作历史同步记录。

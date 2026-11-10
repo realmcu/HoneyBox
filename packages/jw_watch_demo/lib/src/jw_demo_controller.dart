@@ -352,6 +352,9 @@ class JWDemoController extends ChangeNotifier {
   Future<JWAutoMeasureConfig> readHeartRateAutoMeasure() =>
       _runSessionValue((s) => s.measure.readHeartRateAutoMeasure());
 
+  Future<List<int>> readHeartRateIntervalOptions() =>
+      _runSessionValue((s) => s.measure.readHeartRateIntervalOptions());
+
   Future<void> setHeartRateAutoMeasure(JWAutoMeasureConfig config) =>
       _runSession((s) => s.measure.setHeartRateAutoMeasure(config));
 

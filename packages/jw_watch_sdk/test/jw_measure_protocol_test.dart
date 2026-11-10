@@ -13,6 +13,10 @@ void main() {
       Uint8List.fromList([5, 0, 0x11, 0, 0]),
     );
     expect(
+      encodeJWRequest(JWMeasureProtocol.readHeartRateIntervalOptions()),
+      Uint8List.fromList([2, 0, 0x3f, 0, 0]),
+    );
+    expect(
       encodeJWRequest(JWMeasureProtocol.setHeartRateAutoMeasure(
           JWMeasureProtocol.encodeAutoMeasure(
               const JWAutoMeasureConfig(enabled: true, intervalMinutes: 5)))),
@@ -38,6 +42,13 @@ void main() {
           JWMeasureProtocol.encodeContinuousMonitoringSubCommand(0x07, true))),
       Uint8List.fromList([5, 0, 0x4f, 0, 3, 0x07, 1, 0]),
     );
+  });
+
+  test('heart rate interval options decode bitmask', () {
+    expect(decodeHeartRateIntervalOptions(Uint8List.fromList([0x06])),
+        [5, 10]);
+    expect(decodeHeartRateIntervalOptions(Uint8List.fromList([0x3f])),
+        [1, 5, 10, 30, 60, 120]);
   });
 
   test('spot heart rate payload matches HeartRateDataHandler layout', () {

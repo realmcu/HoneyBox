@@ -3,6 +3,7 @@ import '../connection/jw_link.dart';
 import '../connection/jw_protocol.dart';
 import '../model/jw_device_function_info.dart';
 import '../model/jw_error.dart';
+import 'jw_measure_config_cache.dart';
 import 'jw_measure_coordinator.dart';
 import 'jw_measure_codec.dart';
 import 'jw_measure_data_listener.dart';
@@ -14,17 +15,20 @@ final class JWMeasure {
   JWMeasure({
     required JWLink link,
     required JWMeasureCoordinator coordinator,
+    required JWMeasureConfigCache configCache,
     required bool Function() isReady,
     required bool Function() isHealthSyncActive,
     required JWDeviceFunctionInfo? Function() functionInfo,
   })  : _link = link,
         _coordinator = coordinator,
+        _configCache = configCache,
         _isReady = isReady,
         _isHealthSyncActive = isHealthSyncActive,
         _functionInfo = functionInfo;
 
   final JWLink _link;
   final JWMeasureCoordinator _coordinator;
+  final JWMeasureConfigCache _configCache;
   final bool Function() _isReady;
   final bool Function() _isHealthSyncActive;
   final JWDeviceFunctionInfo? Function() _functionInfo;
@@ -38,9 +42,32 @@ final class JWMeasure {
   Future<JWAutoMeasureConfig> readHeartRateAutoMeasure() async {
     _requireReady();
     _requireFunction(JWDeviceFunction.rate);
-    final reply = await _link.request(JWMeasureProtocol.readHeartRateAutoMeasure());
-    _expectSportKey(reply, 0x12, 'heart rate auto measure');
-    return decodeAutoMeasureConfig(reply.value);
+    final cached = _configCache.heartRateAutoMeasureIfComplete;
+    if (cached != null) return cached;
+    final reply =
+        await _link.request(JWMeasureProtocol.readHeartRateAutoMeasure());
+    _expectSportKey(reply, JWMeasureProtocol.heartRateAutoMeasureRspKey,
+        'heart rate auto measure');
+    final config = decodeAutoMeasureConfig(reply.value);
+    _configCache.setHeartRateAutoMeasure(config);
+    return config;
+  }
+
+  Future<List<int>> readHeartRateIntervalOptions() async {
+    _requireReady();
+    _requireFunction(JWDeviceFunction.rate);
+    final cached = _configCache.heartRateIntervalOptionsIfKnown;
+    if (cached != null) return cached;
+    final reply =
+        await _link.request(JWMeasureProtocol.readHeartRateIntervalOptions());
+    _expectSportKey(
+      reply,
+      JWMeasureProtocol.heartRateIntervalOptionsRspKey,
+      'heart rate interval options',
+    );
+    final options = decodeHeartRateIntervalOptions(reply.value);
+    _configCache.setHeartRateIntervalOptions(options);
+    return List<int>.unmodifiable(options);
   }
 
   Future<void> setHeartRateAutoMeasure(JWAutoMeasureConfig config) async {
@@ -48,6 +75,7 @@ final class JWMeasure {
     _requireFunction(JWDeviceFunction.rate);
     await _link.send(JWMeasureProtocol.setHeartRateAutoMeasure(
         JWMeasureProtocol.encodeAutoMeasure(config)));
+    _configCache.setHeartRateAutoMeasure(config);
   }
 
   Future<JWAutoMeasureConfig> readSpO2AutoMeasure() async {

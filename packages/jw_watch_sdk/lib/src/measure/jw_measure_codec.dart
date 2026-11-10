@@ -3,6 +3,39 @@ import 'dart:typed_data';
 import '../history/jw_history_models.dart';
 import 'jw_measure_models.dart';
 
+/// HR interval options on sport `0x18` (Android `ApplicationLayerHrpParamsPacket`).
+List<int> decodeHeartRateIntervalOptions(Uint8List bytes) {
+  if (bytes.isEmpty) {
+    throw const FormatException('Invalid JW heart rate interval options');
+  }
+  final flags = bytes[0] & 0xff;
+  const candidates = <int, int>{
+    0: 1,
+    1: 5,
+    2: 10,
+    3: 30,
+    4: 60,
+    5: 120,
+  };
+  final options = <int>[];
+  for (final entry in candidates.entries) {
+    if ((flags >> entry.key) & 0x01 == 1) {
+      options.add(entry.value);
+    }
+  }
+  return options;
+}
+
+/// `cmd 0x07` key `0x1D` device sync switch bundle.
+Iterable<({int type, int value})> decodeDeviceSyncSwitchItems(Uint8List bytes) {
+  if (bytes.length < 2) return const [];
+  final items = <({int type, int value})>[];
+  for (var i = 0; i + 1 < bytes.length; i += 2) {
+    items.add((type: bytes[i] & 0xff, value: bytes[i + 1] & 0xff));
+  }
+  return items;
+}
+
 JWAutoMeasureConfig decodeAutoMeasureConfig(Uint8List bytes) {
   if (bytes.length < 2) {
     throw const FormatException('Invalid JW auto measure config');

@@ -177,6 +177,7 @@ await session.dispose();
 ''';
 
   static const heartRateAuto = '''
+final intervals = await session.measure.readHeartRateIntervalOptions();
 final cfg = await session.measure.readHeartRateAutoMeasure();
 await session.measure.setHeartRateAutoMeasure(
   JWAutoMeasureConfig(enabled: true, intervalMinutes: 10),
