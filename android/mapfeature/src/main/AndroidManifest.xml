@@ -46,6 +46,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".AddBleDeviceActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Map1"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".navi.NaviActivity"
             android:configChanges="orientation|keyboardHidden|screenSize"
             android:exported="false"
