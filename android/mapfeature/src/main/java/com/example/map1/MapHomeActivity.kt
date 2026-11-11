@@ -32,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -83,7 +84,16 @@ import kotlinx.coroutines.withContext
 class MapHomeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        MapSdkInitializer.initialize(applicationContext)
+        val mapReady = MapSdkInitializer.initialize(applicationContext)
+        if (!mapReady) {
+            // Key-less local builds still open the dashboard: BLE connect and the
+            // add-device flow do not touch AMap.
+            android.widget.Toast.makeText(
+                this,
+                "未配置高德 API Key：地图与地点搜索不可用，BLE 连接不受影响",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
         enableEdgeToEdge()
         setContent {
             Map1Theme {
@@ -244,6 +254,37 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         if (granted) openScanner()
         else scope.launch { snackbarHostState.showSnackbar("相机权限被拒绝，无法扫一扫。请在系统设置中允许相机权限。") }
     }
+
+    // 手动添加设备：仪表不一定有二维码，改为扫广播发现后直连。复用同一个
+    // VehicleBleManager，所以连接/投屏状态与扫码路径完全一致。
+    val addDevicePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.all { it }) {
+            context.startActivity(Intent(context, AddBleDeviceActivity::class.java))
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar("附近设备权限被拒绝，无法搜索仪表。请在系统设置中授权后重试。")
+            }
+        }
+    }
+
+    fun openAddDevice() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            context.startActivity(Intent(context, AddBleDeviceActivity::class.java))
+        } else {
+            addDevicePermissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
     val blePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -557,7 +598,18 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(text = "高德模拟导航", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                text = "高德模拟导航",
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            // 没有二维码的仪表走「+ 连接」：广播过滤后手动选设备。
+            TextButton(onClick = ::openAddDevice) {
+                Icon(Icons.Outlined.Add, contentDescription = null)
+                Text("连接", modifier = Modifier.padding(start = 4.dp))
+            }
             TextButton(
                 onClick = {
                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -611,7 +663,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
                 else -> MaterialTheme.colorScheme.outline
             }
         } else {
-            connText = "连接仪表：未连接（扫描车辆二维码以建立连接）"
+            connText = "连接仪表：未连接（扫一扫，或点「+ 连接」搜索设备）"
             connColor = MaterialTheme.colorScheme.outline
         }
         Text(
