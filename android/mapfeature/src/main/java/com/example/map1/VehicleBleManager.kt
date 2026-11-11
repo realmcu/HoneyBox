@@ -15,6 +15,7 @@ import androidx.annotation.RequiresApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +34,14 @@ object VehicleBleManager {
     /** HoneyProtocol 2.2.1 HMIS service UUID (full 128-bit form). */
     private const val HMIS_SERVICE_UUID = "484D4953-0000-1000-8000-00805F9B34FB"
 
+    /**
+     * A connected meter must reach [State.NaviReady] within this window: GATT
+     * connect, service discovery, MTU negotiation and the CCCD write. Anything
+     * slower is treated as a failed handshake so the link is dropped instead of
+     * sitting in [State.Connected] forever.
+     */
+    private const val HANDSHAKE_TIMEOUT_MS = 10_000L
+
     sealed interface State {
         data object Idle : State
         data class Connecting(val config: VehicleQrProtocol.BleConfig) : State
@@ -47,6 +56,9 @@ object VehicleBleManager {
 
     private var gatt: BluetoothGatt? = null
     @Volatile private var generation = 0L
+
+    /** Watchdog for the connect -> NaviReady handshake; see [HANDSHAKE_TIMEOUT_MS]. */
+    private var handshakeJob: Job? = null
 
     // HoneyProtocol HMIS characteristics
     @Volatile var naviCtrlTx: BluetoothGattCharacteristic? = null  // 0xFFC1 write
@@ -119,7 +131,8 @@ object VehicleBleManager {
                             mutableState.value = State.Connected(config)
                             requestHighThroughput(gatt)
                             if (!gatt.discoverServices()) {
-                                mutableState.value = State.Error("已连接，但无法发现 GATT 服务")
+                                Log.e(TAG, "discoverServices() rejected")
+                                failAndClose("已连接，但无法发现 GATT 服务，已断开")
                             }
                         }
                         newState == BluetoothProfile.STATE_DISCONNECTED -> {
@@ -137,37 +150,47 @@ object VehicleBleManager {
 
             @SuppressLint("MissingPermission")
             override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-                if (status != BluetoothGatt.GATT_SUCCESS) return
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    Log.e(TAG, "service discovery failed status=$status")
+                    failAndClose("无法读取仪表服务，已断开（GATT $status）")
+                    return
+                }
                 synchronized(this@VehicleBleManager) {
                     if (generation != currentGeneration) return
                     discoverNaviChars(gatt)
-                    if (isNaviReady) {
-                        Log.i(TAG, "Navi chars found (FFD1-FFD4); starting MTU + CCCD setup")
-                        // NaviReady is published only AFTER MTU negotiation attempt AND both
-                        // FFD2/FFD4 CCCD writes succeed for this generation.
-                        // Serialize: ① request MTU, ② enable FFD2 CCCD, ③ enable FFD4 CCCD
-                        gattScope.launch {
-                            if (generation != currentGeneration) return@launch
-                            val mtuOk = doMtuRequest(gatt, 512)
-                            Log.i(TAG,
-                                "MTU request ok=$mtuOk negotiated=$negotiatedMtu attPayload=$attPayload")
-                            if (!mtuOk) {
-                                // MTU failure is non-fatal: negotiatedMtu stays at 23 (reset in
-                                // connect()), which is a safe baseline; continue with CCCDs.
-                                Log.w(TAG,
-                                    "MTU negotiation failed; continuing with fallback MTU=$negotiatedMtu")
-                            }
-                            if (generation != currentGeneration) return@launch
-                            val cccdOk = enableNaviNotifiesSeq(gatt, currentGeneration)
-                            if (generation != currentGeneration) return@launch
-                            if (cccdOk) {
-                                Log.i(TAG, "NaviReady: MTU=$negotiatedMtu CCCDs enabled successfully")
-                                mutableState.value = State.NaviReady(config)
-                            } else {
-                                Log.e(TAG, "CCCD enable failed; navi projection unavailable")
-                                mutableState.value =
-                                    State.Error("无法启用 BLE 通知，投影功能无法启动")
-                            }
+                    if (!isNaviReady) {
+                        // Connected, but this is not a HoneyProtocol meter: keeping the
+                        // link would leave the UI at "connected" with no way to project.
+                        Log.w(TAG, "HMIS chars missing; dropping the link")
+                        failAndClose("该设备未提供 HMIS 导航服务（0xFFC1/0xFFC2），已断开")
+                        return
+                    }
+                    Log.i(TAG, "Navi chars found (FFD1-FFD4); starting MTU + CCCD setup")
+                    // NaviReady is published only AFTER MTU negotiation attempt AND both
+                    // FFD2/FFD4 CCCD writes succeed for this generation.
+                    // Serialize: ① request MTU, ② enable FFD2 CCCD, ③ enable FFD4 CCCD
+                    gattScope.launch {
+                        if (generation != currentGeneration) return@launch
+                        val mtuOk = doMtuRequest(gatt, 512)
+                        Log.i(TAG,
+                            "MTU request ok=$mtuOk negotiated=$negotiatedMtu attPayload=$attPayload")
+                        if (!mtuOk) {
+                            // MTU failure is non-fatal: negotiatedMtu stays at 23 (reset in
+                            // connect()), which is a safe baseline; continue with CCCDs.
+                            Log.w(TAG,
+                                "MTU negotiation failed; continuing with fallback MTU=$negotiatedMtu")
+                        }
+                        if (generation != currentGeneration) return@launch
+                        val cccdOk = enableNaviNotifiesSeq(gatt, currentGeneration)
+                        if (generation != currentGeneration) return@launch
+                        if (cccdOk) {
+                            Log.i(TAG, "NaviReady: MTU=$negotiatedMtu CCCDs enabled successfully")
+                            handshakeJob?.cancel()
+                            handshakeJob = null
+                            mutableState.value = State.NaviReady(config)
+                        } else {
+                            Log.e(TAG, "CCCD enable failed; navi projection unavailable")
+                            failAndClose("无法启用 BLE 通知，仪表不可用，已断开")
                         }
                     }
                 }
@@ -265,6 +288,47 @@ object VehicleBleManager {
             mutableState.value = State.Error("缺少附近设备权限，无法连接 BLE 仪表")
         } catch (_: RuntimeException) {
             mutableState.value = State.Error("Android 无法发起 BLE 连接")
+        }
+
+        if (gatt != null) startHandshakeWatchdog(currentGeneration)
+    }
+
+    /**
+     * Drops a half-established link but keeps [State.Error] as the visible state,
+     * so the UI can explain why the device went away. The next [disconnect] /
+     * [connect] resets it to Idle.
+     */
+    @Synchronized
+    private fun failAndClose(message: String) {
+        generation++  // invalidate every callback still queued for this session
+        handshakeJob?.cancel()
+        handshakeJob = null
+        pendingOp?.cancel()
+        pendingOp = null
+        val oldGatt = gatt
+        gatt = null
+        clearChars()
+        if (oldGatt != null) {
+            try { oldGatt.disconnect() } catch (_: RuntimeException) {}
+            try { oldGatt.close() } catch (_: RuntimeException) {}
+        }
+        mutableState.value = State.Error(message)
+    }
+
+    /** Fails the connection when it does not reach [State.NaviReady] in time. */
+    private fun startHandshakeWatchdog(expectedGen: Long) {
+        handshakeJob?.cancel()
+        handshakeJob = gattScope.launch {
+            delay(HANDSHAKE_TIMEOUT_MS)
+            synchronized(this@VehicleBleManager) {
+                if (generation != expectedGen) return@launch
+                val state = mutableState.value
+                if (state is State.NaviReady || state is State.Error) return@launch
+                Log.w(TAG, "handshake timeout after ${HANDSHAKE_TIMEOUT_MS}ms")
+                failAndClose(
+                    "仪表未在 ${HANDSHAKE_TIMEOUT_MS / 1000} 秒内完成握手，已断开",
+                )
+            }
         }
     }
 
@@ -487,6 +551,8 @@ object VehicleBleManager {
     @Synchronized
     fun disconnect() {
         generation++
+        handshakeJob?.cancel()
+        handshakeJob = null
         // Cancel any in-flight serialized op so waiting coroutines unblock immediately.
         pendingOp?.cancel()
         pendingOp = null

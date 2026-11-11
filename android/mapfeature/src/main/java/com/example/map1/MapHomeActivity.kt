@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -215,6 +216,9 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
     var pendingVehicleConfig by remember { mutableStateOf<VehicleQrProtocol.Config?>(null) }
     var pendingBleConfig by remember { mutableStateOf<VehicleQrProtocol.BleConfig?>(null) }
     var scanError by remember { mutableStateOf<String?>(null) }
+    // 握手失败 / 连接失败的原因。VehicleBleManager 已经主动丢弃链路，这里只负责
+    // 把原因告诉用户并把状态复位回 Idle（否则右上角会一直挂着「断开」）。
+    var connectFailure by remember { mutableStateOf<String?>(null) }
     var lastScan by remember { mutableStateOf<Pair<String, Long>?>(null) }
 
     fun handleScanResult(contents: String) {
@@ -368,6 +372,27 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
     // 启动时仅查询本机 IP 作网段提示，不预填接收端地址
     LaunchedEffect(Unit) {
         localIp = withContext(Dispatchers.IO) { NetworkUtils.getLocalIpv4() }
+    }
+
+    // 握手没通过（服务缺失、通知订阅失败、超时）时 manager 会先自断链路并把原因
+    // 放进 State.Error：弹窗说明，同时复位到 Idle，让右上角回到「连接 / 扫一扫」。
+    LaunchedEffect(vehicleBleState) {
+        val state = vehicleBleState
+        if (state is VehicleBleManager.State.Error) {
+            connectFailure = state.message
+            VehicleBleManager.disconnect()
+        }
+    }
+
+    connectFailure?.let { message ->
+        AlertDialog(
+            onDismissRequest = { connectFailure = null },
+            title = { Text("连接失败") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { connectFailure = null }) { Text("知道了") }
+            },
+        )
     }
 
     pendingVehicleConfig?.let { config ->
@@ -605,20 +630,45 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            // 没有二维码的仪表走「+ 连接」：广播过滤后手动选设备。
-            TextButton(onClick = ::openAddDevice) {
-                Icon(Icons.Outlined.Add, contentDescription = null)
-                Text("连接", modifier = Modifier.padding(start = 4.dp))
-            }
-            TextButton(
-                onClick = {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                        PackageManager.PERMISSION_GRANTED
-                    ) openScanner() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                },
-            ) {
-                Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
-                Text("扫一扫", modifier = Modifier.padding(start = 4.dp))
+            // 已连线时两个入口合并成一个「断开」；连接中显示「取消」。
+            val bleLinkUp = vehicleBleState is VehicleBleManager.State.Connecting ||
+                vehicleBleState is VehicleBleManager.State.Connected ||
+                vehicleBleState is VehicleBleManager.State.NaviReady
+            val wifiLinkUp = vehicleWifiState is VehicleWifiManager.State.ApprovalPending ||
+                vehicleWifiState is VehicleWifiManager.State.Available
+            if (bleLinkUp || wifiLinkUp) {
+                TextButton(
+                    onClick = {
+                        VehicleBleManager.disconnect()
+                        VehicleWifiManager.disconnect()
+                    },
+                ) {
+                    Icon(Icons.Outlined.LinkOff, contentDescription = null)
+                    Text(
+                        text = if (vehicleBleState is VehicleBleManager.State.Connecting) {
+                            "取消"
+                        } else {
+                            "断开"
+                        },
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            } else {
+                // 没有二维码的仪表走「+ 连接」：广播过滤后手动选设备。
+                TextButton(onClick = ::openAddDevice) {
+                    Icon(Icons.Outlined.Add, contentDescription = null)
+                    Text("连接", modifier = Modifier.padding(start = 4.dp))
+                }
+                TextButton(
+                    onClick = {
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                            PackageManager.PERMISSION_GRANTED
+                        ) openScanner() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    },
+                ) {
+                    Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+                    Text("扫一扫", modifier = Modifier.padding(start = 4.dp))
+                }
             }
         }
 
@@ -671,11 +721,6 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodySmall,
             color = connColor,
         )
-        if (bleActive && vehicleBleState !is VehicleBleManager.State.NaviReady) {
-            TextButton(onClick = { VehicleBleManager.disconnect() }) { Text("断开 BLE 仪表") }
-        } else if (!bleActive && wifiActive) {
-            TextButton(onClick = { VehicleWifiManager.disconnect() }) { Text("断开车辆 Wi-Fi") }
-        }
 
         // 起点 / 终点放同一行节省纵向空间
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
