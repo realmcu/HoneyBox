@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:jw_watch_demo/jw_watch_demo.dart';
-import '../../providers/current_app_provider.dart';
 
-/// Watch Lab：当前仅挂载 JW SDK Demo（WS 包 Greenfield 重建中，不接 HoneyBox）。
-class WatchLabAppRoot extends ConsumerWidget {
-  const WatchLabAppRoot({super.key});
+import '../../providers/current_app_provider.dart';
+import 'sdk_demo_hub_page.dart';
+
+/// 启动器「SDK Demo」一级入口：二级 Hub 内再进入 JW / WS Demo。
+class SdkDemoAppRoot extends ConsumerWidget {
+  const SdkDemoAppRoot({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -15,7 +16,7 @@ class WatchLabAppRoot extends ConsumerWidget {
         if (!didPop) return;
         ref.read(currentAppProvider.notifier).state = null;
       },
-      child: const JWWatchLabAppRoot(),
+      child: const SdkDemoHubPage(),
     );
   }
 }

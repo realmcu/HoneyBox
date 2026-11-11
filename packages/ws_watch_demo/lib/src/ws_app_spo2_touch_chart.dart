@@ -1,0 +1,418 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+
+import 'ws_app_chart_layout.dart';
+import 'ws_app_chart_models.dart';
+import 'ws_health_app_theme.dart';
+
+final class WsAppSpo2TouchSelection {
+  const WsAppSpo2TouchSelection({
+    required this.max,
+    required this.min,
+    required this.begin,
+    required this.end,
+    required this.anchorX,
+  });
+
+  final int max;
+  final int min;
+  final DateTime begin;
+  final DateTime end;
+  final double anchorX;
+}
+
+/// 对齐 Android `Spo2TouchView2`（24 槽 min-max 竖向范围 + 圆点）。
+class WsAppSpo2TouchChart extends StatefulWidget {
+  const WsAppSpo2TouchChart({
+    super.key,
+    required this.hours,
+    this.onSelection,
+    this.axisMax = 100,
+    this.axisMin = 85,
+    this.mode = WsAppChartMode.detail,
+  });
+
+  final List<WsAppSpo2HourBucket> hours;
+  final ValueChanged<WsAppSpo2TouchSelection?>? onSelection;
+  final int axisMax;
+  final int axisMin;
+  final WsAppChartMode mode;
+
+  @override
+  State<WsAppSpo2TouchChart> createState() => _JwAppSpo2TouchChartState();
+}
+
+class _JwAppSpo2TouchChartState extends State<WsAppSpo2TouchChart> {
+
+  static const double _leftPad = 0;
+  static const double _itemW = 7;
+
+  int _touchSlot = -1;
+  int _downSlot = -1;
+  var _armed = false;
+  var _tracking = false;
+  Timer? _delay;
+  Offset? _downPos;
+
+  double _itemPadding(double width) {
+    return ((width - 2 * _leftPad) / 24 - _itemW) / 2;
+  }
+
+  double _slotCenterX(int slot, double width) {
+    final pad = _itemPadding(width);
+    return _leftPad + _itemW / 2 + pad + (_itemW + 2 * pad) * slot;
+  }
+
+  int _findDataPositionByX(double x, double width) {
+    final pad = _itemPadding(width);
+    final step = _itemW + 2 * pad;
+    var slot = (x / step).floor();
+    if (slot < 0) slot = 0;
+    if (slot > 23) slot = 23;
+    if (slot >= widget.hours.length) return -1;
+    final h = widget.hours[slot];
+    if (!_hasDrawableData(h)) return -1;
+    return slot;
+  }
+
+  bool _hasDrawableData(WsAppSpo2HourBucket h) {
+    return h.maxValue > 0 && h.minValue > 0;
+  }
+
+  @override
+  void didUpdateWidget(covariant WsAppSpo2TouchChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_sameHours(oldWidget.hours, widget.hours)) {
+      _delay?.cancel();
+      _touchSlot = -1;
+      _armed = false;
+      _tracking = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        widget.onSelection?.call(null);
+      });
+    }
+  }
+
+  bool _sameHours(List<WsAppSpo2HourBucket> a, List<WsAppSpo2HourBucket> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].hour != b[i].hour ||
+          a[i].maxValue != b[i].maxValue ||
+          a[i].minValue != b[i].minValue ||
+          a[i].values.length != b[i].values.length) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  void dispose() {
+    _delay?.cancel();
+    super.dispose();
+  }
+
+  void _clear() {
+    _delay?.cancel();
+    final had = _touchSlot != -1;
+    _touchSlot = -1;
+    _armed = false;
+    _tracking = false;
+    if (had && mounted) setState(() {});
+    widget.onSelection?.call(null);
+  }
+
+  WsAppSpo2HourBucket _bucket(int slot) {
+    return widget.hours.firstWhere(
+      (e) => e.hour == slot,
+      orElse: () => WsAppSpo2HourBucket(
+        hour: slot,
+        startTime: DateTime.now(),
+        values: const [],
+        maxValue: 0,
+        minValue: 0,
+      ),
+    );
+  }
+
+  void _emit(int slot, double width) {
+    final h = _bucket(slot);
+    widget.onSelection?.call(
+      WsAppSpo2TouchSelection(
+        max: h.maxValue,
+        min: h.minValue,
+        begin: h.startTime,
+        end: h.startTime.add(const Duration(hours: 1)),
+        anchorX: _slotCenterX(slot, width),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final interactive = WsAppChartLayout.interactive(widget.mode);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        final pad = _itemPadding(width);
+        final paint = CustomPaint(
+          size: Size(width, height),
+          painter: _Spo2Painter(
+            hours: widget.hours,
+            axisMax: widget.axisMax,
+            axisMin: widget.axisMin,
+            touchSlot: interactive ? _touchSlot : -1,
+            itemPadding: pad,
+            slotCenterX: _slotCenterX,
+            mode: widget.mode,
+          ),
+        );
+        if (!interactive) return paint;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanDown: (d) {
+            _delay?.cancel();
+            _downSlot = _findDataPositionByX(d.localPosition.dx, width);
+            if (_downSlot < 0) return;
+            _armed = true;
+            _tracking = false;
+            _downPos = d.localPosition;
+            _delay = Timer(WsHealthAppTheme.chartTouchDelay, () {
+              if (!mounted || !_armed) return;
+              if (_downSlot < 0 || !_hasDrawableData(_bucket(_downSlot))) {
+                return;
+              }
+              setState(() {
+                _tracking = true;
+                _touchSlot = _downSlot;
+              });
+              _emit(_touchSlot, width);
+            });
+          },
+          onPanUpdate: (d) {
+            final down = _downPos;
+            if (down == null) return;
+            final dx = (d.localPosition.dx - down.dx).abs();
+            final dy = (d.localPosition.dy - down.dy).abs();
+            if (!_tracking && dx > 12 && dx > dy) {
+              _clear();
+              return;
+            }
+            if (!_tracking) return;
+            final cur = _findDataPositionByX(d.localPosition.dx, width);
+            if (cur >= 0 && cur != _touchSlot) {
+              setState(() => _touchSlot = cur);
+              _emit(cur, width);
+            }
+          },
+          onPanEnd: (_) => _clear(),
+          onPanCancel: _clear,
+          child: paint,
+        );
+      },
+    );
+  }
+}
+
+class _Spo2Painter extends CustomPainter {
+  _Spo2Painter({
+    required this.hours,
+    required this.axisMax,
+    required this.axisMin,
+    required this.touchSlot,
+    required this.itemPadding,
+    required this.slotCenterX,
+    required this.mode,
+  });
+
+  final List<WsAppSpo2HourBucket> hours;
+  final int axisMax;
+  final int axisMin;
+  final int touchSlot;
+  final double itemPadding;
+  final double Function(int slot, double width) slotCenterX;
+  final WsAppChartMode mode;
+
+  double get _top => WsAppChartLayout.top(mode);
+
+  double get _bottomText => WsAppChartLayout.bottomText(mode, detail: 20);
+
+  bool get _showYAxis => WsAppChartLayout.showYAxis(mode);
+
+  bool get _showXAxis => WsAppChartLayout.showXAxis(mode);
+  static const double _leftPad = 0;
+  static const double _radius = 3.5;
+  static const double _labelPadRight = 5;
+  double get _plotTop => _top + _radius;
+
+  int get _chartRange => axisMax - axisMin;
+
+  double _mapY(int value, double height) {
+    final safe = value.clamp(axisMin, axisMax).toInt();
+    final axisBottom = height - _bottomText;
+    final plotBottom = axisBottom - _radius;
+    final plotH = plotBottom - _plotTop;
+    if (plotH <= 0) return _top;
+    return _plotTop + (axisMax - safe) * (plotH / _chartRange);
+  }
+
+  bool _hasData(WsAppSpo2HourBucket h) =>
+      h.maxValue > 0 && h.minValue > 0;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const labelStyle = TextStyle(
+      color: WsHealthAppTheme.spo2Text,
+      fontSize: 10.6,
+    );
+    final text = TextPainter(textDirection: ui.TextDirection.ltr);
+
+    const topStr = '100';
+    const botStr = '85';
+    final labelRight = size.width - _labelPadRight;
+    var topLineEndX = size.width;
+    var bottomLineEndX = size.width;
+    if (_showYAxis) {
+      text.text = const TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      final topW = text.width;
+      text.text = const TextSpan(text: botStr, style: labelStyle);
+      text.layout();
+      final botW = text.width;
+      topLineEndX = labelRight - topW - 5;
+      bottomLineEndX = labelRight - botW - 5;
+    }
+
+    final linePaint = Paint()
+      ..color = WsHealthAppTheme.spo2HeadLine
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(0, _top), Offset(topLineEndX, _top), linePaint);
+    canvas.drawLine(
+      Offset(0, size.height - _bottomText),
+      Offset(bottomLineEndX, size.height - _bottomText),
+      linePaint,
+    );
+
+    if (_showXAxis) {
+      final dotY = WsAppChartLayout.xAxisDotY(size.height, _bottomText);
+      final labelY = WsAppChartLayout.xAxisLabelY(size.height, _bottomText);
+      for (var hour = 0; hour < 24; hour++) {
+        final cx = slotCenterX(hour, size.width);
+        if (hour == 0) {
+          canvas.drawCircle(
+            Offset(_leftPad + itemPadding, dotY),
+            1.5,
+            Paint()..color = WsHealthAppTheme.spo2Text,
+          );
+        } else if (hour == 23) {
+          canvas.drawCircle(
+            Offset(size.width - _leftPad - itemPadding, dotY),
+            1.5,
+            Paint()..color = WsHealthAppTheme.spo2Text,
+          );
+        } else if (hour % 4 == 0) {
+          final str = '${hour.toString().padLeft(2, '0')}:00';
+          text.text = TextSpan(text: str, style: labelStyle);
+          text.layout();
+          text.paint(canvas, Offset(cx - text.width / 2, labelY));
+        }
+      }
+    }
+
+    var hasData = false;
+    final fill = Paint()
+      ..color = WsHealthAppTheme.spo2Value
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+
+    for (var i = 0; i < hours.length && i < 24; i++) {
+      final h = hours[i];
+      if (!_hasData(h)) continue;
+      hasData = true;
+      final cx = slotCenterX(h.hour, size.width);
+      final yHi = _mapY(h.maxValue, size.height);
+      final yLo = _mapY(h.minValue, size.height);
+      if (h.maxValue == h.minValue) {
+        canvas.drawCircle(Offset(cx, yHi), _radius, fill);
+      } else {
+        var barTop = yHi + _radius;
+        var barBottom = yLo - _radius;
+        if (barBottom - barTop <= _radius * 2) {
+          canvas.drawCircle(
+            Offset(cx, (yHi + yLo) / 2),
+            _radius,
+            fill,
+          );
+        } else {
+          final rect = RRect.fromRectAndRadius(
+            Rect.fromLTRB(cx - _radius, barTop, cx + _radius, barBottom),
+            const Radius.circular(_radius),
+          );
+          canvas.drawRRect(rect, fill);
+        }
+      }
+
+      if (i == touchSlot && _hasData(h)) {
+        final thumb = Paint()
+          ..color = WsHealthAppTheme.spo2ThumbBg
+          ..strokeWidth = 1;
+        canvas.drawLine(
+          Offset(cx, 0),
+          Offset(cx, yHi - _radius - 1),
+          thumb,
+        );
+        canvas.drawLine(
+          Offset(cx, yLo + _radius + 1),
+          Offset(cx, size.height - _bottomText),
+          thumb,
+        );
+      }
+    }
+
+    if (!hasData && WsAppChartLayout.showEmptyHint(mode)) {
+      text.text = TextSpan(
+        text: '暂无血氧',
+        style: TextStyle(
+          color: WsHealthAppTheme.spo2Empty,
+          fontSize: WsAppChartLayout.emptyHintFontSize(mode),
+        ),
+      );
+      text.layout();
+      text.paint(
+        canvas,
+        Offset(
+          (size.width - text.width) / 2,
+          _top + (size.height - _top - _bottomText) / 2 - 8,
+        ),
+      );
+    }
+
+    if (_showYAxis) {
+      text.text = const TextSpan(text: topStr, style: labelStyle);
+      text.layout();
+      final topW = text.width;
+      const labelDy = 12.0;
+      text.paint(canvas, Offset(labelRight - topW, _top - labelDy));
+
+      text.text = const TextSpan(text: botStr, style: labelStyle);
+      text.layout();
+      final botW = text.width;
+      text.paint(
+        canvas,
+        Offset(labelRight - botW, size.height - _bottomText - labelDy),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _Spo2Painter oldDelegate) =>
+      oldDelegate.hours != hours ||
+      oldDelegate.touchSlot != touchSlot ||
+      oldDelegate.itemPadding != itemPadding ||
+      oldDelegate.mode != mode;
+}

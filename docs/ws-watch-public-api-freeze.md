@@ -1,7 +1,8 @@
 # WS Watch 公开 API 冻结（W5.0 → W5.1 Greenfield）
 
-> **仓库状态（2026-11）**：原 **M1–M6** 实现已随 `packages/ws_watch_sdk`、`packages/ws_watch_demo` **整包删除**。本文是 **W5.1 起唯一契约**；实施方式 = **复制 `jw_watch_sdk` / `jw_watch_demo` 骨架**，替换为 `WS*` 类型与 HoneyProtocol L2，**不从旧 WS 源码 port**。  
-> **对照真源**：`packages/jw_watch_sdk/lib/jw_watch_sdk.dart`、`JWWatch` / `JWWatchSession` 及同名子模块（settings / history / measure / control / notify / today / debug）。  
+> **仓库状态（2026-11）**：原 **M1–M6** 实现已随 `packages/ws_watch_sdk`、`packages/ws_watch_demo` **整包删除**；**当前无 WS SDK/Demo 源码**，本次为 **首版 Greenfield**。  
+> **实施方式**：复制 `jw_watch_sdk` / `jw_watch_demo` 的**工程骨架**（目录与 Watch+Session 分层），新建 `ws_watch_sdk` / `ws_watch_demo` 与 `WS*` 类型；**设备协议按 HoneyProtocol 新写**（JW 为老协议对照，**不从旧 WS port**，**无** M 系 `@Deprecated`）。  
+> **对照真源（仅 API 形状）**：`packages/jw_watch_sdk/lib/jw_watch_sdk.dart`、`JWWatch` / `JWWatchSession` 及同名子模块。  
 > **HoneyBox**：Greenfield 阶段 **不依赖** `ws_watch_demo`；Watch Lab 仅 JW。
 
 ---
@@ -13,7 +14,7 @@
 | API 形状 | 与 JW **一一镜像**（export 列表、Watch + Session、子模块命名仅前缀不同） |
 | Session 阶段 | 与 JW 同款 **`WSSessionPhase` / 状态流**（对照 `jw_session_state.dart`） |
 | 过渡 API | **不保留** M 系 `connect` on Watch、`data`/`openSimulationLab` 等；**无** `@Deprecated` 垫层 |
-| L2 | HoneyProtocol（`0x02`/`0x03`/`0x05`/`0x11`…）；**不**复用 JW codec |
+| 设备协议 | **HoneyProtocol**（新）；JW 侧为 **HL 老协议**；WS codec **独立实现**，不复用 JW |
 | 存储 | `ws_watch.db`；表设计 follow [jw-watch-database-design.md](jw-watch-database-design.md) 语义，**schema 与已删 M 版零兼容** |
 | 共用底层 | 仅 `watch_frame_channel`、`watch_transport`、`watch_transport_ble`、`watch_transport_simulation` |
 
@@ -53,7 +54,7 @@ await watch.dispose();
 
 与 [jw_watch_sdk.dart](../packages/jw_watch_sdk/lib/jw_watch_sdk.dart) export 分组一致：
 
-| 模块 | 协议阶段 | W5 交付 |
+| 模块 | Honey 命令域（排期） | W5 交付 |
 | --- | --- | --- |
 | `WSWatch` | 全局扫描、DB、`createSession` | W5.1 |
 | `WSWatchSession` | 连接、capabilities、historyScope | W5.1 |
@@ -78,6 +79,6 @@ await watch.dispose();
 ## 5. 实施顺序（冻结）
 
 1. 文档与删包、HoneyBox 去 WS 依赖（§0）  
-2. **你方编译验证**  
-3. W5.1：JW 骨架复制 → WS 包名与 Honey L2 目录  
+2. **编译验证**  
+3. **W5.1**：JW 工程骨架复制 → 新建 `ws_watch_sdk` / `ws_watch_demo` 与 `WS*` 公开 API；Honey 协议实现随迭代填入（首版不追求全量 codec）  
 4. W5.2–W5.5：见 [ws-watch-implementation-plan.md](ws-watch-implementation-plan.md)

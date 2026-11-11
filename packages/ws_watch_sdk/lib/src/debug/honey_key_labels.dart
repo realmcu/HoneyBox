@@ -1,0 +1,118 @@
+/// Honey L2 cmd/key names for [WSWatchDebugLog] (HoneyProtocol).
+abstract final class HoneyKeyLabels {
+  static const _cmdNames = <int, String>{
+    0x02: 'SETTINGS(0x02)',
+    0x03: 'BIND(0x03)',
+    0x04: 'CONTROL(0x04)',
+    0x05: 'DATA(0x05)',
+    0x11: 'MEASURE(0x11)',
+  };
+
+  /// Short symbol (log suffix).
+  static const _keySymbols = <(int, int), String>{
+    (0x02, 0x01): 'SET_TIME',
+    (0x02, 0x02): 'SET_PHONE_SYSTEM',
+    (0x02, 0x03): 'SET_LANGUAGE',
+    (0x02, 0x30): 'DEVICE_INFO',
+    (0x02, 0x31): 'CAPABILITIES',
+    (0x03, 0x01): 'BIND_REQ',
+    (0x03, 0x02): 'BIND_REPLY',
+    (0x03, 0x03): 'LOGIN_REQ',
+    (0x03, 0x04): 'LOGIN_REPLY',
+    (0x03, 0x05): 'UNBIND',
+    (0x04, 0x50): 'BATTERY_QUERY',
+    (0x04, 0x51): 'BATTERY_REPLY',
+    (0x05, 0x00): 'SYNC_ALL',
+    (0x05, 0x01): 'SYNC_ACTIVITY',
+    (0x05, 0x02): 'SYNC_SLEEP',
+    (0x05, 0x03): 'SYNC_HR',
+    (0x05, 0x04): 'SYNC_BP',
+    (0x05, 0x05): 'SYNC_SPO2',
+    (0x05, 0x06): 'SYNC_HRV',
+    (0x05, 0x07): 'SYNC_PRESSURE',
+    (0x05, 0x08): 'SYNC_TEMP',
+    (0x05, 0x09): 'SYNC_GLU',
+    (0x05, 0x0A): 'SYNC_SPORT',
+    (0x05, 0x21): 'DATA_ACTIVITY',
+    (0x05, 0x22): 'DATA_SLEEP',
+    (0x05, 0x23): 'DATA_HR',
+    (0x05, 0x24): 'DATA_BP',
+    (0x05, 0x25): 'DATA_SPO2',
+    (0x05, 0x26): 'DATA_HRV',
+    (0x05, 0x27): 'DATA_PRESSURE',
+    (0x05, 0x28): 'DATA_TEMP',
+    (0x05, 0x29): 'DATA_GLU',
+    (0x05, 0x2A): 'DATA_SPORT',
+    (0x05, 0x40): 'SYNC_START',
+    (0x05, 0x41): 'SYNC_END',
+    (0x05, 0x42): 'SYNC_CONFIRM',
+    (0x05, 0x60): 'TODAY_QUERY',
+    (0x05, 0x61): 'TODAY_PAYLOAD',
+    (0x11, 0x03): 'HR_SPOT_START',
+    (0x11, 0x04): 'HR_SPOT_START_REPLY',
+    (0x11, 0x05): 'HR_SPOT_STOP',
+  };
+
+  /// 中文说明，便于对照协议文档。
+  static const _keyHints = <(int, int), String>{
+    (0x02, 0x01): '对时',
+    (0x02, 0x02): '手机系统',
+    (0x02, 0x03): '读写语言',
+    (0x02, 0x30): '设备信息',
+    (0x02, 0x31): '能力列表',
+    (0x03, 0x01): '首次绑定请求',
+    (0x03, 0x02): '首次绑定应答',
+    (0x03, 0x03): '登录请求',
+    (0x03, 0x04): '登录应答',
+    (0x03, 0x05): '解绑',
+    (0x04, 0x50): '读电量',
+    (0x04, 0x51): '电量应答',
+    (0x05, 0x00): '同步全部类型',
+    (0x05, 0x01): '同步-活动',
+    (0x05, 0x02): '同步-睡眠',
+    (0x05, 0x03): '同步-心率',
+    (0x05, 0x04): '同步-血压',
+    (0x05, 0x05): '同步-血氧',
+    (0x05, 0x06): '同步-HRV',
+    (0x05, 0x07): '同步-压力',
+    (0x05, 0x08): '同步-体温',
+    (0x05, 0x09): '同步-血糖',
+    (0x05, 0x0A): '同步-运动',
+    (0x05, 0x21): '下发-活动帧',
+    (0x05, 0x22): '下发-睡眠帧',
+    (0x05, 0x23): '下发-心率帧',
+    (0x05, 0x24): '下发-血压帧',
+    (0x05, 0x25): '下发-血氧帧',
+    (0x05, 0x26): '下发-HRV帧',
+    (0x05, 0x27): '下发-压力帧',
+    (0x05, 0x28): '下发-体温帧',
+    (0x05, 0x29): '下发-血糖帧',
+    (0x05, 0x2A): '下发-运动帧',
+    (0x05, 0x40): '同步开始计划',
+    (0x05, 0x41): '同步结束',
+    (0x05, 0x42): '同步确认',
+    (0x05, 0x60): '今日汇总查询',
+    (0x05, 0x61): '今日汇总应答',
+    (0x11, 0x03): '点测心率-开始',
+    (0x11, 0x04): '点测心率-开始应答',
+    (0x11, 0x05): '点测心率-停止',
+  };
+
+  static String annotate(int command, int key) => describeKey(command, key);
+
+  static String describeKey(int command, int key) {
+    final cmd = _cmdNames[command] ?? 'CMD_0x${_hexByte(command)}';
+    final sym = _keySymbols[(command, key)];
+    final hint = _keyHints[(command, key)];
+    final hex = '0x${_hexByte(key)}';
+    if (sym != null && hint != null) {
+      return '$cmd $hex($sym · $hint)';
+    }
+    if (sym != null) return '$cmd $hex($sym)';
+    if (hint != null) return '$cmd $hex($hint)';
+    return '$cmd key=$hex';
+  }
+
+  static String _hexByte(int b) =>
+      (b & 0xff).toRadixString(16).padLeft(2, '0').toUpperCase();
+}

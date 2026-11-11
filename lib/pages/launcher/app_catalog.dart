@@ -56,9 +56,9 @@ const List<AppEntry> kAppCatalog = <AppEntry>[
   ),
   AppEntry(
     id: AppId.watchLab,
-    title: 'Watch Lab',
-    subtitle: 'JW 协议实验室（独立全屏 Demo）',
-    icon: Icons.watch_later_outlined,
+    title: 'SDK Demo',
+    subtitle: 'JW / WS Watch SDK 实验室',
+    icon: Icons.science_outlined,
     accent: Color(0xFF5B4B9A),
     deviceFilter: 'Watch Lab',
     implemented: true,
@@ -92,7 +92,7 @@ String routeNameFor(AppId id) {
     case AppId.dashboard:
       return '/dashboard-root';
     case AppId.watchLab:
-      return '/watch-lab-root';
+      return '/sdk-demo-root';
     case AppId.capture:
       return '/capture-root';
     case AppId.ota:

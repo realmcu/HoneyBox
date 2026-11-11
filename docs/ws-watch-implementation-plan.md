@@ -1,7 +1,7 @@
 # W5：完整 WS Flutter SDK 实施计划
 
 > 状态：**W5.0 基线已落档**（[覆盖表](ws-watch-api-coverage.md)、[API 冻结](ws-watch-public-api-freeze.md)）；**Greenfield 重置已执行**（见 §0）。码云 Epic **[IKUCE2](https://e.gitee.com/priodigit/dashboard?issue=IKUCE2)**，子任务 §9。前置 **T1–T3 已完成**；JW **T4.0–T4.5 已闭环**（见 [jw-watch-sdk-implementation-plan.md](jw-watch-sdk-implementation-plan.md)、[迁移计划 §20](ws-watch-migration-plan.md)）。  
-> 工程约定：**公开 API / Session 形态 / Demo 信息架构完全对齐 `jw_watch_sdk` + `jw_watch_demo`**（仅 `JW*` → `WS*`、L2 为 HoneyProtocol）；**不从旧 M1–M6 代码 port**；**L0/L1 共用** `watch_frame_channel` + transport trio；**SDK 与 Demo 分包**，业务不进 HoneyBox。  
+> 工程约定：**公开 API / Session / Demo 信息架构对齐 `jw_watch_sdk` + `jw_watch_demo`（`JW*` → `WS*`）**；**设备协议**：JW = 老 HL 私有协议，WS = **新 HoneyProtocol**（codec 独立实现，不复用 JW）。WS SDK/Demo 为 **首版 Greenfield**，删包后仓库内尚无任何 WS 落地代码。**不从旧 M1–M6 port**；**不**保留 M 系 `@Deprecated`。链路下层共用 `watch_frame_channel` + transport；**SDK 与 Demo 分包**，业务不进 HoneyBox。  
 > 协议：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/) `0x05-data` 等；设计细节见 [ws-watch-sdk-design.md](ws-watch-sdk-design.md)（M 系实现章节为 **historical**）。  
 > **当前无 WS 真机**：**W5.1–W5.5** 以模拟器 + 单测/集成测为验收面；**W5.6** 对应 M7 真机 UART（[IKSABE](https://e.gitee.com/priodigit/dashboard?issue=IKSABE)），不阻塞 W5.1–5.5 关单。
 
@@ -15,9 +15,9 @@
 | 0.2 删包 | ✅ | 移除 `packages/ws_watch_sdk`、`packages/ws_watch_demo` **整目录**（含 example/integration_test） |
 | 0.3 HoneyBox | ✅ | `pubspec` / CI 去 WS workspace 与依赖；**不**挂载 `ws_watch_demo`；Watch Lab 仅 JW |
 | 0.4 宿主编译 | ⏳ | **由你本地 `flutter pub get` + 构建验证** |
-| 0.5 骨架复制 | ⏸️ | **0.4 通过后**：从 `jw_watch_sdk` / `jw_watch_demo` **复制目录骨架** → 改包名与 Honey L2；**零兼容**旧 `ws_watch.db` M 表 |
+| 0.5 骨架复制 | ⏸️ | **0.4 通过后**：从 `jw_watch_sdk` / `jw_watch_demo` **复制工程骨架**（目录分层 + Watch/Session/Demo 习惯）→ 新建 `ws_watch_sdk` / `ws_watch_demo` 与 `WS*` 公开 API；**Honey 协议编解码在 SDK 内按规范新写**（正常模块命名，非另起「L2 包」） |
 
-**废止：** 码云 **M1–M6** 在 WS 侧视为 **superseded**（JW 线 T4 仍有效）；W5.1 验收项改为「JW 镜像骨架 + Honey 协议接线」，**不再**要求「M3–M5 测试迁移通过」。
+**废止：** 码云 **M1–M6** 在 WS 侧视为 **superseded**（JW 线 T4 仍有效）；W5.1 验收为「JW 同构公开 API + 首版包壳 + Sim 最小连通」，**不再**要求「M3–M5 测试迁移通过」。`ws_watch.db` 与旧 M 表 **零兼容**。
 
 **数据库：** 仍用文件名 `ws_watch.db`，schema 按 [jw-watch-database-design.md](jw-watch-database-design.md) **WS 化重写**，与旧 M5 drift **不迁移**。
 
@@ -28,10 +28,10 @@
 交付独立 `packages/ws_watch_sdk` + `packages/ws_watch_demo`：
 
 - **API 形状对齐 JW**：`WSWatch`（扫描、全局 `ws_watch.db`）+ **`WSWatchSession`**（单连接、settings / history / measure / control / notify / today 等挂在 session 上），与 `JWWatch` + `JWWatchSession` 同构；调用方读 JW 文档即可理解 WS 分组，仅前缀与类型不同。
-- **L2 完全 HoneyProtocol**：设置 `0x02`（含操作码）、绑定 `0x03`、数据 `0x05` v1、点测 `0x11` 等；**不**复用 JW codec 或 JW 历史 Key。
+- **Honey 新协议（HoneyProtocol）**：设置 `0x02`、绑定 `0x03`、数据 `0x05` v1、点测 `0x11` 等；**不**复用 JW 老协议 codec 或 JW 历史 Key。
 - **历史同步：HoneyProtocol 全量类型**（请求键 **0x01–0x1F**、数据键 **0x21–0x3F**，以 `0x05-data.rst` 为准）；**W5.3 一次性交付** 全部 codec + drift 表 + 同步，M5 步数/心率为起点代码而非终态范围。
 - **内置 drift/SQLite** `ws_watch.db`：按类型分表、查询 API 语义对齐 `JWHistoryStore`（设备+用户+时间范围），**表结构与 JW 库不共用**。
-- **模拟器为设备端 L2 真源**：`SimWatchDevice`（及注册工厂）在无固件时承担协议状态、历史生成、设置读写、点测/上报；通过 **integration_test** 跑通与 `jw_watch_demo` 同级主路径。
+- **模拟器为 Honey 协议设备侧真源**：`SimWatchDevice`（及注册工厂）在无固件时承担协议状态、历史生成、设置读写、点测/上报；通过 **integration_test** 跑通与 `jw_watch_demo` 同级主路径。
 - Demo **视觉与信息架构对齐** `jw_watch_demo`（连接、设置、数据首页、同步顶区、类型详情），**仅依赖** `ws_watch_sdk` 公开 API，**不**与 SDK 同包。
 
 **完成标准（W5 主线，模拟器证据即可关单子阶段）：**
@@ -193,7 +193,7 @@ SimWatchDevice（设备端 HoneyProtocol 行为，W5.2 扩全）
 | 阶段 | 名称 | 交付摘要 | 验收（默认 Sim） |
 | --- | --- | --- | --- |
 | **W5.0** | 覆盖表 + API 冻结 | HoneyProtocol 全表；JW↔WS 门面对照 | 文档 + 评审 |
-| **W5.1** | Greenfield 骨架 | 从 JW 复制包结构；`WS*` 公开 API 与 JW 同构；Honey L2 占位 + Sim 连通 | `flutter analyze` + 最小连接单测 |
+| **W5.1** | Greenfield 骨架 | 从 JW 复制工程骨架；新建 `WS*` 公开 API（首版）；Honey codec 随模块逐步填充 + Sim 最小连通 | `flutter analyze` + 最小连接单测 |
 | **W5.2** | 模拟器 v2 | 设备态、异常路径；为 W5.3 历史打底 | integration_test 基础链路 |
 | **W5.3** | 数据：存储与全量历史同步 | **0x01–0x1F codec+表** + `WSHistoryStore` + `syncHealthData` | 全量同步 2 轮去重 |
 | **W5.4** | 业务能力 | 设置 + 点测/监测 + 控制/通知 | Sim 读写 + 点测/上报 |

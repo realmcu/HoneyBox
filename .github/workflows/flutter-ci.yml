@@ -74,6 +74,14 @@ jobs:
         working-directory: packages/watch_transport_ble
         run: flutter test
 
+      - name: Run ws_watch_sdk tests
+        working-directory: packages/ws_watch_sdk
+        run: flutter test
+
+      - name: Run ws_watch_demo tests
+        working-directory: packages/ws_watch_demo
+        run: flutter test
+
   # ─── Job 2: Build Android APK ────────────────────────────────────
   build-android:
     name: Build Android APK
