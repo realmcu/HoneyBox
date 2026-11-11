@@ -134,6 +134,7 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
     final bindState = ref.watch(watchBindProvider);
     final modelState = ref.watch(watchModelProvider);
     final bound = bindState.phase == WatchBindPhase.success;
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
 
     ref.listen<WatchBindState>(watchBindProvider, (previous, next) {
       if (previous?.phase != WatchBindPhase.success &&
@@ -150,6 +151,7 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
       drawer: const AppDrawer(),
       drawerEdgeDragWidth: MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
+        leading: canPop ? const BackButton() : null,
         title: Text(widget.deviceName),
         actions: [
           TextButton.icon(

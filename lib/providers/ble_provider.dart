@@ -48,12 +48,14 @@ class ConnectedDeviceInfo {
   final String name;
   final int mtu;
   final bool isJw;
+  final String? ownerApp;
 
   ConnectedDeviceInfo({
     required this.deviceId,
     required this.name,
     required this.mtu,
     this.isJw = false,
+    this.ownerApp,
   });
 }
 
@@ -191,7 +193,7 @@ class BleNotifier extends StateNotifier<BleState> {
   }
 
   Future<bool> connect(String deviceId, String deviceName,
-      {bool allowJw = false}) async {
+      {bool allowJw = false, String? ownerApp}) async {
     _discardPendingScanDevices();
     // 调试模式旁路:虚拟设备不发起真实 GATT 连接,直接把
     // connectedDeviceProvider 置为一个"看起来已连"的 info,让
@@ -211,6 +213,7 @@ class BleNotifier extends StateNotifier<BleState> {
         deviceId: deviceId,
         name: deviceName,
         mtu: 512,
+        ownerApp: ownerApp,
       );
       state = BleState.connected;
       return true;
@@ -225,6 +228,7 @@ class BleNotifier extends StateNotifier<BleState> {
         name: deviceName,
         mtu: _bleManager.mtu,
         isJw: _bleManager.jwTransport != null,
+        ownerApp: ownerApp,
       );
       state = BleState.connected;
     } else {

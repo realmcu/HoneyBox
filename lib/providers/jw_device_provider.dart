@@ -29,8 +29,12 @@ final jwHistoryStoreProvider = FutureProvider<JwHistoryStore>((ref) async {
   return store;
 });
 
-final jwRepositoryProvider =
-    FutureProvider.autoDispose<JwDeviceRepository?>((ref) async {
+/// BLE 会话由当前连接持有，不随 Watch 页面卸载而销毁。
+///
+/// 返回 Launcher 时页面会卸载；如果这里使用 `autoDispose`，仓库析构会关闭
+/// `JwSession` 并断开底层 BLE，导致连接状态无法保留。连接变化时 provider
+/// 仍会重建并释放旧仓库。
+final jwRepositoryProvider = FutureProvider<JwDeviceRepository?>((ref) async {
   final connected = ref.watch(connectedDeviceProvider);
   if (connected?.isJw != true) return null;
   final port = ref.read(bleManagerProvider).jwTransport;
@@ -65,8 +69,9 @@ final jwRepositoryProvider =
   return repository;
 });
 
+/// 与 [jwRepositoryProvider] 同寿命，避免页面卸载时 notifier 释放仓库。
 final jwDeviceProvider =
-    StateNotifierProvider.autoDispose<JwDeviceNotifier, JwDeviceState>((ref) {
+    StateNotifierProvider<JwDeviceNotifier, JwDeviceState>((ref) {
   final repository = ref.watch(jwRepositoryProvider);
   final notifier = JwDeviceNotifier(
       repository: repository.valueOrNull,

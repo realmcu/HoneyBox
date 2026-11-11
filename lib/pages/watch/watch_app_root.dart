@@ -3,13 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
 import '../../providers/current_app_provider.dart';
 import '../../providers/rtl8762_ota_provider.dart';
+import '../launcher/app_catalog.dart';
+import '../launcher/connected_app.dart';
 import '../scan/scan_page.dart';
 import 'watch_device_page.dart';
 import 'jw_device_page.dart';
 import 'jw_history_page.dart';
 
 /// Watch 应用根：结构与 EBadgeAppRoot 一致。
-/// [PopScope] 保证返回 Launcher 时 disconnect + 清 currentApp（spec §4.4）。
+/// 返回 Launcher 时保留连接并清 currentApp，由 Launcher 展示连接状态。
 class WatchAppRoot extends ConsumerStatefulWidget {
   const WatchAppRoot({super.key});
 
@@ -26,8 +28,8 @@ class _WatchAppRootState extends ConsumerState<WatchAppRoot> {
     ref.listen<ConnectedDeviceInfo?>(connectedDeviceProvider, (prev, next) {
       // A popped route remains mounted during its exit animation. Its delayed
       // disconnect must not pop the Launcher after this route left the stack.
-      if (prev != null &&
-          next == null &&
+      if (connectedDeviceMatchesApp(prev, AppId.watch) &&
+          !connectedDeviceMatchesApp(next, AppId.watch) &&
           !_leaving &&
           !ref.read(rtl8762OtaInProgressProvider)) {
         Navigator.of(context).popUntil((r) =>
@@ -40,7 +42,10 @@ class _WatchAppRootState extends ConsumerState<WatchAppRoot> {
       }
     });
 
-    final connected = ref.watch(connectedDeviceProvider);
+    final allConnected = ref.watch(connectedDeviceProvider);
+    final connected = connectedDeviceMatchesApp(allConnected, AppId.watch)
+        ? allConnected
+        : null;
     final otaInProgress = ref.watch(rtl8762OtaInProgressProvider);
     final child = connected != null
         ? connected.isJw
@@ -70,7 +75,6 @@ class _WatchAppRootState extends ConsumerState<WatchAppRoot> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) return;
         _leaving = true;
-        ref.read(bleNotifierProvider.notifier).disconnect();
         ref.read(currentAppProvider.notifier).state = null;
       },
       child: child,

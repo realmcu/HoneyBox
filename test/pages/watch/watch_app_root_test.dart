@@ -14,6 +14,7 @@ import 'dart:io';
 
 class _Manager implements manager.BleManager {
   final scanFilters = <String?>[];
+  var disconnectCalls = 0;
   void Function(ScanResult)? scanCallback;
   @override
   Stream<manager.BleState> get onStateChanged => const Stream.empty();
@@ -31,7 +32,9 @@ class _Manager implements manager.BleManager {
   }
 
   @override
-  Future<void> disconnect() async {}
+  Future<void> disconnect() async {
+    disconnectCalls++;
+  }
 }
 
 void main() {
@@ -161,11 +164,11 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
   });
-  testWidgets('leaving Watch cannot pop Launcher on a fast disconnect callback',
-      (tester) async {
+  testWidgets('back to launcher keeps Watch connection', (tester) async {
+    final manager = _Manager();
     await tester.pumpWidget(ProviderScope(
         overrides: [
-          bleManagerProvider.overrideWith((ref) => _Manager()),
+          bleManagerProvider.overrideWith((ref) => manager),
           connectedDeviceProvider.overrideWith((ref) => ConnectedDeviceInfo(
               deviceId: 'test', name: 'S200', mtu: 23, isJw: true)),
           jwDeviceProvider.overrideWith((ref) => JwDeviceNotifier(
@@ -185,9 +188,52 @@ void main() {
                         child: const Text('Launcher')))))));
     await tester.tap(find.text('Launcher'));
     await tester.pumpAndSettle();
+    final container =
+        ProviderScope.containerOf(tester.element(find.byType(WatchAppRoot)));
+    final connected = container.read(connectedDeviceProvider);
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(find.text('Launcher'), findsOneWidget);
+    expect(container.read(connectedDeviceProvider), same(connected));
+    expect(manager.disconnectCalls, 0);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'fast disconnect while leaving Watch cannot pop the launcher again',
+      (tester) async {
+    final manager = _Manager();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [
+          bleManagerProvider.overrideWith((ref) => manager),
+          connectedDeviceProvider.overrideWith((ref) => ConnectedDeviceInfo(
+              deviceId: 'test', name: 'S200', mtu: 23, isJw: true)),
+          jwDeviceProvider.overrideWith((ref) => JwDeviceNotifier(
+              repository: null,
+              initialState:
+                  const JwDeviceState(phase: JwDevicePhase.loggedIn))),
+        ],
+        child: MaterialApp(
+            home: Builder(
+                builder: (context) => Scaffold(
+                    body: TextButton(
+                        onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                settings:
+                                    const RouteSettings(name: '/watch-root'),
+                                builder: (_) => const WatchAppRoot())),
+                        child: const Text('Launcher')))))));
+    await tester.tap(find.text('Launcher'));
+    await tester.pumpAndSettle();
+    final container =
+        ProviderScope.containerOf(tester.element(find.byType(WatchAppRoot)));
+    await tester.tap(find.byType(BackButton));
+    container.read(connectedDeviceProvider.notifier).state = null;
+    await tester.pumpAndSettle();
+    expect(find.text('Launcher'), findsOneWidget);
+    expect(container.read(connectedDeviceProvider), isNull);
+    expect(manager.disconnectCalls, 0);
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();
   });

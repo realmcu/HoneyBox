@@ -121,12 +121,14 @@ class _DevicePageState extends ConsumerState<DevicePage>
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final features = deviceFeaturesFor(_type);
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
 
     return Scaffold(
       drawer: const AppDrawer(),
       // Let a rightward swipe from the left half of the screen open the drawer.
       drawerEdgeDragWidth: MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
+        leading: canPop ? const BackButton() : null,
         title: Text(widget.deviceName),
         actions: [
           TextButton.icon(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/ble_provider.dart';
 import '../../providers/current_app_provider.dart';
 import '../ebadge/ebadge_app_root.dart';
 import '../shared/update_flow.dart';
@@ -8,6 +9,7 @@ import '../watch/watch_app_root.dart';
 import '../capture/capture_page.dart';
 import '../ota/ota_chip_page.dart';
 import 'app_catalog.dart';
+import 'connected_app.dart';
 import 'widgets/app_card.dart';
 
 /// Sentinel value for the overflow-menu entry that is an *action* rather than a
@@ -22,6 +24,7 @@ class AppLauncherPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final connected = ref.watch(connectedDeviceProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('选择应用'),
@@ -51,6 +54,9 @@ class AppLauncherPage extends ConsumerWidget {
           final entry = kAppCatalog[i];
           return AppCard(
             entry: entry,
+            connectedDeviceName: connectedDeviceMatchesApp(connected, entry.id)
+                ? connected?.name
+                : null,
             onTap: () => _launch(context, ref, entry),
           );
         },
@@ -88,12 +94,59 @@ class AppLauncherPage extends ConsumerWidget {
       return;
     }
 
+    final existing = ref.read(connectedDeviceProvider);
+    final usesDeviceConnection =
+        entry.id == AppId.ebadge || entry.id == AppId.watch;
+    if (usesDeviceConnection &&
+        existing != null &&
+        !connectedDeviceMatchesApp(existing, entry.id)) {
+      final switchApp = await _confirmSwitchConnectedApp(
+        context,
+        connectedName: existing.name,
+        targetName: entry.title,
+      );
+      if (!switchApp || !context.mounted) return;
+      await ref.read(bleNotifierProvider.notifier).disconnect();
+      if (!context.mounted) return;
+    }
+
     ref.read(currentAppProvider.notifier).state = entry.id;
     final name = routeNameFor(entry.id);
-    Navigator.of(context).push(MaterialPageRoute(
-      settings: RouteSettings(name: name),
-      builder: (_) => _rootFor(entry),
-    ));
+    try {
+      await Navigator.of(context).push(MaterialPageRoute(
+        settings: RouteSettings(name: name),
+        builder: (_) => _rootFor(entry),
+      ));
+    } finally {
+      if (context.mounted && ref.read(currentAppProvider) == entry.id) {
+        ref.read(currentAppProvider.notifier).state = null;
+      }
+    }
+  }
+
+  Future<bool> _confirmSwitchConnectedApp(
+    BuildContext context, {
+    required String connectedName,
+    required String targetName,
+  }) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('切换应用'),
+            content: Text('当前已连接 $connectedName。打开 $targetName 前会先断开当前设备。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('断开并打开'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   Widget _rootFor(AppEntry entry) {

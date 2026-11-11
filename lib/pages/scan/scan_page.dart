@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../providers/ble_provider.dart';
+import '../../providers/current_app_provider.dart';
 import '../../services/jw/jw_scan_policy.dart';
 import '../../services/app_settings.dart';
 import '../../services/system_settings.dart';
@@ -189,7 +190,8 @@ class _ScanPageState extends ConsumerState<ScanPage>
     ref
         .read(bleNotifierProvider.notifier)
         .connect(device.deviceId, device.name,
-            allowJw: widget.acceptJwCandidates)
+            allowJw: widget.acceptJwCandidates,
+            ownerApp: ref.read(currentAppProvider)?.name)
         .then((success) {
       if (!mounted) return;
       // On success the root gate swaps to the device page automatically once
@@ -238,8 +240,8 @@ class _ScanPageState extends ConsumerState<ScanPage>
     final base = debugOn ? <ScanDevice>[debugDevice, ...all] : all;
     final devices = _applyFilter(base);
     final scanning = bleState == BleState.scanning;
-    final showBack =
-        widget.showBackButton && (ModalRoute.of(context)?.canPop ?? false);
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
+    final showBack = widget.showBackButton && canPop;
 
     return Scaffold(
       drawer: showBack ? null : const AppDrawer(),
@@ -247,7 +249,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
       drawerEdgeDragWidth:
           showBack ? 0 : MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
-        leading: showBack ? const BackButton() : null,
+        leading: canPop ? const BackButton() : null,
         title: Text('${widget.appTitle} · 扫描设备',
             style: tt.titleLarge?.copyWith(color: cs.onPrimary)),
         backgroundColor: cs.primary,
