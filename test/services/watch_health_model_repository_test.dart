@@ -1,9 +1,31 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:honeybox/pages/watch/health/watch_health_data.dart';
 import 'package:honeybox/services/watch_health_protocol.dart';
 import 'package:honeybox/services/watch_health_repository.dart';
+import 'package:honeybox/services/watch_health_store.dart';
+
+class _GateStore implements WatchHealthStore {
+  WatchHealthSnapshot? cached;
+  Completer<void>? gate;
+  bool failOnSave = false;
+  int saveCount = 0;
+  final List<WatchHealthSnapshot> saved = [];
+
+  @override
+  Future<WatchHealthSnapshot?> load(String deviceId) async => cached;
+
+  @override
+  Future<void> save(String deviceId, WatchHealthSnapshot snapshot) async {
+    saveCount++;
+    if (gate != null) await gate!.future;
+    if (failOnSave) throw const FileSystemException('disk full');
+    saved.add(snapshot);
+  }
+}
 
 void main() {
   test('runs history sync, acknowledges it, then reads today data', () async {
@@ -21,6 +43,7 @@ void main() {
     );
 
     final future = repository.sync('watch-01');
+    await pumpEventQueue();
     expect(sent, [WatchHealthProtocol.buildRequestAll()]);
 
     notifications.add(_frame([
@@ -79,6 +102,74 @@ void main() {
       () => repository.sync('watch-01'),
       throwsA(isA<WatchHealthSyncException>()),
     );
+  });
+
+  test('persists history before sending the 0x42 acknowledgement', () async {
+    final notifications = StreamController<Uint8List>.broadcast();
+    final store = _GateStore()..gate = Completer<void>();
+    addTearDown(notifications.close);
+    final sent = <Uint8List>[];
+    final repository = WatchHealthBleRepository(
+      commandAvailable: () => true,
+      sendCommand: (frame) {
+        sent.add(frame);
+        return sent.length;
+      },
+      notifications: notifications.stream,
+      store: store,
+    );
+
+    final future = repository.sync('watch-01');
+    await pumpEventQueue();
+    notifications.add(_frame([
+      (WatchHealthKey.activityData, _sportPage()),
+    ]));
+    notifications.add(_frame([
+      (WatchHealthKey.syncEnd, Uint8List.fromList([0, 0, 0, 0, 1])),
+    ]));
+    await pumpEventQueue();
+
+    expect(store.saveCount, 1);
+    expect(sent, [WatchHealthProtocol.buildRequestAll()]);
+
+    store.gate!.complete();
+    await pumpEventQueue();
+    expect(sent, [
+      WatchHealthProtocol.buildRequestAll(),
+      WatchHealthProtocol.buildSyncAck(),
+      WatchHealthProtocol.buildTodayRequest(),
+    ]);
+
+    notifications.add(_frame([(WatchHealthKey.todayData, _today())]));
+    final snapshot = await future;
+    expect(store.saved, hasLength(2));
+    expect(store.saved.last.steps, 1234);
+    expect(snapshot.sportRecords, hasLength(1));
+  });
+
+  test('never acknowledges history when durable persistence fails', () async {
+    final notifications = StreamController<Uint8List>.broadcast();
+    final store = _GateStore()..failOnSave = true;
+    addTearDown(notifications.close);
+    final sent = <Uint8List>[];
+    final repository = WatchHealthBleRepository(
+      commandAvailable: () => true,
+      sendCommand: (frame) {
+        sent.add(frame);
+        return sent.length;
+      },
+      notifications: notifications.stream,
+      store: store,
+    );
+
+    final future = repository.sync('watch-01');
+    await pumpEventQueue();
+    notifications.add(_frame([
+      (WatchHealthKey.syncEnd, Uint8List.fromList([0, 0, 0, 0, 0])),
+    ]));
+
+    await expectLater(future, throwsA(isA<WatchHealthSyncException>()));
+    expect(sent, [WatchHealthProtocol.buildRequestAll()]);
   });
 }
 

@@ -295,5 +295,7 @@ class WatchHealthSnapshot {
 }
 
 abstract interface class WatchHealthRepository {
+  Future<WatchHealthSnapshot?> loadCached(String deviceId);
+
   Future<WatchHealthSnapshot> sync(String deviceId);
 }

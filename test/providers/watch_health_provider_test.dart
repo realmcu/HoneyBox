@@ -5,11 +5,19 @@ import 'package:honeybox/pages/watch/health/watch_health_provider.dart';
 import '../helpers/watch_health_fixture.dart';
 
 class _Repository implements WatchHealthRepository {
-  _Repository({required this.result, this.error});
+  _Repository({required this.result, this.error, this.cached});
 
   final WatchHealthSnapshot result;
   final Object? error;
+  final WatchHealthSnapshot? cached;
   final List<String> requestedDeviceIds = [];
+  final List<String> cachedDeviceIds = [];
+
+  @override
+  Future<WatchHealthSnapshot?> loadCached(String deviceId) async {
+    cachedDeviceIds.add(deviceId);
+    return cached;
+  }
 
   @override
   Future<WatchHealthSnapshot> sync(String deviceId) async {
@@ -39,6 +47,23 @@ void main() {
     expect(notifier.state.phase, WatchHealthSyncPhase.success);
     expect(notifier.state.snapshot?.steps, 1000);
     expect(notifier.state.errorMessage, isNull);
+  });
+
+  test('restores a durable snapshot before synchronizing', () async {
+    final cached = watchHealthFixture();
+    final repository = _Repository(result: cached, cached: cached);
+    final notifier = WatchHealthNotifier(
+      repository: repository,
+      deviceId: 'watch-cache',
+      isBound: () => false,
+    );
+
+    await notifier.restore();
+
+    expect(repository.cachedDeviceIds, ['watch-cache']);
+    expect(repository.requestedDeviceIds, isEmpty);
+    expect(notifier.state.snapshot?.steps, 1000);
+    expect(notifier.state.phase, WatchHealthSyncPhase.idle);
   });
 
   test('exposes a retryable failure without inventing data', () async {

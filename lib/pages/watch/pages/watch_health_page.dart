@@ -25,13 +25,18 @@ class _WatchHealthPageState extends ConsumerState<WatchHealthPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          ref.read(watchBindProvider).phase != WatchBindPhase.success) {
-        return;
-      }
-      ref.read(watchHealthProvider(widget.deviceId).notifier).sync();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreAndSync());
+  }
+
+  Future<void> _restoreAndSync() async {
+    if (!mounted) return;
+    final notifier = ref.read(watchHealthProvider(widget.deviceId).notifier);
+    await notifier.restore();
+    if (!mounted ||
+        ref.read(watchBindProvider).phase != WatchBindPhase.success) {
+      return;
+    }
+    await notifier.sync();
   }
 
   @override

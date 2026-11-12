@@ -13,7 +13,13 @@ import 'package:honeybox/theme/app_theme.dart';
 import '../../helpers/watch_health_fixture.dart';
 
 class _ImmediateRepository implements WatchHealthRepository {
+  _ImmediateRepository({this.cached});
+
+  final WatchHealthSnapshot? cached;
   int syncCount = 0;
+
+  @override
+  Future<WatchHealthSnapshot?> loadCached(String deviceId) async => cached;
 
   @override
   Future<WatchHealthSnapshot> sync(String deviceId) async {
@@ -74,6 +80,17 @@ void main() {
     await tester.pumpWidget(_buildPage(repository: repository, bound: false));
     await tester.pumpAndSettle();
 
+    expect(find.text('设备尚未绑定'), findsWidgets);
+    expect(repository.syncCount, 0);
+  });
+
+  testWidgets('shows cached health data while the watch is unbound',
+      (tester) async {
+    final repository = _ImmediateRepository(cached: watchHealthFixture());
+    await tester.pumpWidget(_buildPage(repository: repository, bound: false));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1,000'), findsOneWidget);
     expect(find.text('设备尚未绑定'), findsWidgets);
     expect(repository.syncCount, 0);
   });
