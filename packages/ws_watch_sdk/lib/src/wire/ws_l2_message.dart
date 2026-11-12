@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
-/// Honey L2 wire layout per [HoneyProtocol architecture](../../../../../../HoneyProtocol/docs/architecture.rst):
+/// WS watch L2 wire layout (Command + Version nibble, Key, Length BE, Value):
 /// 2-byte header (Command + Version nibble), then Key / Length BE / Value units.
-final class HoneyL2Message {
-  HoneyL2Message({
+final class WSL2Message {
+  WSL2Message({
     required this.command,
     required this.key,
     required Uint8List value,
@@ -37,14 +37,14 @@ final class HoneyL2Message {
   }
 
   /// Decodes one or more L2 messages from an L1 payload (may contain multiple KV units).
-  static List<HoneyL2Message> decodeAll(Uint8List bytes) {
+  static List<WSL2Message> decodeAll(Uint8List bytes) {
     if (bytes.length < 2) {
       throw FormatException('L2 payload too short');
     }
     final command = bytes[0];
     final version = bytes[1] >> 4;
     var offset = 2;
-    final out = <HoneyL2Message>[];
+    final out = <WSL2Message>[];
     while (offset < bytes.length) {
       if (bytes.length - offset < 3) {
         throw FormatException('truncated L2 key header at $offset');
@@ -55,7 +55,7 @@ final class HoneyL2Message {
       if (length > bytes.length - offset) {
         throw FormatException('L2 value length $length overflows payload');
       }
-      out.add(HoneyL2Message(
+      out.add(WSL2Message(
         command: command,
         version: version,
         key: key,

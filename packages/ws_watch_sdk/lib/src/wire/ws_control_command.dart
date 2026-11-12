@@ -1,23 +1,23 @@
 import 'dart:typed_data';
 
-import 'honey_l2.dart';
+import 'ws_l2_message.dart';
 
-/// Command `0x04` notifications ([HoneyProtocol 0x04-notification.rst]).
-abstract final class HoneyControlCommand {
+/// Command `0x04` notifications ([WS protocol 0x04-notification.rst]).
+abstract final class WSControlCommand {
   static const int command = 0x04;
   static const int version = 0;
 
   static const int keyBatteryQuery = 0x50;
   static const int keyBatteryReply = 0x51;
 
-  static HoneyL2Message batteryQuery() => HoneyL2Message(
+  static WSL2Message batteryQuery() => WSL2Message(
         command: command,
         version: version,
         key: keyBatteryQuery,
         value: Uint8List(0),
       );
 
-  static int decodeBatteryPercent(HoneyL2Message reply) {
+  static int decodeBatteryPercent(WSL2Message reply) {
     if (reply.command != command ||
         reply.key != keyBatteryReply ||
         reply.value.length < 1) {

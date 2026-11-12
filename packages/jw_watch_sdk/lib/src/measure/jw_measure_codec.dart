@@ -112,7 +112,7 @@ double _spotSkinTemperature(int tempRaw, int statusByte) {
 
 /// Spot heart rate / temperature on `cmd 0x05` keys `0x0f` / `0x28`
 /// (V2 [HeartRateDataHandler]).
-SpotMeasurePayload? decodeSpotHeartRatePayload(
+JWSpotMeasurePayload? decodeSpotHeartRatePayload(
   Uint8List data, {
   required bool temperatureCapable,
 }) {
@@ -122,9 +122,9 @@ SpotMeasurePayload? decodeSpotHeartRatePayload(
     final minutes = ((data[4] << 8) | (data[5] & 0xff)) & 0xffff;
     final second = data[6] & 0xff;
     final rate = data[7] & 0xff;
-    if (rate == 0) return const SpotMeasurePayload();
+    if (rate == 0) return const JWSpotMeasurePayload();
     final time = _timeFromLegacyDate(year, month, day, minutes, second);
-    return SpotMeasurePayload(
+    return JWSpotMeasurePayload(
       heartRates: [JWHeartRate(time: time, heartRate: rate)],
     );
   }
@@ -133,12 +133,12 @@ SpotMeasurePayload? decodeSpotHeartRatePayload(
   final minutes = ((data[8] << 8) | (data[9] & 0xff)) & 0xffff;
   final second = data[10] & 0xff;
   final rate = data[11] & 0xff;
-  if (rate == 0) return const SpotMeasurePayload();
+  if (rate == 0) return const JWSpotMeasurePayload();
   final time = _timeFromLegacyDate(year, month, day, minutes, second);
   final wear = (status & 0x01) == 1;
   final adjust = ((status >> 1) & 0x01) == 1;
   final skin = _spotSkinTemperature(tempRaw, status);
-  return SpotMeasurePayload(
+  return JWSpotMeasurePayload(
     heartRates: [JWHeartRate(time: time, heartRate: rate)],
     temperatures: temperatureCapable && tempRaw != 0
         ? [
@@ -224,8 +224,8 @@ List<JWBloodGlucose>? decodeSpotBloodGlucose(Uint8List data) {
 }
 
 /// Decoded spot-measure push for key `0x0f`.
-final class SpotMeasurePayload {
-  const SpotMeasurePayload({
+final class JWSpotMeasurePayload {
+  const JWSpotMeasurePayload({
     this.heartRates = const [],
     this.temperatures = const [],
   });

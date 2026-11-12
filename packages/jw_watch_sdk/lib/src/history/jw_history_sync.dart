@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:meta/meta.dart';
+
 import '../connection/jw_link.dart';
 import '../connection/jw_protocol.dart';
 import '../debug/jw_debug_log.dart';
@@ -14,8 +16,8 @@ import 'jw_history_write_queue.dart';
 /// Internal HL private-protocol (`cmd 0x05`) health-history engine.
 ///
 /// Flow matches [HL_Private_Protocol.md] §5.1 → §5.7 → payload keys → §5.8,
-/// then phone `key 0x1c` ack (Android V2). HoneyProtocol `05 10` / `0x40` sync
-/// control is **not** used on JW devices.
+/// then phone `key 0x1c` ack (Android V2). WS watch L2 sync (`0x40`/`0x42`) is
+/// **not** used on JW devices.
 final class JWHealthHistorySync {
   JWHealthHistorySync({
     required JWLink link,
@@ -380,7 +382,7 @@ const _keyType = <int, int>{
   0x64: 0x10,
 };
 /// Payload keys that may appear mid-sync but are not HL history batch data
-/// (same skip list as HoneyBox `JwHistoryCoordinator`).
+/// Legacy app coordinator used the same skip list for non-batch payload keys.
 const _ignoredHistoryKeys = {0x0f, 0x28, 0x1a};
 
 /// START types that end with an `overover` stream marker before END (0x5b/0x60/0x64).
@@ -427,7 +429,7 @@ List<JWHistoryRecord>? _decodeOne(int key, Uint8List raw) {
   final data = ByteData.sublistView(raw);
   DateTime calendar(int minute, [int second = 0]) {
     final word = data.getUint16(0);
-    final date = jwDeviceLocalDateTime(
+    final date = parseJWDeviceLocalDateTime(
         2000 + (word >> 9 & 63),
         word >> 5 & 15,
         word & 31,
@@ -515,7 +517,7 @@ List<JWHistoryRecord>? _decodeOne(int key, Uint8List raw) {
       final word = _be(raw, 0, 8);
       final value = nonzero(_bits(word, 16, 8));
       if (value == null) return const [];
-      final time = jwDeviceLocalDateTime(
+      final time = parseJWDeviceLocalDateTime(
           2000 + _bits(word, 57, 6),
           _bits(word, 53, 4),
           _bits(word, 48, 5),
@@ -572,5 +574,6 @@ int _bits(BigInt word, int shift, int width) =>
     ((word >> shift) & ((BigInt.one << width) - BigInt.one)).toInt();
 
 /// Mirrors production sync decode; for unit tests only.
-List<JWHistoryRecord> jwDecodeHistoryFieldForTest(int key, Uint8List bytes) =>
+@visibleForTesting
+List<JWHistoryRecord> decodeJWHistoryFieldForTest(int key, Uint8List bytes) =>
     _decode(key, bytes).records;

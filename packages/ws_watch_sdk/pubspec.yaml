@@ -1,5 +1,5 @@
 name: ws_watch_sdk
-description: Public Flutter SDK for WS watches (HoneyProtocol / HoneyBox).
+description: Public Flutter SDK for WS watches (binary L2 wire protocol).
 version: 0.1.0
 publish_to: 'none'
 resolution: workspace

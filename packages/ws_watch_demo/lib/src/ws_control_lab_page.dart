@@ -23,7 +23,7 @@ class WsControlLabPage extends StatelessWidget {
       body: const Padding(
         padding: EdgeInsets.all(24),
         child: Text(
-          'Honey WS SDK 的控制类 API（天气、音乐状态等）尚未开放。\n'
+          'WS SDK 的控制类 API（天气、音乐状态等）尚未开放。\n'
           '本页保留与 JW Demo 一致的入口，便于后续接入。',
         ),
       ),

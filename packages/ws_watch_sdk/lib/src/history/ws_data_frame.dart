@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 /// Splits a `0x05` data Value (`recordLen` 1B + `count` 2B BE + records) into record byte slices.
-abstract final class HoneyDataFrame {
+abstract final class WSDataFrame {
   static List<Uint8List> splitValueFrames(Uint8List value) {
     if (value.length < 3) {
       throw FormatException('data frame value too short');

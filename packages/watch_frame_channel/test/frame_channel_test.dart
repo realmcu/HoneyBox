@@ -42,6 +42,13 @@ class Port {
 }
 
 void main() {
+  test('WS outbound data sets bit6 for RTL ACK_REQUEST', () {
+    final f = WatchFrame(seq: 1, payload: hex('0201'), noAck: true);
+    expect(f.encode()[1], 0x40);
+    expect(WatchFrameProfile.ws.outboundDataUsesAckRequestBit, isTrue);
+    expect(WatchFrameProfile.jw.outboundDataUsesAckRequestBit, isFalse);
+  });
+
   test('CRC catalogue check and exact eight-byte endian vectors', () {
     final b = hex('313233343536373839');
     expect(watchCrc16(b), 0xbb3d); // Independent CRC-16/ARC catalogue check.
@@ -63,7 +70,10 @@ void main() {
       final b = [0xab, flag, 0, 0, 0, 0, 0, 7];
       expect(WatchFrame.validHeader(b, 236, profile: WatchFrameProfile.jw),
           isTrue);
-      expect(WatchFrame.validHeader(b, 65535), flag < 0x40);
+      final wsOk = [0, 0x10, 0x30, 0x40, 0x50].contains(flag);
+      expect(
+          WatchFrame.validHeader(b, 65535, profile: WatchFrameProfile.ws),
+          wsOk);
     }
     for (final flag in [1, 0x20, 0x60, 0x80, 0xff]) {
       expect(
@@ -295,6 +305,7 @@ void main() {
       final a = c.send(Uint8List(1));
       final check =
           expectLater(a, throwsA(frameError(WatchFrameErrorKind.receive)));
+      await turn();
       p.rx.addError(StateError('notify'));
       await check;
       expect(c.isClosed, isFalse);

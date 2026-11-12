@@ -12,16 +12,16 @@ final class JWControl {
   JWControl({
     required JWLink link,
     required JWControlCoordinator coordinator,
-    required bool Function() isReady,
+    required bool Function() isConnected,
     required JWDeviceFunctionInfo? Function() functionInfo,
   })  : _link = link,
         _coordinator = coordinator,
-        _isReady = isReady,
+        _isConnected = isConnected,
         _functionInfo = functionInfo;
 
   final JWLink _link;
   final JWControlCoordinator _coordinator;
-  final bool Function() _isReady;
+  final bool Function() _isConnected;
   final JWDeviceFunctionInfo? Function() _functionInfo;
 
   void addControlListener(JWControlListener listener) =>
@@ -32,7 +32,7 @@ final class JWControl {
 
   /// Register a [JWControlListener] before enabling so gestures invoke [JWControlListener.onTakePhoto].
   Future<JWSettingSubmission> setTakePhotoControl(bool enable) async {
-    _requireReady();
+    _requireConnected();
     _requireCapability(JWDeviceFunction.cameraControl, 'take photo control');
     await _link.send(JWControlProtocol.setTakePhotoControl(enable));
     return JWSettingSubmission(
@@ -40,7 +40,7 @@ final class JWControl {
   }
 
   Future<JWSettingSubmission> setMusicStatus(JWMusicStatusInfo musicStatusInfo) async {
-    _requireReady();
+    _requireConnected();
     _requireCapability(JWDeviceFunction.musicControl, 'music status');
     if (musicStatusInfo.volumePercent < 0 || musicStatusInfo.volumePercent > 63) {
       throw ArgumentError('volumePercent must be 0 - 63');
@@ -50,14 +50,14 @@ final class JWControl {
   }
 
   Future<JWSettingSubmission> setWeather(JWWeatherInfo weatherInfo) async {
-    _requireReady();
+    _requireConnected();
     await _link.send(JWControlProtocol.setWeather(weatherInfo));
     return const JWSettingSubmission('weather');
   }
 
-  void _requireReady() {
-    if (!_isReady()) {
-      throw StateError('JW control requires an authenticated session');
+  void _requireConnected() {
+    if (!_isConnected()) {
+      throw StateError('JW control requires an open connected session');
     }
   }
 

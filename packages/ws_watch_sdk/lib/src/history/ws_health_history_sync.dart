@@ -3,22 +3,22 @@ import 'dart:typed_data';
 
 import '../connection/ws_link.dart';
 import '../debug/ws_debug_log.dart';
-import '../honey/honey_data.dart';
-import '../honey/honey_l2.dart';
+import '../wire/ws_data_command.dart';
+import '../wire/ws_l2_message.dart';
 import '../model/ws_error.dart';
 import '../storage/ws_history_store.dart';
-import 'honey_health_codecs.dart';
+import 'ws_health_codecs.dart';
 import 'ws_history_sync_frame.dart';
 import 'ws_history_sync_listener.dart';
 
-/// Honey `0x05` full health sync: `0x00` → `0x40` → data → `0x41` → `0x42`.
+/// WS `0x05` full health sync: `0x00` → `0x40` → data → `0x41` → `0x42`.
 final class WSHealthHistorySync {
   WSHealthHistorySync({
     required WSLink link,
     required WSHistoryStore store,
     required WSHistoryScope scope,
     required WSHistorySyncListener listener,
-    int syncKey = HoneyDataCommand.keySyncAll,
+    int syncKey = WSDataCommand.keySyncAll,
     void Function(WSHistorySyncFrame frame)? onHistoryFrame,
   })  : _link = link,
         _store = store,
@@ -34,7 +34,7 @@ final class WSHealthHistorySync {
   final int _syncKey;
   final void Function(WSHistorySyncFrame frame)? _onHistoryFrame;
 
-  StreamSubscription<HoneyL2Message>? _sub;
+  StreamSubscription<WSL2Message>? _sub;
   Completer<void>? _done;
   Timer? _idle;
   final _declared = <int, int>{};
@@ -66,7 +66,7 @@ final class WSHealthHistorySync {
       'syncKey=0x${_syncKey.toRadixString(16)}',
     );
     try {
-      await _link.send(HoneyDataCommand.syncRequest(_syncKey));
+      await _link.send(WSDataCommand.syncRequest(_syncKey));
       await _done!.future;
       WSWatchDebugLog.apiOut('WSHealthHistorySync.run', 'finished');
     } finally {
@@ -74,19 +74,19 @@ final class WSHealthHistorySync {
     }
   }
 
-  void _onMessage(HoneyL2Message message) {
+  void _onMessage(WSL2Message message) {
     if (_finished || _done == null || _done!.isCompleted) return;
-    if (message.command != HoneyDataCommand.command ||
-        message.version != HoneyDataCommand.version) {
+    if (message.command != WSDataCommand.command ||
+        message.version != WSDataCommand.version) {
       return;
     }
     _armIdle();
     try {
-      if (message.key == HoneyDataCommand.keySyncStart) {
+      if (message.key == WSDataCommand.keySyncStart) {
         _readStart(message.value);
-      } else if (HoneyDataCommand.isDataKey(message.key)) {
+      } else if (WSDataCommand.isDataKey(message.key)) {
         _readData(message);
-      } else if (message.key == HoneyDataCommand.keySyncEnd) {
+      } else if (message.key == WSDataCommand.keySyncEnd) {
         unawaited(_readEnd(message.value));
       }
     } catch (error, stack) {
@@ -121,7 +121,7 @@ final class WSHealthHistorySync {
     _emitProgress();
   }
 
-  void _readData(HoneyL2Message message) {
+  void _readData(WSL2Message message) {
     if (!_sawStart) throw const FormatException('data before sync start');
     WSWatchDebugLog.syncDataFrame(key: message.key, value: message.value);
     _onHistoryFrame?.call(
@@ -133,7 +133,7 @@ final class WSHealthHistorySync {
       throw FormatException('unexpected data key ${message.key}');
     }
     _received[syncKey] = (_received[syncKey] ?? 0) + wire;
-    final decoded = HoneyHealthCodecs.decodeByKey(message.key, message);
+    final decoded = WSHealthCodecs.decodeByKey(message.key, message);
     switch (decoded) {
       case List<WSActivity> v:
         _activities.addAll(v);
@@ -198,7 +198,7 @@ final class WSHealthHistorySync {
           'pressure=${_pressures.length} temp=${_temperatures.length} glu=${_glucoses.length} '
           'sport=${_sports.length}',
     );
-    await _link.send(HoneyDataCommand.syncConfirm());
+    await _link.send(WSDataCommand.syncConfirm());
     _finished = true;
     _listener.onSyncFinished();
     _done?.complete();
@@ -229,7 +229,7 @@ final class WSHealthHistorySync {
     if (_sports.isNotEmpty) await _store.writeSports(_scope, _sports);
   }
 
-  int _wireCount(HoneyL2Message message) {
+  int _wireCount(WSL2Message message) {
     final bytes = message.value;
     if (bytes.length < 3) return 0;
     return (bytes[1] << 8) | bytes[2];
@@ -281,16 +281,16 @@ final class WSHealthHistorySync {
 
   static WSHistorySyncCategory? _categoryForSyncKey(int syncKey) {
     return switch (syncKey) {
-      HoneyDataCommand.keySyncActivity => WSHistorySyncCategory.activity,
-      HoneyDataCommand.keySyncSleep => WSHistorySyncCategory.sleep,
-      HoneyDataCommand.keySyncHeartRate => WSHistorySyncCategory.heartRate,
-      HoneyDataCommand.keySyncBloodPressure => WSHistorySyncCategory.bloodPressure,
-      HoneyDataCommand.keySyncBloodOxygen => WSHistorySyncCategory.bloodOxygen,
-      HoneyDataCommand.keySyncHrv => WSHistorySyncCategory.hrv,
-      HoneyDataCommand.keySyncPressure => WSHistorySyncCategory.pressure,
-      HoneyDataCommand.keySyncTemperature => WSHistorySyncCategory.temperature,
-      HoneyDataCommand.keySyncBloodGlucose => WSHistorySyncCategory.bloodGlucose,
-      HoneyDataCommand.keySyncSport => WSHistorySyncCategory.sport,
+      WSDataCommand.keySyncActivity => WSHistorySyncCategory.activity,
+      WSDataCommand.keySyncSleep => WSHistorySyncCategory.sleep,
+      WSDataCommand.keySyncHeartRate => WSHistorySyncCategory.heartRate,
+      WSDataCommand.keySyncBloodPressure => WSHistorySyncCategory.bloodPressure,
+      WSDataCommand.keySyncBloodOxygen => WSHistorySyncCategory.bloodOxygen,
+      WSDataCommand.keySyncHrv => WSHistorySyncCategory.hrv,
+      WSDataCommand.keySyncPressure => WSHistorySyncCategory.pressure,
+      WSDataCommand.keySyncTemperature => WSHistorySyncCategory.temperature,
+      WSDataCommand.keySyncBloodGlucose => WSHistorySyncCategory.bloodGlucose,
+      WSDataCommand.keySyncSport => WSHistorySyncCategory.sport,
       _ => null,
     };
   }

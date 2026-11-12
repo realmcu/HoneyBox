@@ -4,15 +4,40 @@ import 'jw_gatt_profile.dart';
 abstract final class JwScanPolicy {
   static bool isCandidate(
       {required Set<String> serviceUuids,
-      required Map<int, List<int>> manufacturerData}) {
+      required Map<int, List<int>> manufacturerData,
+      String deviceName = ''}) {
     final uuids = serviceUuids.map(JwGattProfile.normalize).toSet();
+    if (isHoneyWsAdvertisement(
+        serviceUuids: uuids,
+        manufacturerData: manufacturerData,
+        deviceName: deviceName)) {
+      return false;
+    }
     if (uuids.contains('0000fd50-0000-1000-8000-00805f9b34fb') ||
         uuids.contains(JwGattProfile.service)) {
       return true;
     }
-    // flutter_blue_plus separates the little-endian company ID from its data.
-    return manufacturerData.entries.any(
-        (e) => (e.key == 0x07d0 || e.key == 0xfec5) && e.value.length >= 6);
+    final legacy = manufacturerData[0x07d0];
+    return legacy != null && legacy.length >= 6;
+  }
+
+  static bool isHoneyWsAdvertisement({
+    required Set<String> serviceUuids,
+    required Map<int, List<int>> manufacturerData,
+    String deviceName = '',
+  }) {
+    if (serviceUuids.contains(
+        '6e400001-b5a3-f393-e0a9-e50e24dcca9e')) {
+      return true;
+    }
+    final fec5 = manufacturerData[0xfec5];
+    if (fec5 == null || fec5.length < 6) {
+      return false;
+    }
+    if (serviceUuids.contains('0000fee7-0000-1000-8000-00805f9b34fb')) {
+      return true;
+    }
+    return deviceName.trim().toLowerCase() == 'watch';
   }
 
   static bool matches(

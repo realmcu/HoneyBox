@@ -82,7 +82,8 @@ class _TransportDiagnosticsPageState extends State<TransportDiagnosticsPage> {
   Future<void> scan() async {
     await ensureBleLabPermissions();
     await scanner.stop();
-    await scanner.start();
+    await scanner.start(
+        services: wsProfile ? wsBleScanServiceUuids : jwBleScanServiceUuids);
     log('扫描开始');
   }
 
@@ -93,10 +94,15 @@ class _TransportDiagnosticsPageState extends State<TransportDiagnosticsPage> {
       !wsProfile && widget.profileMode != TransportProfileMode.wsUartOnly;
 
   List<WatchBleAdvertisement> get _visibleDevices {
-    if (widget.profileMode == TransportProfileMode.jwOnly) {
-      return devices.where(isJwCandidate).toList();
-    }
-    return devices;
+    return switch (widget.profileMode) {
+      TransportProfileMode.jwOnly =>
+        devices.where(isJwCandidate).toList(),
+      TransportProfileMode.wsUartOnly =>
+        devices.where(isWsUartCandidate).toList(),
+      TransportProfileMode.selectable => wsProfile
+          ? devices.where(isWsUartCandidate).toList()
+          : devices.where(isJwCandidate).toList(),
+    };
   }
 
   Future<void> connect(WatchBleAdvertisement device) async {

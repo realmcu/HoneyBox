@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-/// Stable identity for Honey 0x03 login/bind (32-byte ASCII wire, spec §用户 ID).
+/// Stable identity for WS 0x03 login/bind (32-byte ASCII wire, spec §用户 ID).
 final class WSIdentity {
   static const int wireAsciiCapacity = 32;
 
@@ -26,7 +26,7 @@ final class WSIdentity {
     for (final unit in units) {
       if (unit < 0x20 || unit > 0x7e) {
         throw ArgumentError.value(
-            raw, 'value', 'userId must be printable ASCII for Honey bind');
+            raw, 'value', 'userId must be printable ASCII for WS bind');
       }
     }
     return trimmed;

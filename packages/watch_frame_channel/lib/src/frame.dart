@@ -7,9 +7,32 @@ enum WatchFrameProfile {
 
   bool get acknowledgeCorruption => this == ws;
   int get maxPayloadLength => this == jw ? 236 : 65535;
-  bool acceptsFlags(int flags) => this == ws
-      ? flags == 0 || flags == 0x10 || flags == 0x30
-      : const [0, 0x10, 0x30, 0x40, 0x50, 0x70].contains(flags);
+
+  /// JW HL: bit6 clear means peer must ACK ([noAck] false on the wire).
+  ///
+  /// WS on RTL8773 interim: bit6 set means peer must ACK (`hmi_proto` ACK_REQUEST);
+  /// encode via [WatchFrame.noAck] until firmware matches HL [no_ack] semantics.
+  bool get outboundDataUsesAckRequestBit => this == ws;
+
+  bool acceptsFlags(int flags) => switch (this) {
+        WatchFrameProfile.ws =>
+          flags == 0 ||
+              flags == 0x10 ||
+              flags == 0x30 ||
+              flags == 0x40 ||
+              flags == 0x50,
+        WatchFrameProfile.jw =>
+          const [0, 0x10, 0x30, 0x40, 0x50, 0x70].contains(flags),
+      };
+
+  /// After a validated inbound **data** frame, whether this endpoint should send L1 ACK.
+  bool shouldAckInboundData(WatchFrame frame) {
+    if (frame.isAck) return false;
+    return switch (this) {
+      WatchFrameProfile.ws => true,
+      WatchFrameProfile.jw => !frame.noAck,
+    };
+  }
 }
 
 /// CRC-16/ARC: poly A001 reflected, init 0000, xorout 0000.

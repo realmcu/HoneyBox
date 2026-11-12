@@ -7,4 +7,4 @@ final class JWAddressBookEntry {
 }
 
 /// Hard limit enforced by Android V2 `JWFunctionManagerImpl.setAddressBook`.
-const int kJwMaxAddressBookEntries = 10;
+const int kJWMaxAddressBookEntries = 10;

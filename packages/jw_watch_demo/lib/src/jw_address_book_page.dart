@@ -45,10 +45,10 @@ class _JwAddressBookPageState extends State<JwAddressBookPage> {
 
   Future<void> _syncToWatch() async {
     final entries = _selectedEntries();
-    if (entries.length > kJwMaxAddressBookEntries) {
+    if (entries.length > kJWMaxAddressBookEntries) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('最多选择 $kJwMaxAddressBookEntries 位联系人'),
+          content: Text('最多选择 $kJWMaxAddressBookEntries 位联系人'),
         ),
       );
       return;
@@ -127,7 +127,7 @@ class _JwAddressBookPageState extends State<JwAddressBookPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
-              '演示数据 · 勾选后同步到手表（最多 $kJwMaxAddressBookEntries 条）',
+              '演示数据 · 勾选后同步到手表（最多 $kJWMaxAddressBookEntries 条）',
               style: JwSettingsAppTheme.itemSubTitle,
             ),
           ),
@@ -142,7 +142,7 @@ class _JwAddressBookPageState extends State<JwAddressBookPage> {
                 final row = _contacts[index];
                 final disabled = _syncing ||
                     (!row.selected &&
-                        selected >= kJwMaxAddressBookEntries);
+                        selected >= kJWMaxAddressBookEntries);
                 return CheckboxListTile(
                   value: row.selected,
                   onChanged: disabled ? null : (v) => _toggle(index, v),

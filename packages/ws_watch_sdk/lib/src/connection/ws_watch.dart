@@ -45,11 +45,12 @@ final class WSWatch {
             isSimulated: true,
           ),
         for (final a in advertisements)
-          WSScanDevice(
-            deviceMac: a.deviceId,
-            name: a.name,
-            rssi: a.rssi,
-          ),
+          if (isWSCandidate(a))
+            WSScanDevice(
+              deviceMac: a.deviceId,
+              name: a.name,
+              rssi: a.rssi,
+            ),
       ];
       _devices.add(list);
     }));
@@ -113,7 +114,10 @@ final class WSWatch {
     if (config.simulationExclusive) {
       return Future.value();
     }
-    return _scanner.start(timeout: timeout);
+    return _scanner.start(
+      services: wsBleScanServiceUuids,
+      timeout: timeout,
+    );
   }
 
   Future<void> stopScan() {
@@ -121,8 +125,18 @@ final class WSWatch {
     return _scanner.stop();
   }
 
+  /// True when scan skips the platform BLE radio (simulator-only config).
   bool get isSimulationExclusive => config.simulationExclusive;
 
+  /// Whether [startScan] uses the platform BLE scanner for this instance.
+  bool get usesBleScan => config.usesBleScan;
+
+  /// Active transport profile; fixed for the lifetime of this [WSWatch].
+  WSTransportMode get transportMode => config.transportMode;
+
+  /// Opens a session to a device id from [scanResults]. Transport backend is
+  /// implied by [config.transportMode] and the id (simulator uses
+  /// [kWsWatchSimDeviceId]); callers do not pass transport at connect time.
   WSWatchSession createSession(String deviceMac) {
     _checkNotDisposed();
     if (!_initialized) {

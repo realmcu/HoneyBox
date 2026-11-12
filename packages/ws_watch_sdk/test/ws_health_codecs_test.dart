@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ws_watch_sdk/src/honey/honey_data.dart';
-import 'package:ws_watch_sdk/src/honey/honey_l2.dart';
-import 'package:ws_watch_sdk/src/history/honey_health_codecs.dart';
+import 'package:ws_watch_sdk/src/wire/ws_data_command.dart';
+import 'package:ws_watch_sdk/src/wire/ws_l2_message.dart';
+import 'package:ws_watch_sdk/src/history/ws_health_codecs.dart';
 import 'package:ws_watch_sdk/src/history/ws_history_models.dart';
 
 Uint8List _hex(String pairs) {
@@ -11,25 +11,35 @@ Uint8List _hex(String pairs) {
   return Uint8List.fromList(parts.map((h) => int.parse(h, radix: 16)).toList());
 }
 
-HoneyL2Message _l2(int key, String hex) {
-  return HoneyL2Message(
-    command: HoneyDataCommand.command,
-    version: HoneyDataCommand.version,
+WSL2Message _l2(int key, String hex) {
+  return WSL2Message(
+    command: WSDataCommand.command,
+    version: WSDataCommand.version,
     key: key,
     value: _hex(hex),
   );
 }
 
 void main() {
+  test('decodes live sim epoch little-endian', () {
+    final frame = _l2(
+      WSDataCommand.keyDataHeartRate,
+      '05 00 02 4B CF F3 6A 48 53 D6 F3 6A 4B',
+    );
+    final rows = WSHealthCodecs.decodeHeartRateDataFrame(frame);
+    expect(rows[0].time, 0x6AF3CF4B);
+    expect(rows[1].time, 0x6AF3D653);
+  });
+
   test('decodes spec example activity frame 0x21', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataActivity,
+      WSDataCommand.keyDataActivity,
       '12 00 02 6A CC 9A 88 04 B0 03 52 01 C8 62 0F 00 01 00 00 00 00 '
       '6A CC 9E 0C 01 2C 00 D2 00 70 00 0F 00 00 00 00 00 00',
     );
-    final rows = HoneyHealthCodecs.decodeActivityDataFrame(frame);
+    final rows = WSHealthCodecs.decodeActivityDataFrame(frame);
     expect(rows.length, 2);
-    expect(rows[0].time.millisecondsSinceEpoch, 0x6ACC9A88 * 1000);
+    expect(rows[0].time.millisecondsSinceEpoch, 0x889ACC6A * 1000);
     expect(rows[0].steps, 0x04B0);
     expect(rows[0].distanceMeters, 0x0352);
     expect(rows[0].caloriesTenthKcal, 0x01C8);
@@ -41,10 +51,10 @@ void main() {
 
   test('decodes spec example sleep frame 0x22', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataSleep,
+      WSDataCommand.keyDataSleep,
       '08 00 02 6A CC 3F 20 01 00 00 00 6A CC 54 38 02 00 00 00',
     );
-    final rows = HoneyHealthCodecs.decodeSleepDataFrame(frame);
+    final rows = WSHealthCodecs.decodeSleepDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].state, 0x01);
     expect(rows[1].state, 0x02);
@@ -53,22 +63,22 @@ void main() {
 
   test('decodes spec example heart rate frame 0x23', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataHeartRate,
+      WSDataCommand.keyDataHeartRate,
       '05 00 02 6A CC 9A 88 48 6A CC 9A C4 4B',
     );
-    final rows = HoneyHealthCodecs.decodeHeartRateDataFrame(frame);
+    final rows = WSHealthCodecs.decodeHeartRateDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].bpm, 0x48);
     expect(rows[1].bpm, 0x4B);
-    expect(rows[0].time, 0x6ACC9A88);
+    expect(rows[0].time, 0x889ACC6A);
   });
 
   test('decodes spec example blood pressure frame 0x24', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataBloodPressure,
+      WSDataCommand.keyDataBloodPressure,
       '06 00 02 6A CC 9A 88 78 50 6A CC CB C0 76 4E',
     );
-    final rows = HoneyHealthCodecs.decodeBloodPressureDataFrame(frame);
+    final rows = WSHealthCodecs.decodeBloodPressureDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].systolic, 0x78);
     expect(rows[0].diastolic, 0x50);
@@ -78,10 +88,10 @@ void main() {
 
   test('decodes spec example blood oxygen frame 0x25', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataBloodOxygen,
+      WSDataCommand.keyDataBloodOxygen,
       '07 00 02 6A CC 9A 88 62 63 60 6A CC CB C0 61 FF FF',
     );
-    final rows = HoneyHealthCodecs.decodeBloodOxygenDataFrame(frame);
+    final rows = WSHealthCodecs.decodeBloodOxygenDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].currentPercent, 0x62);
     expect(rows[0].highPercent, 0x63);
@@ -92,10 +102,10 @@ void main() {
 
   test('decodes spec example HRV frame 0x26', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataHrv,
+      WSDataCommand.keyDataHrv,
       '06 00 02 6A CC 9A 88 00 2D 6A CC CB C0 00 34',
     );
-    final rows = HoneyHealthCodecs.decodeHrvDataFrame(frame);
+    final rows = WSHealthCodecs.decodeHrvDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].sdnnMs, 0x2D);
     expect(rows[1].sdnnMs, 0x34);
@@ -103,10 +113,10 @@ void main() {
 
   test('decodes spec example pressure frame 0x27', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataPressure,
+      WSDataCommand.keyDataPressure,
       '05 00 02 6A CC 9A 88 23 6A CC CB C0 3E',
     );
-    final rows = HoneyHealthCodecs.decodePressureDataFrame(frame);
+    final rows = WSHealthCodecs.decodePressureDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].value, 0x23);
     expect(rows[1].value, 0x3E);
@@ -114,10 +124,10 @@ void main() {
 
   test('decodes spec example temperature frame 0x28', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataTemperature,
+      WSDataCommand.keyDataTemperature,
       '0A 00 02 6A CC 9A 88 0E 44 0C EE 00 03 6A CC CB C0 80 00 0B B8 FF 00',
     );
-    final rows = HoneyHealthCodecs.decodeTemperatureDataFrame(frame);
+    final rows = WSHealthCodecs.decodeTemperatureDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].bodyHundredthCelsius, 0x0E44);
     expect(rows[0].skinHundredthCelsius, 0x0CEE);
@@ -131,10 +141,10 @@ void main() {
 
   test('decodes spec example blood glucose frame 0x29', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataBloodGlucose,
+      WSDataCommand.keyDataBloodGlucose,
       '06 00 02 6A CC 9A 88 00 38 6A CC CB C0 00 48',
     );
-    final rows = HoneyHealthCodecs.decodeBloodGlucoseDataFrame(frame);
+    final rows = WSHealthCodecs.decodeBloodGlucoseDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].mmolLtenth, 0x38);
     expect(rows[1].mmolLtenth, 0x48);
@@ -142,15 +152,15 @@ void main() {
 
   test('decodes spec example sport frame 0x2A', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataSport,
+      WSDataCommand.keyDataSport,
       '1F 00 01 00 00 00 2A 6A CC 9A 88 6A CC A1 90 01 07 08 07 44 '
       '00 00 11 94 00 00 14 50 00 00 0C 80 91 01',
     );
-    final rows = HoneyHealthCodecs.decodeSportDataFrame(frame);
+    final rows = WSHealthCodecs.decodeSportDataFrame(frame);
     expect(rows.length, 1);
     expect(rows[0].sportId, 0x2A);
-    expect(rows[0].startTime, 0x6ACC9A88);
-    expect(rows[0].endTime, 0x6ACCA190);
+    expect(rows[0].startTime, 0x889ACC6A);
+    expect(rows[0].endTime, 0x90A1CC6A);
     expect(rows[0].steps, 0x1194);
     expect(rows[0].distanceMeters, 0x1450);
     expect(rows[0].caloriesTenthKcal, 0x0C80);
@@ -160,19 +170,19 @@ void main() {
 
   test('decodeByKey dispatches to typed lists', () {
     final frame = _l2(
-      HoneyDataCommand.keyDataHeartRate,
+      WSDataCommand.keyDataHeartRate,
       '05 00 02 6A CC 9A 88 48 6A CC 9A C4 4B',
     );
     final decoded =
-        HoneyHealthCodecs.decodeByKey(HoneyDataCommand.keyDataHeartRate, frame);
+        WSHealthCodecs.decodeByKey(WSDataCommand.keyDataHeartRate, frame);
     expect(decoded, isA<List<WSHeartRate>>());
   });
 
   test('decodes full L2 wire example for heart rate', () {
     final wire = _hex('05 10 23 00 0D 05 00 02 6A CC 9A 88 48 6A CC 9A C4 4B');
-    final messages = HoneyL2Message.decodeAll(wire);
+    final messages = WSL2Message.decodeAll(wire);
     expect(messages.length, 1);
-    final rows = HoneyHealthCodecs.decodeHeartRateDataFrame(messages[0]);
+    final rows = WSHealthCodecs.decodeHeartRateDataFrame(messages[0]);
     expect(rows[0].bpm, 0x48);
   });
 }

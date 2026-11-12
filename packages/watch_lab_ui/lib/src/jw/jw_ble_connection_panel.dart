@@ -52,7 +52,7 @@ class _JwBleConnectionPanelState extends State<JwBleConnectionPanel> {
   Future<void> scan() async {
     await ensureBleLabPermissions();
     await scanner.stop();
-    await scanner.start();
+    await scanner.start(services: jwBleScanServiceUuids);
     setState(() => statusLine = '扫描 JW 设备（${jwWristbandServiceUuid.substring(0, 8)}… / fd50）');
   }
 

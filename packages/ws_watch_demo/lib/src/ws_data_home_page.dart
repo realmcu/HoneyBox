@@ -53,9 +53,12 @@ class _JwDataHomePageState extends State<WsDataHomePage> {
 
   WSDemoController get controller => widget.controller;
 
+  WSSessionPhase? _lastSessionPhase;
+
   @override
   void initState() {
     super.initState();
+    _lastSessionPhase = controller.state.phase;
     _sync = WsHistorySyncRunController();
     _sync.addListener(_onSyncChanged);
     controller.addListener(_onControllerChanged);
@@ -73,6 +76,9 @@ class _JwDataHomePageState extends State<WsDataHomePage> {
 
   void _onControllerChanged() {
     if (!mounted) return;
+    final phase = controller.state.phase;
+    if (phase == _lastSessionPhase) return;
+    _lastSessionPhase = phase;
     unawaited(_refreshCards());
     unawaited(_refreshTodaySummary());
   }

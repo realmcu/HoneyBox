@@ -157,7 +157,11 @@ class WatchFrameChannel {
     final seq = _seq;
     handle._seq = seq;
     _seq = (_seq + 1) & 0xffff;
-    final raw = WatchFrame(seq: seq, payload: payload).encode();
+    final raw = WatchFrame(
+      seq: seq,
+      payload: payload,
+      noAck: profile.outboundDataUsesAckRequestBit,
+    ).encode();
     try {
       for (var attempt = 0; attempt <= retries; attempt++) {
         _checkOpen();
@@ -294,7 +298,7 @@ class WatchFrameChannel {
       }
       return;
     }
-    if (!frame.noAck) _acknowledge(frame.seq);
+    if (profile.shouldAckInboundData(frame)) _acknowledge(frame.seq);
     if (isClosed) return;
     final now = DateTime.now();
     while (_seen.isNotEmpty &&

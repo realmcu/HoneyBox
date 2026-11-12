@@ -3,8 +3,9 @@ import 'dart:typed_data';
 
 import 'package:watch_frame_channel/watch_frame_channel.dart';
 
-import '../honey/honey_l2.dart';
-import 'honey_key_labels.dart';
+import '../model/ws_error.dart';
+import '../wire/ws_l2_message.dart';
+import 'ws_key_labels.dart';
 
 /// WS SDK protocol logging. Filter logcat / Xcode with tag [logName].
 abstract final class WSWatchDebugLog {
@@ -27,6 +28,18 @@ abstract final class WSWatchDebugLog {
     _log('API← $symbol$suffix');
   }
 
+  /// Visible failure line for transport/L1/L2 errors (`filter: WSWatchSDK`).
+  static void linkFailure(String symbol, WSException error, {String? detail}) {
+    if (!enabled) return;
+    final extra = detail == null || detail.isEmpty ? '' : ' $detail';
+    _log('API← $symbol FAILED code=${error.code.name} ${error.message}$extra');
+  }
+
+  static void l1AckTimeout({required int seq, required int attempts}) {
+    if (!enabled) return;
+    _log('WIRE L1 ACK timeout seq=$seq attempts=$attempts (exhausted)');
+  }
+
   static void _log(String message) {
     developer.log('${_timestamp()} $message', name: logName);
   }
@@ -44,8 +57,16 @@ abstract final class WSWatchDebugLog {
     if (!enabled) return;
 
     if (event.direction == WatchFrameDirection.tx &&
-        (event.kind == WatchFrameKind.data ||
-            event.kind == WatchFrameKind.retry)) {
+        event.kind == WatchFrameKind.data) {
+      return;
+    }
+
+    if (event.direction == WatchFrameDirection.tx &&
+        event.kind == WatchFrameKind.retry) {
+      if (event.raw.length >= 8 && event.raw[0] == 0xab) {
+        final seq = (event.raw[6] << 8) | event.raw[7];
+        _log('WIRE tx retry seq=$seq (${_hex(Uint8List.fromList(event.raw))})');
+      }
       return;
     }
 
@@ -101,20 +122,20 @@ abstract final class WSWatchDebugLog {
       buf.write(' ack=${(flags & 0x40) != 0 ? 0 : 1}');
       if (payloadLen > 0 && raw.length >= 8 + payloadLen) {
         final l2 = raw.sublist(8, 8 + payloadLen);
-        _appendHoneyHint(buf, l2);
+        _appendWSKeyHint(buf, l2);
       }
     } else if (payloadLen > 0 && raw.length >= 8 + payloadLen) {
       final l2 = raw.sublist(8, 8 + payloadLen);
-      _appendHoneyHint(buf, l2);
+      _appendWSKeyHint(buf, l2);
     }
 
     buf.write(' ${_hex(raw)}');
     _log(buf.toString());
   }
 
-  static void _appendHoneyHint(StringBuffer buf, Uint8List l2) {
+  static void _appendWSKeyHint(StringBuffer buf, Uint8List l2) {
     if (l2.length >= 3) {
-      buf.write(' ${HoneyKeyLabels.annotate(l2[0], l2[2])}');
+      buf.write(' ${WSKeyLabels.annotate(l2[0], l2[2])}');
     }
   }
 
@@ -131,19 +152,19 @@ abstract final class WSWatchDebugLog {
   }
 
   static void l2MatchedBusinessReply({
-    required HoneyL2Message request,
-    required HoneyL2Message reply,
+    required WSL2Message request,
+    required WSL2Message reply,
     int? outboundSeq,
   }) {
     if (!enabled) return;
     _log(
       'API← WSLink.request matched outboundSeq=${outboundSeq ?? '?'} '
-      'sent=${describeHoney(request)} reply=${describeHoney(reply)}',
+      'sent=${describeWSL2Message(request)} reply=${describeWSL2Message(reply)}',
     );
   }
 
-  static String describeHoney(HoneyL2Message message) {
-    return '${HoneyKeyLabels.describeKey(message.command, message.key)} '
+  static String describeWSL2Message(WSL2Message message) {
+    return '${WSKeyLabels.describeKey(message.command, message.key)} '
         'ver=${message.version} len=${message.value.length}'
         '${_valuePreview(message.value)}';
   }
@@ -151,7 +172,7 @@ abstract final class WSWatchDebugLog {
   static void syncDataFrame({required int key, required Uint8List value}) {
     if (!enabled) return;
     _log(
-      'SYNC ${HoneyKeyLabels.describeKey(0x05, key)} '
+      'SYNC ${WSKeyLabels.describeKey(0x05, key)} '
       'len=${value.length}${_valuePreview(value)}',
     );
   }

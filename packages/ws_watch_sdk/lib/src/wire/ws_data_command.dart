@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
-import 'honey_l2.dart';
+import 'ws_l2_message.dart';
 
-/// Command `0x05` version 1 — history sync ([HoneyProtocol 0x05-data.rst]).
-abstract final class HoneyDataCommand {
+/// Command `0x05` version 1 — history sync ([WS protocol 0x05-data.rst]).
+abstract final class WSDataCommand {
   static const int command = 0x05;
   static const int version = 1;
 
@@ -33,14 +33,14 @@ abstract final class HoneyDataCommand {
   static const int keySyncEnd = 0x41;
   static const int keySyncConfirm = 0x42;
 
-  static HoneyL2Message syncRequest(int syncKey) => HoneyL2Message(
+  static WSL2Message syncRequest(int syncKey) => WSL2Message(
         command: command,
         version: version,
         key: syncKey,
         value: Uint8List(0),
       );
 
-  static HoneyL2Message syncConfirm() => HoneyL2Message(
+  static WSL2Message syncConfirm() => WSL2Message(
         command: command,
         version: version,
         key: keySyncConfirm,

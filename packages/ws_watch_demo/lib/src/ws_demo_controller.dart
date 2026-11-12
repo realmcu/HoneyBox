@@ -44,37 +44,40 @@ String describeWSDemoError(Object error) {
   return error.toString();
 }
 
-/// HoneyBox-side composition of public JW SDK objects.
+/// Demo-side composition of public WS SDK session objects.
 ///
 /// This controller never writes GATT bytes or imports transport packages; it
 /// only coordinates the public scanner, session, and login APIs.
 ///
+/// **Errors:** SDK methods throw on failure. This class does not swallow
+/// exceptions into a global bus — callers use `try/catch` (see [wsDemoRunWithSnackBar]).
+/// [_runSession] only syncs [state] and [sessionBusy], then rethrows.
+///
 /// Scan result updates use [scanDevices] so high-frequency BLE advertisements
 /// coalesce to at most one UI refresh per frame.
+///
+/// Transport (simulator vs BLE) is fixed by [WSConfig] on the underlying
+/// [WSWatch]. Use [setTransportMode] to rebuild the SDK instance; connection UI
+/// does not branch on device type beyond ordinary scan → connect.
 class WSDemoController extends ChangeNotifier {
-  WSDemoController({WSWatch? watch})
-      : _watch = watch ??
-            WSWatch(
-              config: const WSConfig(
-                simulationEnabled: true,
-                simulationExclusive: true,
-              ),
-            ) {
-    _subscriptions.add(_watch.scanResults.listen((devices) {
-      _devices = devices;
-      _scheduleScanUiUpdate();
-    }));
-    _subscriptions.add(_watch.scanErrors.listen((error) {
-      sheetError.value = error;
-      scanActive.value = _watch.isScanning;
-    }));
+  WSDemoController({
+    WSConfig config = const WSConfig.simulation(),
+    WSWatch? watch,
+  })  : _config = config,
+        _watch = watch ?? WSWatch(config: config) {
+    _attachWatchStreams(_watch);
   }
 
-  final WSWatch _watch;
+  WSConfig _config;
+  WSWatch _watch;
   final _subscriptions = <StreamSubscription<dynamic>>[];
   final ValueNotifier<List<WSScanDevice>> scanDevices = ValueNotifier(const []);
   final ValueNotifier<bool> scanActive = ValueNotifier(false);
-  final ValueNotifier<Object?> sheetError = ValueNotifier(null);
+
+  /// In-flight SDK calls (`_runSession` / `_runSessionValue`); drives one global progress strip.
+  final ValueNotifier<int> sessionBusy = ValueNotifier(0);
+
+  bool get isSessionBusy => sessionBusy.value > 0;
   bool _scanUiUpdateScheduled = false;
   bool _uiNotifyScheduled = false;
 
@@ -82,14 +85,12 @@ class WSDemoController extends ChangeNotifier {
   WSWatchSession? _session;
   String _userId = '123456';
   WSSessionState _state = const WSSessionState();
-  Object? _error;
   bool _disposed = false;
   final _sessionLog = <String>[];
 
   List<WSScanDevice> get devices => scanDevices.value;
   WSWatchSession? get session => _session;
   WSSessionState get state => _state;
-  Object? get error => _error ?? sheetError.value;
   bool get isScanning => scanActive.value;
   bool get isInitialized => _watch.isInitialized;
   bool get isConnecting => _connecting;
@@ -98,8 +99,7 @@ class WSDemoController extends ChangeNotifier {
   bool _connecting = false;
   WSScanDevice? _connectingDevice;
 
-  Listenable get scanListenable =>
-      Listenable.merge([scanDevices, scanActive, sheetError]);
+  Listenable get scanListenable => Listenable.merge([scanDevices, scanActive]);
 
   WSScanDevice? get connectingDevice => _connectingDevice;
 
@@ -108,13 +108,63 @@ class WSDemoController extends ChangeNotifier {
   /// Last device that connected successfully in this Demo install.
   WsDemoLastDevice? get lastDevice => _lastDevice;
 
+  /// Init-time transport profile of the current [WSWatch] instance.
+  WSTransportMode get transportMode => _watch.transportMode;
+
+  /// Realtek firmware has no login handler yet; Demo uses bind-first on BLE.
+  bool get preferBindOverLogin => transportMode == WSTransportMode.ble;
+
+  void _attachWatchStreams(WSWatch watch) {
+    _subscriptions.add(watch.scanResults.listen((devices) {
+      _devices = devices;
+      _scheduleScanUiUpdate();
+    }));
+    _subscriptions.add(watch.scanErrors.listen((error) {
+      assert(() {
+        debugPrint('WSWatch scan error: $error');
+        return true;
+      }());
+      scanActive.value = watch.isScanning;
+    }));
+  }
+
+  /// Recreates [WSWatch] for [mode]. Does not [initialize] unless SDK was already initialized.
+  Future<void> setTransportMode(WSTransportMode mode) async {
+    if (_disposed) return;
+    final nextConfig = WSConfig.forTransportMode(mode);
+    if (nextConfig.transportMode == _config.transportMode) return;
+    if (_state.isConnected || _connecting) {
+      throw StateError('请先断开当前设备，再切换传输方式。');
+    }
+    final wasInitialized = _watch.isInitialized;
+    await _session?.dispose();
+    _session = null;
+    _sessionLog.clear();
+    _state = const WSSessionState();
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    _subscriptions.clear();
+    await _watch.dispose();
+    _config = nextConfig;
+    _watch = WSWatch(config: nextConfig);
+    _attachWatchStreams(_watch);
+    if (wasInitialized) {
+      await initialize();
+      await loadLastDevice();
+    }
+    _notifyUi();
+  }
+
   Future<void> loadLastDevice() async {
     final stored = await WsDemoLastDeviceStore.read();
-    if (stored != null &&
-        _watch.isSimulationExclusive &&
+    if (stored == null) {
+      _lastDevice = null;
+    } else if (_watch.transportMode == WSTransportMode.simulation &&
         stored.deviceMac != kWsWatchSimDeviceId) {
-      // 与 JW 共用过 jw_demo_last_device.json 时的残留真机 MAC，清掉以免「上次设备」走 BLE。
-      await WsDemoLastDeviceStore.clear();
+      _lastDevice = null;
+    } else if (_watch.transportMode == WSTransportMode.ble &&
+        stored.deviceMac == kWsWatchSimDeviceId) {
       _lastDevice = null;
     } else {
       _lastDevice = stored;
@@ -126,16 +176,9 @@ class WSDemoController extends ChangeNotifier {
   Future<bool> connectLastDevice() async {
     final last = _lastDevice;
     if (last == null) return false;
-    if (_watch.isSimulationExclusive &&
-        last.deviceMac != kWsWatchSimDeviceId) {
-      return connect(const WSScanDevice(
-        deviceMac: kWsWatchSimDeviceId,
-        name: 'WS Watch Simulator',
-        rssi: 0,
-        isSimulated: true,
-      ));
+    if (_watch.usesBleScan) {
+      await _ensurePermissions();
     }
-    await _ensurePermissions();
     return connect(WSScanDevice(
       deviceMac: last.deviceMac,
       name: last.name,
@@ -146,7 +189,7 @@ class WSDemoController extends ChangeNotifier {
 
   Future<void> _rememberConnectedDevice(WSScanDevice device) async {
     final snapshot = WsDemoLastDevice(
-      name: device.name.trim().isEmpty ? 'JW 设备' : device.name.trim(),
+      name: device.name.trim().isEmpty ? 'WS 设备' : device.name.trim(),
       deviceMac: device.deviceMac,
     );
     _lastDevice = snapshot;
@@ -157,8 +200,6 @@ class WSDemoController extends ChangeNotifier {
   /// Clears stale scan rows when opening the connection page.
   void resetConnectionScanUi() {
     clearScanResults();
-    _error = null;
-    sheetError.value = null;
   }
 
   void clearScanResults() {
@@ -194,37 +235,32 @@ class WSDemoController extends ChangeNotifier {
   }
 
   Future<void> startScan() async {
-    sheetError.value = null;
     try {
       if (!isInitialized) {
-        throw StateError('JW SDK must be initialized before scanning.');
+        throw StateError('WS SDK must be initialized before scanning.');
       }
-      if (!_watch.isSimulationExclusive) {
+      if (_watch.usesBleScan) {
         await _ensurePermissions();
       }
       await _watch.stopScan();
       clearScanResults();
-      scanActive.value = !_watch.isSimulationExclusive;
+      scanActive.value = _watch.usesBleScan;
       await _watch.startScan();
       _publishScanUiNow();
       scanActive.value = _watch.isScanning;
     } catch (error) {
       scanActive.value = _watch.isScanning;
-      sheetError.value = error;
+      rethrow;
     }
   }
 
   Future<void> initialize() async {
-    _error = null;
-    sheetError.value = null;
     _notifyUi();
     try {
       await _watch.initialize();
-    } catch (error) {
-      _error = error;
-      sheetError.value = error;
+    } finally {
+      _notifyUi();
     }
-    _notifyUi();
   }
 
   Future<void> stopScan() async {
@@ -239,22 +275,8 @@ class WSDemoController extends ChangeNotifier {
   Future<bool> connect(WSScanDevice device) async {
     if (_connecting) return false;
     if (_state.isConnected) return true;
-    if (_watch.isSimulationExclusive &&
-        device.deviceMac != kWsWatchSimDeviceId) {
-      final error = StateError(
-        '当前 WS Demo 为模拟器模式，请连接列表中的「WS Watch Simulator」。',
-      );
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
-      return false;
-    }
     if (!isInitialized) {
-      final error = StateError('WS SDK must be initialized before connecting.');
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
-      return false;
+      throw StateError('WS SDK must be initialized before connecting.');
     }
     _connecting = true;
     _connectingDevice = device;
@@ -269,8 +291,6 @@ class WSDemoController extends ChangeNotifier {
       _recordState(state);
       _notifyUi();
     }));
-    _error = null;
-    sheetError.value = null;
     _notifyUi();
     try {
       await _session!.connect();
@@ -278,11 +298,6 @@ class WSDemoController extends ChangeNotifier {
         unawaited(_rememberConnectedDevice(device));
       }
       return _state.isConnected;
-    } catch (error) {
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
-      return false;
     } finally {
       _connecting = false;
       _connectingDevice = null;
@@ -315,9 +330,8 @@ class WSDemoController extends ChangeNotifier {
   Future<WSTodayActivitySummary?> fetchTodayActivitySummary() =>
       _runSessionValue((s) async => wsDemoTodaySummaryFromSnapshot(await s.today.queryToday()));
 
-  Future<void> readDeviceInfo() => _runSession((_) async {
-        _state = _session!.state;
-      });
+  Future<void> readDeviceInfo() =>
+      _runSession((session) => session.readDeviceInfo());
 
   Future<int?> readBattery() => _runSessionValue((s) async {
         final value = await s.control.queryBatteryPercent();
@@ -328,9 +342,16 @@ class WSDemoController extends ChangeNotifier {
 
   Future<void> readDeviceDetails() => readDeviceInfo();
 
-  Future<void> readDeviceFeatures() => _runSession((_) async {
-        _functionInfo = WSDeviceFunctionInfo.demoAllSupported();
-        _notifyUi();
+  Future<void> readDeviceFeatures() => _runSession((session) async {
+        await session.readDeviceFeatures();
+        final raw = session.state.capabilities?.raw;
+        if (raw != null && raw.length >= 8) {
+          _functionInfo = WSDeviceFunctionInfo.fromWire(
+            Uint8List.sublistView(raw, 0, 8),
+          );
+        } else {
+          _functionInfo = null;
+        }
       });
 
   Future<WSLanguage> readLanguage() => _runSessionValue((s) async {
@@ -353,30 +374,76 @@ class WSDemoController extends ChangeNotifier {
   Future<WSVerifiedSetting<WSUnitSystem>> setUnitSystem(WSUnitSystem value) async =>
       WSVerifiedSetting(previous: WSUnitSystem.metric, value: value);
 
-  Future<WSHeatStressReminder> readHeatStressReminder() async =>
-      const WSHeatStressReminder(enabled: false, schedule: _kDemoDayRange);
+  Future<WSHeatStressReminder> readHeatStressReminder() =>
+      _runSessionValue((s) async {
+        final schedule = await s.measure.readHeatStressAutoMeasure();
+        return WSHeatStressReminder(
+          enabled: schedule.enabled,
+          schedule: WSTimeRange(
+            startHour: schedule.startHour,
+            startMinute: schedule.startMinute,
+            endHour: schedule.endHour,
+            endMinute: schedule.endMinute,
+          ),
+        );
+      });
 
   Future<WSVerifiedSetting<WSHeatStressReminder>> setHeatStressReminder(
           WSHeatStressReminder value) async =>
-      WSVerifiedSetting(
-        previous: const WSHeatStressReminder(enabled: false, schedule: _kDemoDayRange),
-        value: value,
-      );
+      _runSessionValue((s) async {
+        final previous = await readHeatStressReminder();
+        await s.measure.setHeatStressAutoMeasure(
+          WSAutoMeasureSchedule(
+            enabled: value.enabled,
+            startHour: value.schedule.startHour,
+            startMinute: value.schedule.startMinute,
+            endHour: value.schedule.endHour,
+            endMinute: value.schedule.endMinute,
+            intervalMinutes: 30,
+          ),
+        );
+        return WSVerifiedSetting(previous: previous, value: value);
+      });
 
-  Future<WSHighHeartRateReminder> readHighHeartRateReminder() async =>
-      const WSHighHeartRateReminder(enabled: false, thresholdBpm: 160);
+  Future<WSHighHeartRateReminder> readHighHeartRateReminder() =>
+      _runSessionValue((s) async {
+        final alarm = await s.settings.readHeartRateHighAlarm();
+        return WSHighHeartRateReminder(
+          enabled: alarm.enabled,
+          thresholdBpm: alarm.thresholdBpm,
+        );
+      });
 
   Future<WSVerifiedSetting<WSHighHeartRateReminder>> setHighHeartRateReminder(
           WSHighHeartRateReminder value) async =>
-      WSVerifiedSetting(
-        previous: const WSHighHeartRateReminder(enabled: false, thresholdBpm: 160),
-        value: value,
-      );
+      _runSessionValue((s) async {
+        final previous = await readHighHeartRateReminder();
+        await s.settings.setHeartRateHighAlarm(
+          WSHeartRateHighAlarm(
+            enabled: value.enabled,
+            thresholdBpm: value.thresholdBpm,
+          ),
+        );
+        return WSVerifiedSetting(previous: previous, value: value);
+      });
 
-  Future<bool> readLowSpO2Reminder() async => false;
+  Future<bool> readLowSpO2Reminder() => _runSessionValue((s) async {
+        final alarm = await s.settings.readSpO2LowAlarm();
+        return alarm.enabled;
+      });
 
   Future<WSSettingSubmission> setLowSpO2Reminder(bool enabled) async =>
-      WSSettingSubmission('lowSpO2');
+      _runSession((s) async {
+        final previous = await s.settings.readSpO2LowAlarm();
+        await s.settings.setSpO2LowAlarm(
+          WSSpO2LowAlarm(
+            enabled: enabled,
+            thresholdPercent: previous.thresholdPercent == 0
+                ? 90
+                : previous.thresholdPercent,
+          ),
+        );
+      }).then((_) => const WSSettingSubmission('lowSpO2'));
 
   Future<WSSettingSubmission> syncTime() => _runSessionValue((s) async {
         await s.settings.setTimeUnix(DateTime.now().millisecondsSinceEpoch ~/ 1000);
@@ -420,64 +487,101 @@ class WSDemoController extends ChangeNotifier {
     throw UnimplementedError('WS SDK: clearDeviceData pending');
   }
 
-  Future<WSAutoMeasureConfig> readHeartRateAutoMeasure() async =>
-      const WSAutoMeasureConfig(enabled: false, intervalMinutes: 0);
+  Future<WSAutoMeasureConfig> readHeartRateAutoMeasure() =>
+      _runSessionValue((s) => s.measure.readHeartRateAutoMeasure());
 
-  Future<List<int>> readHeartRateIntervalOptions() async => const [10, 20, 30];
+  Future<List<int>> readHeartRateIntervalOptions() =>
+      _runSessionValue((s) => s.measure.readHeartRateIntervalOptions());
 
-  Future<void> setHeartRateAutoMeasure(WSAutoMeasureConfig config) async {}
+  Future<void> setHeartRateAutoMeasure(WSAutoMeasureConfig config) =>
+      _runSession((s) => s.measure.setHeartRateAutoMeasure(config));
 
-  Future<WSAutoMeasureConfig> readSpO2AutoMeasure() async =>
-      const WSAutoMeasureConfig(enabled: false, intervalMinutes: 0);
+  Future<WSAutoMeasureConfig> readSpO2AutoMeasure() =>
+      _runSessionValue((s) => s.measure.readSpO2AutoMeasure());
 
-  Future<void> setSpO2AutoMeasure(WSAutoMeasureConfig config) async {}
+  Future<void> setSpO2AutoMeasure(WSAutoMeasureConfig config) =>
+      _runSession((s) => s.measure.setSpO2AutoMeasure(config));
 
-  Future<WSAutoMeasureConfig> readBloodPressureAutoMeasure() async =>
-      const WSAutoMeasureConfig(enabled: false, intervalMinutes: 0);
+  Future<WSAutoMeasureConfig> readBloodPressureAutoMeasure() =>
+      _runSessionValue((s) => s.measure.readBloodPressureAutoMeasure());
 
-  Future<void> setBloodPressureAutoMeasure(WSAutoMeasureConfig config) async {}
+  Future<void> setBloodPressureAutoMeasure(WSAutoMeasureConfig config) =>
+      _runSession((s) => s.measure.setBloodPressureAutoMeasure(config));
 
-  Future<WSBloodSugarAutoMeasureConfig> readBloodSugarAutoMeasure() async =>
-      const WSBloodSugarAutoMeasureConfig(enabled: false, intervalMinutes: 0);
+  Future<WSBloodSugarAutoMeasureConfig> readBloodSugarAutoMeasure() =>
+      _runSessionValue((s) => s.measure.readBloodSugarAutoMeasure());
 
-  Future<void> setBloodSugarAutoMeasure(WSBloodSugarAutoMeasureConfig config) async {}
+  Future<void> setBloodSugarAutoMeasure(WSBloodSugarAutoMeasureConfig config) =>
+      _runSession((s) => s.measure.setBloodSugarAutoMeasure(config));
 
-  Future<WSTemperatureControlSetting> readTemperatureControl() async =>
-      const WSTemperatureControlSetting(enabled: false, adjust: false, celsius: true);
+  Future<WSTemperatureControlSetting> readTemperatureControl() =>
+      _runSessionValue((s) => s.measure.readTemperatureControl());
 
-  Future<void> setTemperatureControl(WSTemperatureControlSetting setting) async {}
+  Future<void> setTemperatureControl(WSTemperatureControlSetting setting) =>
+      _runSession((s) => s.measure.setTemperatureControl(setting));
 
-  Future<void> setPressureAutoMeasure(bool enabled) async {}
+  Future<void> setPressureAutoMeasure(bool enabled) =>
+      _runSession((s) => s.measure.setPressureAutoMeasure(enabled));
 
-  Future<void> startHeartRateMeasure() =>
-      _runSession((s) => s.measure.startHeartRateSpot());
+  Future<void> startHeartRateMeasure() => _runSession(
+        (s) => s.measure.startHeartRateSpot(),
+        notifyUi: false,
+      );
 
-  Future<void> stopHeartRateMeasure() =>
-      _runSession((s) => s.measure.stopHeartRateSpot());
+  Future<void> stopHeartRateMeasure() => _runSession(
+        (s) => s.measure.stopHeartRateSpot(),
+        notifyUi: false,
+      );
 
-  Future<void> startBloodPressureSpotMeasure() async =>
-      throw UnimplementedError('WS spot BP pending');
+  Future<void> startBloodPressureSpotMeasure() => _runSession(
+        (s) => s.measure.startBloodPressureSpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> stopBloodPressureSpotMeasure() async {}
+  Future<void> stopBloodPressureSpotMeasure() => _runSession(
+        (s) => s.measure.stopBloodPressureSpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> startSpO2SpotMeasure() async =>
-      throw UnimplementedError('WS spot SpO2 pending');
+  Future<void> startSpO2SpotMeasure() => _runSession(
+        (s) => s.measure.startSpO2SpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> stopSpO2SpotMeasure() async {}
+  Future<void> stopSpO2SpotMeasure() => _runSession(
+        (s) => s.measure.stopSpO2SpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> checkSpO2SpotMeasure() async {}
+  Future<void> checkSpO2SpotMeasure() => _runSession(
+        (s) => s.measure.checkSpO2SpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> startTemperatureSpotMeasure() async =>
-      throw UnimplementedError('WS spot temperature pending');
+  Future<void> startTemperatureSpotMeasure() => _runSession(
+        (s) => s.measure.startTemperatureSpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> stopTemperatureSpotMeasure() async {}
+  Future<void> stopTemperatureSpotMeasure() => _runSession(
+        (s) => s.measure.stopTemperatureSpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> checkTemperatureSpotMeasure() async {}
+  Future<void> checkTemperatureSpotMeasure() => _runSession(
+        (s) => s.measure.checkTemperatureSpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> startBloodGlucoseSpotMeasure() async =>
-      throw UnimplementedError('WS spot glucose pending');
+  Future<void> startBloodGlucoseSpotMeasure() => _runSession(
+        (s) => s.measure.startBloodGlucoseSpotMeasure(),
+        notifyUi: false,
+      );
 
-  Future<void> stopBloodGlucoseSpotMeasure() async {}
+  Future<void> stopBloodGlucoseSpotMeasure() => _runSession(
+        (s) => s.measure.stopBloodGlucoseSpotMeasure(),
+        notifyUi: false,
+      );
 
   Future<WSSettingSubmission> setUserProfile(WSUserProfile profile) async =>
       WSSettingSubmission('userProfile');
@@ -554,6 +658,7 @@ class WSDemoController extends ChangeNotifier {
   Future<void> disconnect() async {
     final session = _session;
     _session = null;
+    _functionInfo = null;
     _state = const WSSessionState(phase: WSSessionPhase.disconnected);
     await session?.dispose();
     _notifyUi();
@@ -594,49 +699,60 @@ class WSDemoController extends ChangeNotifier {
 
   void rememberUserId(String value) => _userId = value.trim();
 
-  Future<void> _runSession(
-      Future<void> Function(WSWatchSession session) operation) async {
-    final session = _session;
-    if (session == null) {
-      _error = StateError('请先连接 WS 设备');
-      sheetError.value = _error;
-      _notifyUi();
-      return;
-    }
-    _error = null;
-    sheetError.value = null;
-    _notifyUi();
-    try {
-      await operation(session);
-      _state = session.state;
-      _notifyUi();
-    } catch (error) {
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
+  void _sessionWorkStarted() {
+    sessionBusy.value++;
+  }
+
+  void _sessionWorkEnded() {
+    if (sessionBusy.value > 0) {
+      sessionBusy.value--;
     }
   }
 
-  Future<T> _runSessionValue<T>(
-      Future<T> Function(WSWatchSession session) operation) async {
+  /// Mirrors [WSWatchSession] state and tracks [sessionBusy]; failures **rethrow**.
+  Future<void> _runSession(
+    Future<void> Function(WSWatchSession session) operation, {
+    bool notifyUi = true,
+  }) async {
     final session = _session;
     if (session == null) {
-      final error = StateError('WS device must be connected first');
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
-      throw error;
+      throw StateError('请先连接 WS 设备');
     }
-    _error = null;
-    sheetError.value = null;
-    _notifyUi();
+    _sessionWorkStarted();
     try {
-      return await operation(session);
+      await operation(session);
+      _state = session.state;
+      if (notifyUi) _notifyUi();
     } catch (error) {
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
+      _state = session.state;
+      if (notifyUi) _notifyUi();
       rethrow;
+    } finally {
+      _sessionWorkEnded();
+    }
+  }
+
+  /// Same as [_runSession] but returns a value; failures **rethrow**.
+  Future<T> _runSessionValue<T>(
+    Future<T> Function(WSWatchSession session) operation, {
+    bool notifyUi = true,
+  }) async {
+    final session = _session;
+    if (session == null) {
+      throw StateError('WS device must be connected first');
+    }
+    _sessionWorkStarted();
+    try {
+      final result = await operation(session);
+      _state = session.state;
+      if (notifyUi) _notifyUi();
+      return result;
+    } catch (error) {
+      _state = session.state;
+      if (notifyUi) _notifyUi();
+      rethrow;
+    } finally {
+      _sessionWorkEnded();
     }
   }
 
@@ -669,7 +785,7 @@ class WSDemoController extends ChangeNotifier {
     unawaited(_watch.dispose());
     scanDevices.dispose();
     scanActive.dispose();
-    sheetError.dispose();
+    sessionBusy.dispose();
     super.dispose();
   }
 }

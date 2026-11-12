@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ws_watch_sdk/src/simulation/ws_sim_fixtures.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
 
 final class _CollectListener implements WSHistorySyncListener {
@@ -43,12 +44,18 @@ void main() {
       await session.bindFirstTime(userId, confirmed: true);
       await session.syncHealthData(listener);
       expect(listener.finished, isTrue);
-      expect(listener.plan?.totalWireRecords, 19);
-      expect(listener.lastReceived, 19);
+      expect(listener.plan?.totalWireRecords, WsSimFixtures.totalWireRecords);
+      expect(listener.lastReceived, WsSimFixtures.totalWireRecords);
 
       final scope = session.historyScope!;
+      final now = DateTime.now();
+      final hourAgo = now.subtract(const Duration(hours: 1, minutes: 5));
+      final activities =
+          await store.queryActivities(WSHistoryQuery(scope: scope));
+      expect(activities.length, 2);
+      expect(activities.first.time.isAfter(hourAgo), isTrue);
       expect((await store.queryHeartRates(WSHistoryQuery(scope: scope))).length, 2);
-      expect((await store.queryActivities(WSHistoryQuery(scope: scope))).length, 2);
+      expect((await store.querySleeps(WSHistoryQuery(scope: scope))).length, 0);
       expect((await store.querySports(WSHistoryQuery(scope: scope))).length, 1);
 
       // Second round still succeeds (idempotent upsert).

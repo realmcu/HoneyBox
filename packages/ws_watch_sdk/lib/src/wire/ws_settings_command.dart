@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
-import 'honey_l2.dart';
+import 'ws_l2_message.dart';
 
-/// Command `0x02` settings ([HoneyProtocol 0x02-settings.rst]).
-abstract final class HoneySettingsCommand {
+/// Command `0x02` settings ([WS protocol 0x02-settings.rst]).
+abstract final class WSSettingsCommand {
   static const int command = 0x02;
   static const int version = 0;
 
@@ -15,11 +15,11 @@ abstract final class HoneySettingsCommand {
   static const int keyPhoneSystem = 0x02;
   static const int keyLanguage = 0x03;
 
-  static HoneyL2Message setPhoneSystem(int system) {
+  static WSL2Message setPhoneSystem(int system) {
     if (system != 1 && system != 2) {
       throw ArgumentError.value(system, 'system', 'expected 1 (iOS) or 2 (Android)');
     }
-    return HoneyL2Message(
+    return WSL2Message(
       command: command,
       version: version,
       key: keyPhoneSystem,
@@ -27,11 +27,11 @@ abstract final class HoneySettingsCommand {
     );
   }
 
-  static HoneyL2Message setTimeUnix(int wallSeconds) {
+  static WSL2Message setTimeUnix(int wallSeconds) {
     final data = ByteData(5);
     data.setUint8(0, opcodeSet);
     data.setUint32(1, wallSeconds);
-    return HoneyL2Message(
+    return WSL2Message(
       command: command,
       version: version,
       key: keyTime,
@@ -39,14 +39,14 @@ abstract final class HoneySettingsCommand {
     );
   }
 
-  static HoneyL2Message readLanguage() => HoneyL2Message(
+  static WSL2Message readLanguage() => WSL2Message(
         command: command,
         version: version,
         key: keyLanguage,
         value: Uint8List.fromList([opcodeRead]),
       );
 
-  static int decodeLanguageCode(HoneyL2Message reply) {
+  static int decodeLanguageCode(WSL2Message reply) {
     if (reply.command != command ||
         reply.key != keyLanguage ||
         reply.value.length != 2 ||
@@ -56,9 +56,29 @@ abstract final class HoneySettingsCommand {
     return reply.value[1];
   }
 
-  static bool isLanguageReadReply(HoneyL2Message message) =>
+  static bool isLanguageReadReply(WSL2Message message) =>
       message.command == command &&
       message.key == keyLanguage &&
+      message.value.isNotEmpty &&
+      message.value[0] == opcodeReadReply;
+
+  static WSL2Message readKey(int key) => WSL2Message(
+        command: command,
+        version: version,
+        key: key,
+        value: Uint8List.fromList([opcodeRead]),
+      );
+
+  static WSL2Message setKey(int key, Uint8List body) => WSL2Message(
+        command: command,
+        version: version,
+        key: key,
+        value: Uint8List.fromList([opcodeSet, ...body]),
+      );
+
+  static bool isReadReplyForKey(WSL2Message message, int key) =>
+      message.command == command &&
+      message.key == key &&
       message.value.isNotEmpty &&
       message.value[0] == opcodeReadReply;
 }

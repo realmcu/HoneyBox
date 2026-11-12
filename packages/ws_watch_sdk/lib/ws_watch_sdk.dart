@@ -1,4 +1,4 @@
-/// Public Flutter SDK for WS watches (HoneyProtocol).
+/// Public Flutter SDK for WS watches.
 library;
 
 export 'src/capability/ws_capabilities.dart';
@@ -12,6 +12,8 @@ export 'src/connection/ws_scan_device.dart';
 export 'src/connection/ws_session.dart';
 export 'src/connection/ws_watch.dart';
 export 'src/measure/ws_measure.dart';
+export 'src/measure/ws_measure_data_listener.dart';
+export 'src/measure/ws_measure_models.dart';
 export 'src/model/ws_device_info.dart';
 export 'src/model/ws_error.dart';
 export 'src/model/ws_heart_rate.dart';

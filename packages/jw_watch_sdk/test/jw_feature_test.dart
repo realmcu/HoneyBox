@@ -42,6 +42,29 @@ void main() {
     expect(isJWCandidate(other), isFalse);
   });
 
+  test('JW scan excludes Honey WS Watch adverts', () {
+    final watch = WatchBleAdvertisement(
+      deviceId: 'ws-watch',
+      name: 'Watch',
+      rssi: -60,
+      services: const [jwWristbandServiceUuid, '0000fee7-0000-1000-8000-00805f9b34fb'],
+      manufacturerData: {
+        0xfec5: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
+      },
+    );
+    final fec5Only = WatchBleAdvertisement(
+      deviceId: 'fec5-only',
+      name: 'Random',
+      rssi: -60,
+      manufacturerData: {
+        0xfec5: [0, 0, 0, 0, 0, 0],
+      },
+    );
+
+    expect(isJWCandidate(watch), isFalse);
+    expect(isJWCandidate(fec5Only), isFalse);
+  });
+
   test('identity is validated before bytes are parsed', () {
     expect(() => JWIdentity('mnop'), throwsArgumentError);
     expect(JWIdentity('A' * 32).bytes, hasLength(32));

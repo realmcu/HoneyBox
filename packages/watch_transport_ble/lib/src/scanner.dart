@@ -23,6 +23,8 @@ final class WatchBleScanner {
   Stream<List<WatchBleAdvertisement>> get results => _results.stream;
   Stream<Object> get errors => _errors.stream;
 
+  /// [services] is for low-level diagnostics only; JW/WS watch SDKs pass fixed
+  /// profile UUIDs internally and app code should not customize them.
   Future<void> start(
       {List<String> services = const [],
       Duration timeout = const Duration(seconds: 10)}) {

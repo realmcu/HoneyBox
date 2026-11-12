@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'honey_l2.dart';
+import 'ws_l2_message.dart';
 
-/// Command 0x03 — bind / login ([HoneyProtocol 0x03-bind.rst](../../../../../../HoneyProtocol/docs/protocol/0x03-bind.rst)).
-abstract final class HoneyBindCommand {
+/// Command `0x03` — bind / login (see protocol `0x03-bind.rst`).
+abstract final class WSBindCommand {
   static const int command = 0x03;
   static const int version = 0;
 
@@ -40,21 +40,21 @@ abstract final class HoneyBindCommand {
     return ascii.decode(wire.sublist(0, end), allowInvalid: false);
   }
 
-  static HoneyL2Message loginRequest(String userId) => HoneyL2Message(
+  static WSL2Message loginRequest(String userId) => WSL2Message(
         command: command,
         version: version,
         key: keyLoginRequest,
         value: encodeUserIdWire(userId),
       );
 
-  static HoneyL2Message bindRequest(String userId) => HoneyL2Message(
+  static WSL2Message bindRequest(String userId) => WSL2Message(
         command: command,
         version: version,
         key: keyBindRequest,
         value: encodeUserIdWire(userId),
       );
 
-  static HoneyL2Message unbindRequest() => HoneyL2Message(
+  static WSL2Message unbindRequest() => WSL2Message(
         command: command,
         version: version,
         key: keyUnbind,

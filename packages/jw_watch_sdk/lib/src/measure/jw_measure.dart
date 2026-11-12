@@ -16,20 +16,20 @@ final class JWMeasure {
     required JWLink link,
     required JWMeasureCoordinator coordinator,
     required JWMeasureConfigCache configCache,
-    required bool Function() isReady,
+    required bool Function() isConnected,
     required bool Function() isHealthSyncActive,
     required JWDeviceFunctionInfo? Function() functionInfo,
   })  : _link = link,
         _coordinator = coordinator,
         _configCache = configCache,
-        _isReady = isReady,
+        _isConnected = isConnected,
         _isHealthSyncActive = isHealthSyncActive,
         _functionInfo = functionInfo;
 
   final JWLink _link;
   final JWMeasureCoordinator _coordinator;
   final JWMeasureConfigCache _configCache;
-  final bool Function() _isReady;
+  final bool Function() _isConnected;
   final bool Function() _isHealthSyncActive;
   final JWDeviceFunctionInfo? Function() _functionInfo;
 
@@ -40,7 +40,7 @@ final class JWMeasure {
       _coordinator.removeListener(listener);
 
   Future<JWAutoMeasureConfig> readHeartRateAutoMeasure() async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.rate);
     final cached = _configCache.heartRateAutoMeasureIfComplete;
     if (cached != null) return cached;
@@ -54,7 +54,7 @@ final class JWMeasure {
   }
 
   Future<List<int>> readHeartRateIntervalOptions() async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.rate);
     final cached = _configCache.heartRateIntervalOptionsIfKnown;
     if (cached != null) return cached;
@@ -71,7 +71,7 @@ final class JWMeasure {
   }
 
   Future<void> setHeartRateAutoMeasure(JWAutoMeasureConfig config) async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.rate);
     await _link.send(JWMeasureProtocol.setHeartRateAutoMeasure(
         JWMeasureProtocol.encodeAutoMeasure(config)));
@@ -79,7 +79,7 @@ final class JWMeasure {
   }
 
   Future<JWAutoMeasureConfig> readSpO2AutoMeasure() async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.spo2Continuous);
     final reply = await _link.request(JWMeasureProtocol.readSpO2AutoMeasure());
     _expectSportKey(reply, 0x35, 'SpO2 auto measure');
@@ -87,14 +87,14 @@ final class JWMeasure {
   }
 
   Future<void> setSpO2AutoMeasure(JWAutoMeasureConfig config) async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.spo2Continuous);
     await _link.send(JWMeasureProtocol.setSpO2AutoMeasure(
         JWMeasureProtocol.encodeAutoMeasure(config)));
   }
 
   Future<JWAutoMeasureConfig> readBloodPressureAutoMeasure() async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.rtkBp3);
     final reply =
         await _link.request(JWMeasureProtocol.readBloodPressureAutoMeasure());
@@ -103,14 +103,14 @@ final class JWMeasure {
   }
 
   Future<void> setBloodPressureAutoMeasure(JWAutoMeasureConfig config) async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.rtkBp3);
     await _link.send(JWMeasureProtocol.setBloodPressureAutoMeasure(
         JWMeasureProtocol.encodeAutoMeasure(config)));
   }
 
   Future<JWBloodSugarAutoMeasureConfig> readBloodSugarAutoMeasure() async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.bloodSugar);
     final reply =
         await _link.request(JWMeasureProtocol.readBloodSugarAutoMeasure());
@@ -120,7 +120,7 @@ final class JWMeasure {
 
   Future<void> setBloodSugarAutoMeasure(
       JWBloodSugarAutoMeasureConfig config) async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.bloodSugar);
     await _link.send(JWMeasureProtocol.setBloodSugarAutoMeasure(
       JWMeasureProtocol.encodeAutoMeasure(
@@ -133,7 +133,7 @@ final class JWMeasure {
   }
 
   Future<JWTemperatureControlSetting> readTemperatureControl() async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.temperature);
     final reply =
         await _link.request(JWMeasureProtocol.readTemperatureControl());
@@ -142,14 +142,14 @@ final class JWMeasure {
   }
 
   Future<void> setTemperatureControl(JWTemperatureControlSetting setting) async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.temperature);
     await _link.send(JWMeasureProtocol.setTemperatureControl(
         JWMeasureProtocol.encodeTemperatureControl(setting)));
   }
 
   Future<void> setPressureAutoMeasure(bool enabled) async {
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.pressure);
     await _link.send(JWMeasureProtocol.setPressureAutoMeasure(
         JWMeasureProtocol.encodeContinuousMonitoringSubCommand(0x07, enabled)));
@@ -164,7 +164,7 @@ final class JWMeasure {
 
   Future<void> stopHeartRateMeasure() async {
     JWWatchDebugLog.apiIn('JWMeasure.stopHeartRateMeasure');
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.rate);
     await _link.send(JWMeasureProtocol.setHeartRateSpotMeasure(false));
   }
@@ -178,7 +178,7 @@ final class JWMeasure {
 
   Future<void> stopBloodPressureSpotMeasure() async {
     JWWatchDebugLog.apiIn('JWMeasure.stopBloodPressureSpotMeasure');
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.bpDetection);
     await _link.send(JWMeasureProtocol.setBloodPressureSpotMeasure(false));
   }
@@ -192,7 +192,7 @@ final class JWMeasure {
 
   Future<void> stopSpO2SpotMeasure() async {
     JWWatchDebugLog.apiIn('JWMeasure.stopSpO2SpotMeasure');
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.spo2Measure);
     await _link.send(JWMeasureProtocol.setSpO2SpotMeasure(false));
   }
@@ -212,7 +212,7 @@ final class JWMeasure {
 
   Future<void> stopTemperatureSpotMeasure() async {
     JWWatchDebugLog.apiIn('JWMeasure.stopTemperatureSpotMeasure');
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.temperature);
     await _link.send(JWMeasureProtocol.setTemperatureSpotMeasure(false));
   }
@@ -233,20 +233,20 @@ final class JWMeasure {
 
   Future<void> stopBloodGlucoseSpotMeasure() async {
     JWWatchDebugLog.apiIn('JWMeasure.stopBloodGlucoseSpotMeasure');
-    _requireReady();
+    _requireConnected();
     _requireFunction(JWDeviceFunction.bloodSugar);
     await _link.send(JWMeasureProtocol.setBloodSugarSpotMeasure(false));
     _coordinator.bloodSugarSpotActive = false;
   }
 
-  void _requireReady() {
-    if (!_isReady()) {
-      throw StateError('JW measure requires an authenticated session');
+  void _requireConnected() {
+    if (!_isConnected()) {
+      throw StateError('JW measure requires an open connected session');
     }
   }
 
   void _requireSpotMeasure() {
-    _requireReady();
+    _requireConnected();
     if (_isHealthSyncActive()) {
       throw StateError('JW spot measure is not allowed during health sync');
     }

@@ -70,7 +70,7 @@ final class JWHistoryStore {
       _database.transaction(() async {
         for (final row in records) {
           await _database.into(_database.jwActivities).insertOnConflictUpdate(
-              JwActivitiesCompanion.insert(
+              JWActivitiesCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -86,7 +86,7 @@ final class JWHistoryStore {
       _database.transaction(() async {
         for (final row in records) {
           await _database.into(_database.jwSleeps).insertOnConflictUpdate(
-              JwSleepsCompanion.insert(
+              JWSleepsCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -100,7 +100,7 @@ final class JWHistoryStore {
         for (final row in records) {
           _positive(row.heartRate, 'heartRate');
           await _database.into(_database.jwHeartRates).insertOnConflictUpdate(
-              JwHeartRatesCompanion.insert(
+              JWHeartRatesCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -116,7 +116,7 @@ final class JWHistoryStore {
           _positive(row.diastolic, 'diastolic');
           await _database
               .into(_database.jwBloodPressures)
-              .insertOnConflictUpdate(JwBloodPressuresCompanion.insert(
+              .insertOnConflictUpdate(JWBloodPressuresCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -131,7 +131,7 @@ final class JWHistoryStore {
         for (final row in records) {
           _positive(row.value, 'blood oxygen');
           await _database.into(_database.jwBloodOxygens).insertOnConflictUpdate(
-              JwBloodOxygensCompanion.insert(
+              JWBloodOxygensCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -146,7 +146,7 @@ final class JWHistoryStore {
         for (final row in records) {
           _positive(row.sdnn, 'sdnn');
           await _database.into(_database.jwHrvs).insertOnConflictUpdate(
-              JwHrvsCompanion.insert(
+              JWHrvsCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -160,7 +160,7 @@ final class JWHistoryStore {
         for (final row in records) {
           _positive(row.value, 'pressure');
           await _database.into(_database.jwPressures).insertOnConflictUpdate(
-              JwPressuresCompanion.insert(
+              JWPressuresCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -173,7 +173,7 @@ final class JWHistoryStore {
       _database.transaction(() async {
         for (final row in records) {
           await _database.into(_database.jwTemperatures).insertOnConflictUpdate(
-              JwTemperaturesCompanion.insert(
+              JWTemperaturesCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -191,7 +191,7 @@ final class JWHistoryStore {
           _positive(row.value, 'blood glucose');
           await _database
               .into(_database.jwBloodGlucoses)
-              .insertOnConflictUpdate(JwBloodGlucosesCompanion.insert(
+              .insertOnConflictUpdate(JWBloodGlucosesCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -203,7 +203,7 @@ final class JWHistoryStore {
       _database.transaction(() async {
         for (final row in records) {
           await _database.into(_database.jwSports).insertOnConflictUpdate(
-              JwSportsCompanion.insert(
+              JWSportsCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -285,7 +285,7 @@ final class JWHistoryStore {
             _database.jwActivities,
             [
               for (final row in activities)
-                JwActivitiesCompanion.insert(
+                JWActivitiesCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -304,7 +304,7 @@ final class JWHistoryStore {
             _database.jwSleeps,
             [
               for (final row in sleeps)
-                JwSleepsCompanion.insert(
+                JWSleepsCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -319,7 +319,7 @@ final class JWHistoryStore {
             _database.jwHeartRates,
             [
               for (final row in rates)
-                JwHeartRatesCompanion.insert(
+                JWHeartRatesCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -334,7 +334,7 @@ final class JWHistoryStore {
             _database.jwBloodPressures,
             [
               for (final row in pressures)
-                JwBloodPressuresCompanion.insert(
+                JWBloodPressuresCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -350,7 +350,7 @@ final class JWHistoryStore {
             _database.jwBloodOxygens,
             [
               for (final row in oxygens)
-                JwBloodOxygensCompanion.insert(
+                JWBloodOxygensCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -367,7 +367,7 @@ final class JWHistoryStore {
             _database.jwHrvs,
             [
               for (final row in hrvs)
-                JwHrvsCompanion.insert(
+                JWHrvsCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -382,7 +382,7 @@ final class JWHistoryStore {
             _database.jwPressures,
             [
               for (final row in stress)
-                JwPressuresCompanion.insert(
+                JWPressuresCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -397,7 +397,7 @@ final class JWHistoryStore {
             _database.jwTemperatures,
             [
               for (final row in temperatures)
-                JwTemperaturesCompanion.insert(
+                JWTemperaturesCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -415,7 +415,7 @@ final class JWHistoryStore {
             _database.jwBloodGlucoses,
             [
               for (final row in glucoses)
-                JwBloodGlucosesCompanion.insert(
+                JWBloodGlucosesCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),
@@ -430,7 +430,7 @@ final class JWHistoryStore {
             _database.jwSports,
             [
               for (final row in sports)
-                JwSportsCompanion.insert(
+                JWSportsCompanion.insert(
                   userId: scope.userId,
                   deviceMac: scope.deviceMac,
                   time: _time(row.time),

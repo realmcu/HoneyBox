@@ -9,6 +9,8 @@ import 'ws_demo_controller.dart';
 import 'ws_demo_last_device_store.dart';
 import 'ws_device_pages.dart';
 import 'ws_settings_home_page.dart';
+import 'ws_demo_session_chrome.dart';
+import 'ws_demo_ui_feedback.dart';
 import 'compat/ws_demo_compat.dart';
 
 /// JW SDK Demo shell: 首页 / 数据 / 设置；数据与设置 Tab 需会话 `ready`。
@@ -71,11 +73,11 @@ class _JWWatchLabHomeState extends State<WSWatchLabHome> {
               'Logcat / Android Studio 过滤：',
               style: Theme.of(context).textTheme.titleSmall,
             ),
-            SizedBox(height: 6),
-            Text('WSWatchSDK — WIRE / API 协议（与 JW 同级）'),
-            Text('WsWatchDemo · WsDemoSync — Demo 同步摘要'),
-            SizedBox(height: 8),
-            Text('模拟器同样走 L1 帧通道，可对照 Honey cmd/key 与 hex。'),
+            const SizedBox(height: 6),
+            const Text('WSWatchSDK — WIRE / API 协议（与 JW 同级）'),
+            const Text('WsWatchDemo · WsDemoSync — Demo 同步摘要'),
+            const SizedBox(height: 8),
+            const Text('模拟器同样走 L1 帧通道，可对照 WS cmd/key 与 hex。'),
           ],
         ),
       ),
@@ -127,11 +129,14 @@ class _JWWatchLabHomeState extends State<WSWatchLabHome> {
               ),
             ],
           ),
-          body: KeyedSubtree(
-            key: ValueKey<String>(
-              '$_selectedIndex-${_tabsUnlocked ? 'ready' : 'locked'}',
+          body: WsDemoSessionChrome(
+            controller: _controller,
+            child: KeyedSubtree(
+              key: ValueKey<String>(
+                '$_selectedIndex-${_tabsUnlocked ? 'ready' : 'locked'}',
+              ),
+              child: _buildTabBody(),
             ),
-            child: _buildTabBody(),
           ),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _selectedIndex,
@@ -222,18 +227,14 @@ class _HomePageState extends State<_HomePage> {
       final ok = await controller.connectLastDevice();
       if (!mounted) return;
       if (!ok) {
-        final message = controller.error == null
-            ? '连接失败，请确认手表在附近后重试。'
-            : describeWSDemoError(controller.error!);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
+        wsDemoShowErrorSnackBar(
+          context,
+          StateError('连接失败，请确认手表在附近后重试。'),
         );
       }
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(describeWSDemoError(error))),
-      );
+      wsDemoShowErrorSnackBar(context, error);
     } finally {
       if (mounted) setState(() => _quickConnecting = false);
     }
@@ -255,8 +256,9 @@ class _HomePageState extends State<_HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final sessionIdle = !controller.isSessionBusy;
     return ListenableBuilder(
-      listenable: controller,
+      listenable: Listenable.merge([controller, controller.sessionBusy]),
       builder: (context, _) => ListView(
         key: const Key('jw.demo.page.home'),
         padding: const EdgeInsets.all(16),
@@ -277,9 +279,18 @@ class _HomePageState extends State<_HomePage> {
             controller.isInitialized ? '已完成' : '初始化后才可扫描和连接设备。',
             keyName: 'jw.demo.guide.initialize',
             actionLabel: controller.isInitialized ? '已初始化' : '初始化',
-            onAction: controller.isInitialized ? null : controller.initialize,
+            onAction: controller.isInitialized
+                ? null
+                : () => wsDemoRunWithSnackBar(
+                      context,
+                      controller.initialize,
+                    ),
             completed: controller.isInitialized,
-            code: 'final watch = WSWatch();\nawait watch.initialize();',
+            code: '''final watch = WSWatch(
+  config: WSConfig.simulation(), // 或 WSConfig.ble()
+);
+await watch.initialize();''',
+            detailPanel: _SdkInitTransportPicker(controller: controller),
           ),
           _GuideTile(
             '2',
@@ -317,10 +328,12 @@ await session.connect();''',
           _GuideTile(
             '3',
             '登录或首次绑定',
-            _authenticationDetail(controller.state),
+            _authenticationDetail(controller),
             keyName: 'jw.demo.guide.authenticate',
-            actionLabel: _authenticationActionLabel(controller.state),
-            onAction: _authenticationAction(controller, _readUserId),
+            actionLabel: _authenticationActionLabel(controller),
+            onAction: sessionIdle
+                ? _authenticationAction(context, controller, _readUserId)
+                : null,
             completed: controller.state.isReady,
             code: '''await session.login(userId);
 // If login is rejected:
@@ -331,10 +344,8 @@ await session.unbind(confirmed: true);''',
               userIdController: _userIdController,
               enabled: controller.state.isConnected,
               onUserIdChanged: controller.rememberUserId,
-              error: controller.error,
               sessionLog: controller.sessionLog,
             ),
-            loading: controller.state.phase == WSSessionPhase.loggingIn,
           ),
           _GuideTile(
             '4',
@@ -344,8 +355,12 @@ await session.unbind(confirmed: true);''',
                 : '已读取当前设备的基础信息。',
             keyName: 'jw.demo.guide.device_info',
             actionLabel: '读取',
-            onAction:
-                controller.state.isConnected ? controller.readDeviceInfo : null,
+            onAction: controller.state.isConnected && sessionIdle
+                ? () => wsDemoRunWithSnackBar(
+                      context,
+                      controller.readDeviceInfo,
+                    )
+                : null,
             completed: controller.state.device != null,
             code: 'await session.readDeviceInfo();',
             detailPanel: controller.state.device != null
@@ -360,12 +375,15 @@ await session.unbind(confirmed: true);''',
                 : '已读取 ${controller.functionInfo!.supported.length} 项设备功能。',
             keyName: 'jw.demo.guide.device_features',
             actionLabel: '读取',
-            onAction: controller.state.isConnected
-                ? controller.readDeviceFeatures
+            onAction: controller.state.isConnected && sessionIdle
+                ? () => wsDemoRunWithSnackBar(
+                      context,
+                      controller.readDeviceFeatures,
+                    )
                 : null,
             completed: controller.functionInfo != null,
             code: '''await session.readDeviceFeatures();
-final functions = session.state.functionInfo;
+final capabilities = session.state.capabilities;
 final supportsHeartRate = functions?.supports(WSDeviceFunction.rate);''',
             detailPanel: controller.functionInfo == null
                 ? null
@@ -383,19 +401,16 @@ class _AuthenticationDetailPanel extends StatelessWidget {
     required this.userIdController,
     required this.enabled,
     required this.onUserIdChanged,
-    required this.error,
     required this.sessionLog,
   });
 
   final TextEditingController userIdController;
   final bool enabled;
   final ValueChanged<String> onUserIdChanged;
-  final Object? error;
   final List<String> sessionLog;
 
   @override
   Widget build(BuildContext context) {
-    final errorColor = Theme.of(context).colorScheme.error;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -413,13 +428,6 @@ class _AuthenticationDetailPanel extends StatelessWidget {
             isDense: true,
           ),
         ),
-        if (error != null && enabled) ...[
-          const SizedBox(height: 8),
-          Text(
-            describeWSDemoError(error!),
-            style: TextStyle(color: errorColor),
-          ),
-        ],
         if (sessionLog.isNotEmpty) ...[
           const SizedBox(height: 12),
           _SessionLogPanel(entries: sessionLog),
@@ -429,48 +437,108 @@ class _AuthenticationDetailPanel extends StatelessWidget {
   }
 }
 
-String _authenticationDetail(WSSessionState state) => switch (state.phase) {
+String _authenticationDetail(WSDemoController controller) =>
+    switch (controller.state.phase) {
       WSSessionPhase.ready =>
         '已登录，可使用需要认证的 SDK 功能。如需更换绑定，可在此解绑（设备会断开连接并清空设备数据）。',
-      WSSessionPhase.loggingIn => '正在登录，请等待设备回应。',
+      WSSessionPhase.loggingIn => controller.preferBindOverLogin
+          ? '正在首次绑定，请等待设备回应（真机可能弹窗确认）。'
+          : '正在登录，请等待设备回应。',
       WSSessionPhase.loginRejected => '设备拒绝当前身份登录，请确认后首次绑定。',
-      _ when state.isConnected => '连接后请登录；仅在登录被拒绝时执行首次绑定。',
+      _ when controller.state.isConnected =>
+        controller.preferBindOverLogin
+            ? '真机 BLE：固件暂未实现登录，请直接「首次绑定」。'
+            : '连接后请登录；仅在登录被拒绝时执行首次绑定。',
       _ => '请先连接设备。',
     };
 
-String _authenticationActionLabel(WSSessionState state) =>
-    switch (state.phase) {
+String _authenticationActionLabel(WSDemoController controller) =>
+    switch (controller.state.phase) {
       WSSessionPhase.ready => '解绑',
-      WSSessionPhase.loggingIn => '正在登录…',
+      WSSessionPhase.loggingIn => controller.preferBindOverLogin
+          ? '正在绑定…'
+          : '正在登录…',
       WSSessionPhase.loginRejected => '首次绑定',
-      _ when state.isConnected => '登录',
-      _ => '登录',
+      _ when controller.state.isConnected =>
+        controller.preferBindOverLogin ? '首次绑定' : '登录',
+      _ => controller.preferBindOverLogin ? '首次绑定' : '登录',
     };
 
 Future<void> Function()? _authenticationAction(
+  BuildContext context,
   WSDemoController controller,
   String Function() readUserId,
 ) {
+  if (controller.isSessionBusy) return null;
   if (controller.state.phase == WSSessionPhase.loggingIn) return null;
+
+  Future<void> bind() => wsDemoRunWithSnackBar(context, () async {
+        final userId = readUserId();
+        if (userId.isEmpty) return;
+        await controller.bindFirstTime(userId, confirmed: true);
+      });
+
   if (controller.state.phase == WSSessionPhase.loginRejected) {
-    return () async {
-      final userId = readUserId();
-      if (userId.isEmpty) return;
-      await controller.bindFirstTime(userId, confirmed: true);
-    };
+    return bind;
   }
   if (controller.state.phase == WSSessionPhase.ready) {
-    return () async {
-      await controller.unbind(confirmed: true);
-    };
+    return () => wsDemoRunWithSnackBar(
+          context,
+          () => controller.unbind(confirmed: true),
+        );
   }
-  return controller.state.isConnected
-      ? () async {
-          final userId = readUserId();
-          if (userId.isEmpty) return;
-          await controller.login(userId);
-        }
-      : null;
+  if (!controller.state.isConnected) return null;
+  if (controller.preferBindOverLogin) return bind;
+  return () => wsDemoRunWithSnackBar(context, () async {
+        final userId = readUserId();
+        if (userId.isEmpty) return;
+        await controller.login(userId);
+      });
+}
+
+class _SdkInitTransportPicker extends StatelessWidget {
+  const _SdkInitTransportPicker({required this.controller});
+
+  final WSDemoController controller;
+
+  static const _modes = <(WSTransportMode, String)>[
+    (WSTransportMode.simulation, '模拟器'),
+    (WSTransportMode.ble, '真机 BLE'),
+  ];
+
+  bool get _canChange =>
+      !controller.state.isConnected && !controller.isConnecting;
+
+  Future<void> _onPick(BuildContext context, WSTransportMode? mode) async {
+    if (mode == null || mode == controller.transportMode) return;
+    try {
+      await controller.setTransportMode(mode);
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<WSTransportMode>(
+      key: const Key('ws.demo.init_transport'),
+      value: controller.transportMode,
+      decoration: InputDecoration(
+        labelText: '传输方式',
+        helperText: _canChange
+            ? '选好后再点「初始化」；已连接时需先断开才能更换。'
+            : '已连接设备，请先断开再更换传输方式。',
+      ),
+      items: [
+        for (final (mode, label) in _modes)
+          DropdownMenuItem(value: mode, child: Text(label)),
+      ],
+      onChanged: _canChange ? (mode) => unawaited(_onPick(context, mode)) : null,
+    );
+  }
 }
 
 class _GuideTile extends StatelessWidget {
@@ -484,7 +552,6 @@ class _GuideTile extends StatelessWidget {
     required this.completed,
     required this.code,
     this.detailPanel,
-    this.loading = false,
     this.showTrailingAction = true,
   });
   final String number;
@@ -496,7 +563,6 @@ class _GuideTile extends StatelessWidget {
   final bool completed;
   final String code;
   final Widget? detailPanel;
-  final bool loading;
   final bool showTrailingAction;
 
   static ButtonStyle _compactFilledStyle(BuildContext context) =>
@@ -585,7 +651,6 @@ class _GuideTile extends StatelessWidget {
               child: detailPanel!,
             ),
           ],
-          if (loading) const LinearProgressIndicator(),
         ],
       ),
     );
@@ -744,10 +809,15 @@ class _ConnectionPageState extends State<_ConnectionPage> {
   }
 
   Future<void> _finishConnect(WSScanDevice device) async {
-    final connected = await controller.connect(device);
-    if (!mounted || !connected) return;
-    widget.onConnected();
-    Navigator.pop(context);
+    try {
+      final connected = await controller.connect(device);
+      if (!mounted || !connected) return;
+      widget.onConnected();
+      Navigator.pop(context);
+    } catch (error) {
+      if (!mounted) return;
+      wsDemoShowErrorSnackBar(context, error);
+    }
   }
 
   @override
@@ -868,14 +938,13 @@ class _ConnectionScanHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final errorColor = Theme.of(context).colorScheme.error;
-    final sheetError = controller.sheetError.value;
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '当前为 Honey 模拟器模式：列表仅含「WS Watch Simulator」，不扫描周围真机 BLE。',
+            '当前为 WS 模拟器模式：列表仅含「WS Watch Simulator」，不扫描周围真机 BLE。',
           ),
           const SizedBox(height: 12),
           if (!controller.isInitialized) ...[
@@ -912,18 +981,6 @@ class _ConnectionScanHeader extends StatelessWidget {
           if (controller.state.isConnected) ...[
             const SizedBox(height: 12),
             Text('已连接 ${controller.state.device?.name ?? 'JW 设备'}'),
-          ],
-          if (sheetError != null) ...[
-            const SizedBox(height: 12),
-            Text(describeWSDemoError(sheetError),
-                style: TextStyle(color: errorColor)),
-          ] else if (controller.error != null &&
-              controller.error != sheetError) ...[
-            const SizedBox(height: 12),
-            Text(
-              describeWSDemoError(controller.error!),
-              style: TextStyle(color: errorColor),
-            ),
           ],
         ],
       ),

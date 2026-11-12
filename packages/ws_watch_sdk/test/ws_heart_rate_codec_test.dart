@@ -1,16 +1,16 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ws_watch_sdk/src/honey/honey_data.dart';
-import 'package:ws_watch_sdk/src/honey/honey_l2.dart';
-import 'package:ws_watch_sdk/src/history/honey_heart_rate_codec.dart';
+import 'package:ws_watch_sdk/src/wire/ws_data_command.dart';
+import 'package:ws_watch_sdk/src/wire/ws_l2_message.dart';
+import 'package:ws_watch_sdk/src/history/ws_heart_rate_codec.dart';
 
 void main() {
   test('decodes spec example heart rate frame', () {
-    final frame = HoneyL2Message(
-      command: HoneyDataCommand.command,
-      version: HoneyDataCommand.version,
-      key: HoneyDataCommand.keyDataHeartRate,
+    final frame = WSL2Message(
+      command: WSDataCommand.command,
+      version: WSDataCommand.version,
+      key: WSDataCommand.keyDataHeartRate,
       value: Uint8List.fromList([
         0x05,
         0x00,
@@ -27,10 +27,10 @@ void main() {
         0x4B,
       ]),
     );
-    final rows = HoneyHeartRateCodec.decodeDataFrame(frame);
+    final rows = WSHeartRateCodec.decodeDataFrame(frame);
     expect(rows.length, 2);
     expect(rows[0].bpm, 0x48);
     expect(rows[1].bpm, 0x4B);
-    expect(rows[0].time, 0x6ACC9A88);
+    expect(rows[0].time, 0x889ACC6A);
   });
 }

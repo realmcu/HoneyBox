@@ -22,7 +22,9 @@ final class WSHistory {
   Future<List<WSHeartRate>> syncHeartRate() async {
     final scope = _scope();
     if (scope == null) {
-      throw StateError('history sync requires authenticated ready session');
+      throw StateError(
+        'history operation requires historyScope (set userId via login/bind)',
+      );
     }
     final rows = await WSHistorySync.syncHeartRate(_link);
     await _store.replaceHeartRates(scope, rows);
@@ -32,7 +34,9 @@ final class WSHistory {
   Future<List<WSHeartRate>> queryHeartRates() async {
     final scope = _scope();
     if (scope == null) {
-      throw StateError('history query requires authenticated ready session');
+      throw StateError(
+        'history operation requires historyScope (set userId via login/bind)',
+      );
     }
     return _store.queryHeartRates(WSHistoryQuery(scope: scope));
   }
@@ -40,7 +44,9 @@ final class WSHistory {
   Future<void> syncHealthData(WSHistorySyncListener listener) {
     final scope = _scope();
     if (scope == null) {
-      throw StateError('history sync requires authenticated ready session');
+      throw StateError(
+        'history operation requires historyScope (set userId via login/bind)',
+      );
     }
     return WSHealthHistorySync(
       link: _link,

@@ -45,7 +45,7 @@ final class JWHistoryQuery {
 
 /// Firmware calendar fields (Y-M-D and minutes-from-midnight) are device-local
 /// wall time, matching Android `DateUtil.getTime` / `HomeSpo2Bean` — not UTC.
-DateTime jwDeviceLocalDateTime(
+DateTime parseJWDeviceLocalDateTime(
   int year,
   int month,
   int day, [

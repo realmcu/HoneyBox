@@ -1,46 +1,46 @@
 import 'dart:typed_data';
 
-import 'honey_l2.dart';
-import 'honey_settings.dart';
+import 'ws_l2_message.dart';
+import 'ws_settings_command.dart';
 
-/// Device info / capability keys on command `0x02` ([HoneyProtocol 0x02-settings.rst]).
-abstract final class HoneyDeviceCommand {
-  static const int command = HoneySettingsCommand.command;
-  static const int version = HoneySettingsCommand.version;
+/// Device info / capability keys on command `0x02` ([WS protocol 0x02-settings.rst]).
+abstract final class WSDeviceCommand {
+  static const int command = WSSettingsCommand.command;
+  static const int version = WSSettingsCommand.version;
 
   static const int keyDeviceInfo = 0x30;
   static const int keyCapabilities = 0x31;
   static const int capabilitiesBlobLength = 16;
 
-  static HoneyL2Message readDeviceInfo() => HoneyL2Message(
+  static WSL2Message readDeviceInfo() => WSL2Message(
         command: command,
         version: version,
         key: keyDeviceInfo,
-        value: Uint8List.fromList([HoneySettingsCommand.opcodeRead]),
+        value: Uint8List.fromList([WSSettingsCommand.opcodeRead]),
       );
 
-  static HoneyL2Message readCapabilities() => HoneyL2Message(
+  static WSL2Message readCapabilities() => WSL2Message(
         command: command,
         version: version,
         key: keyCapabilities,
-        value: Uint8List.fromList([HoneySettingsCommand.opcodeRead]),
+        value: Uint8List.fromList([WSSettingsCommand.opcodeRead]),
       );
 
-  static bool isDeviceInfoReadReply(HoneyL2Message message) =>
+  static bool isDeviceInfoReadReply(WSL2Message message) =>
       message.command == command &&
       message.key == keyDeviceInfo &&
       message.value.isNotEmpty &&
-      message.value[0] == HoneySettingsCommand.opcodeReadReply;
+      message.value[0] == WSSettingsCommand.opcodeReadReply;
 
-  static bool isCapabilitiesReadReply(HoneyL2Message message) =>
+  static bool isCapabilitiesReadReply(WSL2Message message) =>
       message.command == command &&
       message.key == keyCapabilities &&
       message.value.isNotEmpty &&
-      message.value[0] == HoneySettingsCommand.opcodeReadReply;
+      message.value[0] == WSSettingsCommand.opcodeReadReply;
 
   /// Minimal stub fields after opcode byte (model 2B + trailing serial if present).
   static ({int modelId, String serialNumber}) decodeDeviceInfoStub(
-    HoneyL2Message reply,
+    WSL2Message reply,
   ) {
     if (!isDeviceInfoReadReply(reply) || reply.value.length < 3) {
       throw FormatException('unexpected device info reply');
@@ -56,7 +56,7 @@ abstract final class HoneyDeviceCommand {
     return (modelId: modelId, serialNumber: serial);
   }
 
-  static Uint8List decodeCapabilitiesBlob(HoneyL2Message reply) {
+  static Uint8List decodeCapabilitiesBlob(WSL2Message reply) {
     if (!isCapabilitiesReadReply(reply)) {
       throw FormatException('unexpected capabilities reply');
     }

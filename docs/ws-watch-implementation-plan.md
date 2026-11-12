@@ -3,6 +3,7 @@
 > 状态：**W5.0 基线已落档**（[覆盖表](ws-watch-api-coverage.md)、[API 冻结](ws-watch-public-api-freeze.md)）；**Greenfield 重置已执行**（见 §0）。码云 Epic **[IKUCE2](https://e.gitee.com/priodigit/dashboard?issue=IKUCE2)**，子任务 §9。前置 **T1–T3 已完成**；JW **T4.0–T4.5 已闭环**（见 [jw-watch-sdk-implementation-plan.md](jw-watch-sdk-implementation-plan.md)、[迁移计划 §20](ws-watch-migration-plan.md)）。  
 > 工程约定：**公开 API / Session / Demo 信息架构对齐 `jw_watch_sdk` + `jw_watch_demo`（`JW*` → `WS*`）**；**设备协议**：JW = 老 HL 私有协议，WS = **新 HoneyProtocol**（codec 独立实现，不复用 JW）。WS SDK/Demo 为 **首版 Greenfield**，删包后仓库内尚无任何 WS 落地代码。**不从旧 M1–M6 port**；**不**保留 M 系 `@Deprecated`。链路下层共用 `watch_frame_channel` + transport；**SDK 与 Demo 分包**，业务不进 HoneyBox。  
 > 协议：[HoneyProtocol](https://realmcu.github.io/HoneyProtocol/) `0x05-data` 等；设计细节见 [ws-watch-sdk-design.md](ws-watch-sdk-design.md)（M 系实现章节为 **historical**）。  
+> **真机联调差异**：见 [ws-watch-firmware-bringup-issues.md](ws-watch-firmware-bringup-issues.md)（GAP 广播仍播老 `01ff`、L1 bit6 ACK 等）。  
 > **当前无 WS 真机**：**W5.1–W5.5** 以模拟器 + 单测/集成测为验收面；**W5.6** 对应 M7 真机 UART（[IKSABE](https://e.gitee.com/priodigit/dashboard?issue=IKSABE)），不阻塞 W5.1–5.5 关单。
 
 ---

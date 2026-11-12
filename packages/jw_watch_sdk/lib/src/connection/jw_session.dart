@@ -58,12 +58,11 @@ final class JWWatchSession {
 
   /// The only history scope associated with the current authenticated session.
   ///
-  /// It is available only after successful login or first-time binding. The
-  /// MAC comes from the connection target, so callers never need an invented
-  /// device ID or a separate device registry merely to read health history.
+  /// Available when [authenticatedUserId] is set (typically after login/bind).
+  /// The MAC comes from the connection target.
   JWHistoryScope? get historyScope {
     final userId = _authenticatedUserId;
-    if (userId == null || !_state.isReady) return null;
+    if (userId == null) return null;
     final deviceMac = _state.device?.deviceMac ?? connection.target.deviceId;
     return JWHistoryScope(userId: userId, deviceMac: deviceMac);
   }
@@ -96,7 +95,7 @@ final class JWWatchSession {
               _state.functionInfo?.supports(JWDeviceFunction.temperature) ??
               false,
         ),
-        isReady: () => _state.isReady,
+        isConnected: () => _state.isConnected,
         isHealthSyncActive: () => _healthSync != null,
         functionInfo: () => _state.functionInfo,
       );
@@ -105,7 +104,7 @@ final class JWWatchSession {
   JWControl get control => _control ??= JWControl(
         link: _link,
         coordinator: _controlCoordinator ??= JWControlCoordinator(link: _link),
-        isReady: () => _state.isReady,
+        isConnected: () => _state.isConnected,
         functionInfo: () => _state.functionInfo,
       );
 
@@ -118,10 +117,12 @@ final class JWWatchSession {
     JWHistorySyncListener listener, {
     void Function(JWHistorySyncFrame frame)? onHistoryFrame,
   }) {
-    _requireReadyForSettings();
+    _requireConnected();
     final scope = historyScope;
     if (scope == null) {
-      throw StateError('JW health sync requires an authenticated session');
+      throw StateError(
+        'JW health sync requires historyScope (set userId via login/bind)',
+      );
     }
     if (_healthSync != null) {
       throw StateError('JW health sync is already active on this session');
@@ -578,15 +579,15 @@ final class JWWatchSession {
 
   /// Replaces the on-device address book (V2 `setAddressBook`).
   ///
-  /// Pass an empty list to clear. At most [kJwMaxAddressBookEntries] contacts.
+  /// Pass an empty list to clear. At most [kJWMaxAddressBookEntries] contacts.
   Future<JWSettingSubmission> setAddressBook(
       List<JWAddressBookEntry> entries) async {
     _requireReadyForSettings();
     _requireDeviceFunction(JWDeviceFunction.addressBook, 'address book');
     final list = List<JWAddressBookEntry>.unmodifiable(entries);
-    if (list.length > kJwMaxAddressBookEntries) {
+    if (list.length > kJWMaxAddressBookEntries) {
       throw ArgumentError.value(list.length, 'entries',
-          'must not exceed $kJwMaxAddressBookEntries');
+          'must not exceed $kJWMaxAddressBookEntries');
     }
     final count = list.length;
     if (count == 0) {
@@ -975,9 +976,6 @@ final class JWWatchSession {
 
   void _requireReadyForSettings() {
     _requireConnected();
-    if (_state.phase != JWSessionPhase.ready) {
-      throw StateError('JW settings require an authenticated session');
-    }
   }
 
   void _requireDeviceFunction(JWDeviceFunction function, String name) {

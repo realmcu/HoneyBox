@@ -6,7 +6,7 @@ import 'package:watch_transport/watch_transport.dart';
 import '../config/ws_config.dart';
 import '../debug/ws_debug_log.dart';
 import '../model/ws_error.dart';
-import '../honey/honey_l2.dart';
+import '../wire/ws_l2_message.dart';
 
 final class WSLink {
   WSLink(this.connection, {WSLinkConfig config = const WSLinkConfig()})
@@ -26,17 +26,17 @@ final class WSLink {
   final WatchTransportConnection connection;
   final WatchFrameChannel _channel;
   final _failures = StreamController<WSException>.broadcast(sync: true);
-  final _incoming = StreamController<HoneyL2Message>.broadcast(sync: true);
+  final _incoming = StreamController<WSL2Message>.broadcast(sync: true);
   StreamSubscription<WatchReceivedPayload>? _payloadSubscription;
   StreamSubscription<WatchFrameEvent>? _wireSubscription;
   WatchFrameSend? _outboundSend;
-  _PendingHoneyRequest? _pending;
+  _PendingWSRequest? _pending;
   Future<void> _tail = Future.value();
   bool _open = false;
   bool _disposed = false;
 
   Stream<WSException> get failures => _failures.stream;
-  Stream<HoneyL2Message> get incoming => _incoming.stream;
+  Stream<WSL2Message> get incoming => _incoming.stream;
   bool get isOpen => _open && !_disposed;
 
   Future<void> open() async {
@@ -58,17 +58,17 @@ final class WSLink {
     }
   }
 
-  Future<HoneyL2Message> request(
-    HoneyL2Message message, {
+  Future<WSL2Message> request(
+    WSL2Message message, {
     required int replyKey,
     Duration? timeout,
   }) {
     return _enqueue(() => _execute(message, replyKey: replyKey, timeout: timeout));
   }
 
-  Future<HoneyL2Message> requestWhere(
-    HoneyL2Message message, {
-    required bool Function(HoneyL2Message reply) matches,
+  Future<WSL2Message> requestWhere(
+    WSL2Message message, {
+    required bool Function(WSL2Message reply) matches,
     Duration? timeout,
   }) {
     return _enqueue(
@@ -76,11 +76,11 @@ final class WSLink {
     );
   }
 
-  Future<void> send(HoneyL2Message message) {
+  Future<void> send(WSL2Message message) {
     return _enqueue(() async {
       WSWatchDebugLog.apiIn(
         'WSLink.send',
-        WSWatchDebugLog.describeHoney(message),
+        WSWatchDebugLog.describeWSL2Message(message),
       );
       final outbound = _channel.startSend(message.encode());
       _outboundSend = outbound;
@@ -88,8 +88,14 @@ final class WSLink {
         await outbound.completed;
         WSWatchDebugLog.apiOut('WSLink.send', 'ok seq=${outbound.sequence}');
       } catch (error) {
-        WSWatchDebugLog.apiOut('WSLink.send', 'failed $error');
-        rethrow;
+        final mapped =
+            error is WSException ? error : _mapFrameError(error);
+        WSWatchDebugLog.linkFailure(
+          'WSLink.send',
+          mapped,
+          detail: 'L1 send/ACK failed after seq=${outbound.sequence}',
+        );
+        throw mapped;
       } finally {
         if (identical(_outboundSend, outbound)) _outboundSend = null;
       }
@@ -125,10 +131,10 @@ final class WSLink {
     return run;
   }
 
-  Future<HoneyL2Message> _execute(
-    HoneyL2Message message, {
+  Future<WSL2Message> _execute(
+    WSL2Message message, {
     int? replyKey,
-    bool Function(HoneyL2Message reply)? matches,
+    bool Function(WSL2Message reply)? matches,
     Duration? timeout,
   }) async {
     if (_disposed || !_open) {
@@ -136,40 +142,56 @@ final class WSLink {
     }
     if (_pending != null) {
       throw const WSException(
-          WSErrorCode.unavailable, 'Another Honey request is active');
+          WSErrorCode.unavailable, 'Another WS request is active');
     }
     WSWatchDebugLog.apiIn(
       'WSLink.request',
-      WSWatchDebugLog.describeHoney(message),
+      WSWatchDebugLog.describeWSL2Message(message),
     );
-    final pending = _PendingHoneyRequest(
+    final pending = _PendingWSRequest(
       request: message,
       command: message.command,
       replyKey: replyKey,
       matches: matches,
-      completer: Completer<HoneyL2Message>(),
+      completer: Completer<WSL2Message>(),
     );
     _pending = pending;
     final outbound = _channel.startSend(message.encode());
     _outboundSend = outbound;
     try {
-      await outbound.completed;
+      try {
+        await outbound.completed;
+      } catch (error) {
+        final mapped =
+            error is WSException ? error : _mapFrameError(error);
+        WSWatchDebugLog.linkFailure(
+          'WSLink.request',
+          mapped,
+          detail: 'L1 send/ACK failed after seq=${outbound.sequence}',
+        );
+        throw mapped;
+      }
       return await pending.completer.future.timeout(
         timeout ?? const Duration(seconds: 8),
         onTimeout: () {
-          WSWatchDebugLog.apiOut(
+          const error = WSException(
+              WSErrorCode.businessReplyTimeout, 'WS reply timed out');
+          WSWatchDebugLog.linkFailure(
             'WSLink.request',
-            'timeout ${WSWatchDebugLog.describeHoney(message)}',
+            error,
+            detail:
+                'L2 reply timeout ${WSWatchDebugLog.describeWSL2Message(message)}',
           );
-          throw const WSException(
-              WSErrorCode.businessReplyTimeout, 'Honey reply timed out');
+          throw error;
         },
       );
     } catch (error) {
-      if (error is! WSException) {
-        WSWatchDebugLog.apiOut('WSLink.request', 'failed $error');
+      if (error is WSException) {
+        rethrow;
       }
-      rethrow;
+      final mapped = _mapFrameError(error);
+      WSWatchDebugLog.linkFailure('WSLink.request', mapped);
+      throw mapped;
     } finally {
       if (identical(_pending, pending)) _pending = null;
       if (identical(_outboundSend, outbound)) _outboundSend = null;
@@ -184,9 +206,9 @@ final class WSLink {
   }
 
   void _onPayload(WatchReceivedPayload payload) {
-    List<HoneyL2Message> messages;
+    List<WSL2Message> messages;
     try {
-      messages = HoneyL2Message.decodeAll(payload.bytes);
+      messages = WSL2Message.decodeAll(payload.bytes);
     } on FormatException catch (error) {
       WSWatchDebugLog.l2DecodeFailed(payload.bytes, error, l1Seq: payload.seq);
       return;
@@ -214,8 +236,8 @@ final class WSLink {
   }
 }
 
-final class _PendingHoneyRequest {
-  _PendingHoneyRequest({
+final class _PendingWSRequest {
+  _PendingWSRequest({
     required this.request,
     required this.command,
     this.replyKey,
@@ -223,13 +245,13 @@ final class _PendingHoneyRequest {
     required this.completer,
   });
 
-  final HoneyL2Message request;
+  final WSL2Message request;
   final int command;
   final int? replyKey;
-  final bool Function(HoneyL2Message reply)? matches;
-  final Completer<HoneyL2Message> completer;
+  final bool Function(WSL2Message reply)? matches;
+  final Completer<WSL2Message> completer;
 
-  bool accepts(HoneyL2Message message) {
+  bool accepts(WSL2Message message) {
     if (message.command != command) return false;
     if (matches != null) return matches!(message);
     return message.key == replyKey;

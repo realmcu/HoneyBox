@@ -86,7 +86,10 @@ final class JWWatch {
       return Future.error(
           StateError('JW SDK must be initialized before scanning.'));
     }
-    return _scanner.start(timeout: timeout);
+    return _scanner.start(
+      services: jwBleScanServiceUuids,
+      timeout: timeout,
+    );
   }
 
   Future<void> stopScan() => _scanner.stop();

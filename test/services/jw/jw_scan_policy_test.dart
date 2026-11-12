@@ -4,15 +4,27 @@ import 'package:honeybox/services/jw/jw_scan_policy.dart';
 
 void main() {
   test('advertising hints accept exact known UUID/company format only', () {
-    bool candidate(Set<String> uuids, Map<int, List<int>> data) =>
-        JwScanPolicy.isCandidate(serviceUuids: uuids, manufacturerData: data);
+    bool candidate(Set<String> uuids, Map<int, List<int>> data,
+            {String deviceName = ''}) =>
+        JwScanPolicy.isCandidate(
+            serviceUuids: uuids,
+            manufacturerData: data,
+            deviceName: deviceName);
     expect(candidate({'FD50'}, {}), isTrue);
     expect(candidate({'000001ff-3c17-d293-8e48-14fe2e4da212'}, {}), isTrue);
     expect(
         candidate({}, {
           0xfec5: [1, 2, 3, 4, 5, 6]
         }),
-        isTrue);
+        isFalse);
+    expect(
+        candidate({'0000fee7-0000-1000-8000-00805f9b34fb'}, {
+          0xfec5: [1, 2, 3, 4, 5, 6]
+        }),
+        isFalse);
+    expect(
+        candidate({}, {0xfec5: [1, 2, 3, 4, 5, 6]}, deviceName: 'Watch'),
+        isFalse);
     expect(
         candidate({}, {
           0x07d0: [1, 2, 3, 4, 5, 6]

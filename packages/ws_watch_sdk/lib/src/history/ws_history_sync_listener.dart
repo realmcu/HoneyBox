@@ -32,7 +32,7 @@ final class WSHistorySyncFailure {
   final String message;
 }
 
-/// Honey `0x05` health sync callbacks (aligned with JW listener shape).
+/// WS `0x05` health sync callbacks (aligned with JW listener shape).
 abstract interface class WSHistorySyncListener {
   void onSyncStart(WSHistorySyncPlan plan);
 

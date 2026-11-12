@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import '../honey/honey_device.dart';
+import '../wire/ws_device_command.dart';
 
 enum WSFeature {
   heartRate,
@@ -12,15 +12,15 @@ enum WSFeature {
 
 enum WSFeatureSupport { supported, unsupported, unknown }
 
-/// 16-byte capability bitmap stub (HoneyProtocol `0x02` key `0x31`).
+/// 16-byte capability bitmap stub (WS protocol `0x02` key `0x31`).
 final class WSCapabilities {
   WSCapabilities(Uint8List raw)
       : raw = Uint8List.fromList(
-          raw.length == HoneyDeviceCommand.capabilitiesBlobLength
+          raw.length == WSDeviceCommand.capabilitiesBlobLength
               ? raw
               : throw ArgumentError(
                   'capabilities raw must be '
-                  '${HoneyDeviceCommand.capabilitiesBlobLength} bytes',
+                  '${WSDeviceCommand.capabilitiesBlobLength} bytes',
                 ),
         );
 
@@ -29,7 +29,7 @@ final class WSCapabilities {
   static WSCapabilities parse(Uint8List blob) => WSCapabilities(blob);
 
   WSFeatureSupport supportOf(WSFeature feature) {
-    // Bit assignments are still TBD in HoneyProtocol; keep unknown.
+    // Bit assignments are still TBD in WS protocol; keep unknown.
     return WSFeatureSupport.unknown;
   }
 }

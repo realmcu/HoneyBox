@@ -3,12 +3,12 @@
 part of 'jw_database.dart';
 
 // ignore_for_file: type=lint
-class $JwActivitiesTable extends JwActivities
-    with TableInfo<$JwActivitiesTable, JwActivity> {
+class $JWActivitiesTable extends JWActivities
+    with TableInfo<$JWActivitiesTable, JWActivityRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwActivitiesTable(this.attachedDatabase, [this._alias]);
+  $JWActivitiesTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -61,7 +61,7 @@ class $JwActivitiesTable extends JwActivities
   String get actualTableName => $name;
   static const String $name = 'jw_activity';
   @override
-  VerificationContext validateIntegrity(Insertable<JwActivity> instance,
+  VerificationContext validateIntegrity(Insertable<JWActivityRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -121,9 +121,9 @@ class $JwActivitiesTable extends JwActivities
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwActivity map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWActivityRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwActivity(
+    return JWActivityRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -144,12 +144,12 @@ class $JwActivitiesTable extends JwActivities
   }
 
   @override
-  $JwActivitiesTable createAlias(String alias) {
-    return $JwActivitiesTable(attachedDatabase, alias);
+  $JWActivitiesTable createAlias(String alias) {
+    return $JWActivitiesTable(attachedDatabase, alias);
   }
 }
 
-class JwActivity extends DataClass implements Insertable<JwActivity> {
+class JWActivityRow extends DataClass implements Insertable<JWActivityRow> {
   final String userId;
   final String deviceMac;
   final int time;
@@ -158,7 +158,7 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
   final int energy;
   final int activeTime;
   final int mode;
-  const JwActivity(
+  const JWActivityRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -181,8 +181,8 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
     return map;
   }
 
-  JwActivitiesCompanion toCompanion(bool nullToAbsent) {
-    return JwActivitiesCompanion(
+  JWActivitiesCompanion toCompanion(bool nullToAbsent) {
+    return JWActivitiesCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -194,10 +194,10 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
     );
   }
 
-  factory JwActivity.fromJson(Map<String, dynamic> json,
+  factory JWActivityRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwActivity(
+    return JWActivityRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -223,7 +223,7 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
     };
   }
 
-  JwActivity copyWith(
+  JWActivityRow copyWith(
           {String? userId,
           String? deviceMac,
           int? time,
@@ -232,7 +232,7 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
           int? energy,
           int? activeTime,
           int? mode}) =>
-      JwActivity(
+      JWActivityRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
@@ -242,8 +242,8 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
         activeTime: activeTime ?? this.activeTime,
         mode: mode ?? this.mode,
       );
-  JwActivity copyWithCompanion(JwActivitiesCompanion data) {
-    return JwActivity(
+  JWActivityRow copyWithCompanion(JWActivitiesCompanion data) {
+    return JWActivityRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -258,7 +258,7 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
 
   @override
   String toString() {
-    return (StringBuffer('JwActivity(')
+    return (StringBuffer('JWActivityRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -277,7 +277,7 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwActivity &&
+      (other is JWActivityRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
@@ -288,7 +288,7 @@ class JwActivity extends DataClass implements Insertable<JwActivity> {
           other.mode == this.mode);
 }
 
-class JwActivitiesCompanion extends UpdateCompanion<JwActivity> {
+class JWActivitiesCompanion extends UpdateCompanion<JWActivityRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
@@ -298,7 +298,7 @@ class JwActivitiesCompanion extends UpdateCompanion<JwActivity> {
   final Value<int> activeTime;
   final Value<int> mode;
   final Value<int> rowid;
-  const JwActivitiesCompanion({
+  const JWActivitiesCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
@@ -309,7 +309,7 @@ class JwActivitiesCompanion extends UpdateCompanion<JwActivity> {
     this.mode = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwActivitiesCompanion.insert({
+  JWActivitiesCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -327,7 +327,7 @@ class JwActivitiesCompanion extends UpdateCompanion<JwActivity> {
         energy = Value(energy),
         activeTime = Value(activeTime),
         mode = Value(mode);
-  static Insertable<JwActivity> custom({
+  static Insertable<JWActivityRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -351,7 +351,7 @@ class JwActivitiesCompanion extends UpdateCompanion<JwActivity> {
     });
   }
 
-  JwActivitiesCompanion copyWith(
+  JWActivitiesCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
@@ -361,7 +361,7 @@ class JwActivitiesCompanion extends UpdateCompanion<JwActivity> {
       Value<int>? activeTime,
       Value<int>? mode,
       Value<int>? rowid}) {
-    return JwActivitiesCompanion(
+    return JWActivitiesCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -409,7 +409,7 @@ class JwActivitiesCompanion extends UpdateCompanion<JwActivity> {
 
   @override
   String toString() {
-    return (StringBuffer('JwActivitiesCompanion(')
+    return (StringBuffer('JWActivitiesCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -424,11 +424,12 @@ class JwActivitiesCompanion extends UpdateCompanion<JwActivity> {
   }
 }
 
-class $JwSleepsTable extends JwSleeps with TableInfo<$JwSleepsTable, JwSleep> {
+class $JWSleepsTable extends JWSleeps
+    with TableInfo<$JWSleepsTable, JWSleepRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwSleepsTable(this.attachedDatabase, [this._alias]);
+  $JWSleepsTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -458,7 +459,7 @@ class $JwSleepsTable extends JwSleeps with TableInfo<$JwSleepsTable, JwSleep> {
   String get actualTableName => $name;
   static const String $name = 'jw_sleep';
   @override
-  VerificationContext validateIntegrity(Insertable<JwSleep> instance,
+  VerificationContext validateIntegrity(Insertable<JWSleepRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -492,9 +493,9 @@ class $JwSleepsTable extends JwSleeps with TableInfo<$JwSleepsTable, JwSleep> {
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwSleep map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWSleepRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwSleep(
+    return JWSleepRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -507,17 +508,17 @@ class $JwSleepsTable extends JwSleeps with TableInfo<$JwSleepsTable, JwSleep> {
   }
 
   @override
-  $JwSleepsTable createAlias(String alias) {
-    return $JwSleepsTable(attachedDatabase, alias);
+  $JWSleepsTable createAlias(String alias) {
+    return $JWSleepsTable(attachedDatabase, alias);
   }
 }
 
-class JwSleep extends DataClass implements Insertable<JwSleep> {
+class JWSleepRow extends DataClass implements Insertable<JWSleepRow> {
   final String userId;
   final String deviceMac;
   final int time;
   final int mode;
-  const JwSleep(
+  const JWSleepRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -532,8 +533,8 @@ class JwSleep extends DataClass implements Insertable<JwSleep> {
     return map;
   }
 
-  JwSleepsCompanion toCompanion(bool nullToAbsent) {
-    return JwSleepsCompanion(
+  JWSleepsCompanion toCompanion(bool nullToAbsent) {
+    return JWSleepsCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -541,10 +542,10 @@ class JwSleep extends DataClass implements Insertable<JwSleep> {
     );
   }
 
-  factory JwSleep.fromJson(Map<String, dynamic> json,
+  factory JWSleepRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwSleep(
+    return JWSleepRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -562,15 +563,16 @@ class JwSleep extends DataClass implements Insertable<JwSleep> {
     };
   }
 
-  JwSleep copyWith({String? userId, String? deviceMac, int? time, int? mode}) =>
-      JwSleep(
+  JWSleepRow copyWith(
+          {String? userId, String? deviceMac, int? time, int? mode}) =>
+      JWSleepRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
         mode: mode ?? this.mode,
       );
-  JwSleep copyWithCompanion(JwSleepsCompanion data) {
-    return JwSleep(
+  JWSleepRow copyWithCompanion(JWSleepsCompanion data) {
+    return JWSleepRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -580,7 +582,7 @@ class JwSleep extends DataClass implements Insertable<JwSleep> {
 
   @override
   String toString() {
-    return (StringBuffer('JwSleep(')
+    return (StringBuffer('JWSleepRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -594,27 +596,27 @@ class JwSleep extends DataClass implements Insertable<JwSleep> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwSleep &&
+      (other is JWSleepRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
           other.mode == this.mode);
 }
 
-class JwSleepsCompanion extends UpdateCompanion<JwSleep> {
+class JWSleepsCompanion extends UpdateCompanion<JWSleepRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
   final Value<int> mode;
   final Value<int> rowid;
-  const JwSleepsCompanion({
+  const JWSleepsCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
     this.mode = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwSleepsCompanion.insert({
+  JWSleepsCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -624,7 +626,7 @@ class JwSleepsCompanion extends UpdateCompanion<JwSleep> {
         deviceMac = Value(deviceMac),
         time = Value(time),
         mode = Value(mode);
-  static Insertable<JwSleep> custom({
+  static Insertable<JWSleepRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -640,13 +642,13 @@ class JwSleepsCompanion extends UpdateCompanion<JwSleep> {
     });
   }
 
-  JwSleepsCompanion copyWith(
+  JWSleepsCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
       Value<int>? mode,
       Value<int>? rowid}) {
-    return JwSleepsCompanion(
+    return JWSleepsCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -678,7 +680,7 @@ class JwSleepsCompanion extends UpdateCompanion<JwSleep> {
 
   @override
   String toString() {
-    return (StringBuffer('JwSleepsCompanion(')
+    return (StringBuffer('JWSleepsCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -689,12 +691,12 @@ class JwSleepsCompanion extends UpdateCompanion<JwSleep> {
   }
 }
 
-class $JwHeartRatesTable extends JwHeartRates
-    with TableInfo<$JwHeartRatesTable, JwHeartRate> {
+class $JWHeartRatesTable extends JWHeartRates
+    with TableInfo<$JWHeartRatesTable, JWHeartRateRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwHeartRatesTable(this.attachedDatabase, [this._alias]);
+  $JWHeartRatesTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -725,7 +727,7 @@ class $JwHeartRatesTable extends JwHeartRates
   String get actualTableName => $name;
   static const String $name = 'jw_heart_rate';
   @override
-  VerificationContext validateIntegrity(Insertable<JwHeartRate> instance,
+  VerificationContext validateIntegrity(Insertable<JWHeartRateRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -759,9 +761,9 @@ class $JwHeartRatesTable extends JwHeartRates
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwHeartRate map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWHeartRateRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwHeartRate(
+    return JWHeartRateRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -774,17 +776,17 @@ class $JwHeartRatesTable extends JwHeartRates
   }
 
   @override
-  $JwHeartRatesTable createAlias(String alias) {
-    return $JwHeartRatesTable(attachedDatabase, alias);
+  $JWHeartRatesTable createAlias(String alias) {
+    return $JWHeartRatesTable(attachedDatabase, alias);
   }
 }
 
-class JwHeartRate extends DataClass implements Insertable<JwHeartRate> {
+class JWHeartRateRow extends DataClass implements Insertable<JWHeartRateRow> {
   final String userId;
   final String deviceMac;
   final int time;
   final int heartRate;
-  const JwHeartRate(
+  const JWHeartRateRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -799,8 +801,8 @@ class JwHeartRate extends DataClass implements Insertable<JwHeartRate> {
     return map;
   }
 
-  JwHeartRatesCompanion toCompanion(bool nullToAbsent) {
-    return JwHeartRatesCompanion(
+  JWHeartRatesCompanion toCompanion(bool nullToAbsent) {
+    return JWHeartRatesCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -808,10 +810,10 @@ class JwHeartRate extends DataClass implements Insertable<JwHeartRate> {
     );
   }
 
-  factory JwHeartRate.fromJson(Map<String, dynamic> json,
+  factory JWHeartRateRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwHeartRate(
+    return JWHeartRateRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -829,16 +831,16 @@ class JwHeartRate extends DataClass implements Insertable<JwHeartRate> {
     };
   }
 
-  JwHeartRate copyWith(
+  JWHeartRateRow copyWith(
           {String? userId, String? deviceMac, int? time, int? heartRate}) =>
-      JwHeartRate(
+      JWHeartRateRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
         heartRate: heartRate ?? this.heartRate,
       );
-  JwHeartRate copyWithCompanion(JwHeartRatesCompanion data) {
-    return JwHeartRate(
+  JWHeartRateRow copyWithCompanion(JWHeartRatesCompanion data) {
+    return JWHeartRateRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -848,7 +850,7 @@ class JwHeartRate extends DataClass implements Insertable<JwHeartRate> {
 
   @override
   String toString() {
-    return (StringBuffer('JwHeartRate(')
+    return (StringBuffer('JWHeartRateRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -862,27 +864,27 @@ class JwHeartRate extends DataClass implements Insertable<JwHeartRate> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwHeartRate &&
+      (other is JWHeartRateRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
           other.heartRate == this.heartRate);
 }
 
-class JwHeartRatesCompanion extends UpdateCompanion<JwHeartRate> {
+class JWHeartRatesCompanion extends UpdateCompanion<JWHeartRateRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
   final Value<int> heartRate;
   final Value<int> rowid;
-  const JwHeartRatesCompanion({
+  const JWHeartRatesCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
     this.heartRate = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwHeartRatesCompanion.insert({
+  JWHeartRatesCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -892,7 +894,7 @@ class JwHeartRatesCompanion extends UpdateCompanion<JwHeartRate> {
         deviceMac = Value(deviceMac),
         time = Value(time),
         heartRate = Value(heartRate);
-  static Insertable<JwHeartRate> custom({
+  static Insertable<JWHeartRateRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -908,13 +910,13 @@ class JwHeartRatesCompanion extends UpdateCompanion<JwHeartRate> {
     });
   }
 
-  JwHeartRatesCompanion copyWith(
+  JWHeartRatesCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
       Value<int>? heartRate,
       Value<int>? rowid}) {
-    return JwHeartRatesCompanion(
+    return JWHeartRatesCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -946,7 +948,7 @@ class JwHeartRatesCompanion extends UpdateCompanion<JwHeartRate> {
 
   @override
   String toString() {
-    return (StringBuffer('JwHeartRatesCompanion(')
+    return (StringBuffer('JWHeartRatesCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -957,12 +959,12 @@ class JwHeartRatesCompanion extends UpdateCompanion<JwHeartRate> {
   }
 }
 
-class $JwBloodPressuresTable extends JwBloodPressures
-    with TableInfo<$JwBloodPressuresTable, JwBloodPressure> {
+class $JWBloodPressuresTable extends JWBloodPressures
+    with TableInfo<$JWBloodPressuresTable, JWBloodPressureRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwBloodPressuresTable(this.attachedDatabase, [this._alias]);
+  $JWBloodPressuresTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -1000,7 +1002,7 @@ class $JwBloodPressuresTable extends JwBloodPressures
   String get actualTableName => $name;
   static const String $name = 'jw_blood_pressure';
   @override
-  VerificationContext validateIntegrity(Insertable<JwBloodPressure> instance,
+  VerificationContext validateIntegrity(Insertable<JWBloodPressureRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -1040,9 +1042,9 @@ class $JwBloodPressuresTable extends JwBloodPressures
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwBloodPressure map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWBloodPressureRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwBloodPressure(
+    return JWBloodPressureRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -1057,18 +1059,19 @@ class $JwBloodPressuresTable extends JwBloodPressures
   }
 
   @override
-  $JwBloodPressuresTable createAlias(String alias) {
-    return $JwBloodPressuresTable(attachedDatabase, alias);
+  $JWBloodPressuresTable createAlias(String alias) {
+    return $JWBloodPressuresTable(attachedDatabase, alias);
   }
 }
 
-class JwBloodPressure extends DataClass implements Insertable<JwBloodPressure> {
+class JWBloodPressureRow extends DataClass
+    implements Insertable<JWBloodPressureRow> {
   final String userId;
   final String deviceMac;
   final int time;
   final int systolic;
   final int diastolic;
-  const JwBloodPressure(
+  const JWBloodPressureRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -1085,8 +1088,8 @@ class JwBloodPressure extends DataClass implements Insertable<JwBloodPressure> {
     return map;
   }
 
-  JwBloodPressuresCompanion toCompanion(bool nullToAbsent) {
-    return JwBloodPressuresCompanion(
+  JWBloodPressuresCompanion toCompanion(bool nullToAbsent) {
+    return JWBloodPressuresCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -1095,10 +1098,10 @@ class JwBloodPressure extends DataClass implements Insertable<JwBloodPressure> {
     );
   }
 
-  factory JwBloodPressure.fromJson(Map<String, dynamic> json,
+  factory JWBloodPressureRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwBloodPressure(
+    return JWBloodPressureRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -1118,21 +1121,21 @@ class JwBloodPressure extends DataClass implements Insertable<JwBloodPressure> {
     };
   }
 
-  JwBloodPressure copyWith(
+  JWBloodPressureRow copyWith(
           {String? userId,
           String? deviceMac,
           int? time,
           int? systolic,
           int? diastolic}) =>
-      JwBloodPressure(
+      JWBloodPressureRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
         systolic: systolic ?? this.systolic,
         diastolic: diastolic ?? this.diastolic,
       );
-  JwBloodPressure copyWithCompanion(JwBloodPressuresCompanion data) {
-    return JwBloodPressure(
+  JWBloodPressureRow copyWithCompanion(JWBloodPressuresCompanion data) {
+    return JWBloodPressureRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -1143,7 +1146,7 @@ class JwBloodPressure extends DataClass implements Insertable<JwBloodPressure> {
 
   @override
   String toString() {
-    return (StringBuffer('JwBloodPressure(')
+    return (StringBuffer('JWBloodPressureRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -1158,7 +1161,7 @@ class JwBloodPressure extends DataClass implements Insertable<JwBloodPressure> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwBloodPressure &&
+      (other is JWBloodPressureRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
@@ -1166,14 +1169,14 @@ class JwBloodPressure extends DataClass implements Insertable<JwBloodPressure> {
           other.diastolic == this.diastolic);
 }
 
-class JwBloodPressuresCompanion extends UpdateCompanion<JwBloodPressure> {
+class JWBloodPressuresCompanion extends UpdateCompanion<JWBloodPressureRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
   final Value<int> systolic;
   final Value<int> diastolic;
   final Value<int> rowid;
-  const JwBloodPressuresCompanion({
+  const JWBloodPressuresCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
@@ -1181,7 +1184,7 @@ class JwBloodPressuresCompanion extends UpdateCompanion<JwBloodPressure> {
     this.diastolic = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwBloodPressuresCompanion.insert({
+  JWBloodPressuresCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -1193,7 +1196,7 @@ class JwBloodPressuresCompanion extends UpdateCompanion<JwBloodPressure> {
         time = Value(time),
         systolic = Value(systolic),
         diastolic = Value(diastolic);
-  static Insertable<JwBloodPressure> custom({
+  static Insertable<JWBloodPressureRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -1211,14 +1214,14 @@ class JwBloodPressuresCompanion extends UpdateCompanion<JwBloodPressure> {
     });
   }
 
-  JwBloodPressuresCompanion copyWith(
+  JWBloodPressuresCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
       Value<int>? systolic,
       Value<int>? diastolic,
       Value<int>? rowid}) {
-    return JwBloodPressuresCompanion(
+    return JWBloodPressuresCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -1254,7 +1257,7 @@ class JwBloodPressuresCompanion extends UpdateCompanion<JwBloodPressure> {
 
   @override
   String toString() {
-    return (StringBuffer('JwBloodPressuresCompanion(')
+    return (StringBuffer('JWBloodPressuresCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -1266,12 +1269,12 @@ class JwBloodPressuresCompanion extends UpdateCompanion<JwBloodPressure> {
   }
 }
 
-class $JwBloodOxygensTable extends JwBloodOxygens
-    with TableInfo<$JwBloodOxygensTable, JwBloodOxygen> {
+class $JWBloodOxygensTable extends JWBloodOxygens
+    with TableInfo<$JWBloodOxygensTable, JWBloodOxygenRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwBloodOxygensTable(this.attachedDatabase, [this._alias]);
+  $JWBloodOxygensTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -1312,7 +1315,7 @@ class $JwBloodOxygensTable extends JwBloodOxygens
   String get actualTableName => $name;
   static const String $name = 'jw_blood_oxygen';
   @override
-  VerificationContext validateIntegrity(Insertable<JwBloodOxygen> instance,
+  VerificationContext validateIntegrity(Insertable<JWBloodOxygenRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -1354,9 +1357,9 @@ class $JwBloodOxygensTable extends JwBloodOxygens
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwBloodOxygen map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWBloodOxygenRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwBloodOxygen(
+    return JWBloodOxygenRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -1373,19 +1376,20 @@ class $JwBloodOxygensTable extends JwBloodOxygens
   }
 
   @override
-  $JwBloodOxygensTable createAlias(String alias) {
-    return $JwBloodOxygensTable(attachedDatabase, alias);
+  $JWBloodOxygensTable createAlias(String alias) {
+    return $JWBloodOxygensTable(attachedDatabase, alias);
   }
 }
 
-class JwBloodOxygen extends DataClass implements Insertable<JwBloodOxygen> {
+class JWBloodOxygenRow extends DataClass
+    implements Insertable<JWBloodOxygenRow> {
   final String userId;
   final String deviceMac;
   final int time;
   final int value;
   final int? high;
   final int? low;
-  const JwBloodOxygen(
+  const JWBloodOxygenRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -1408,8 +1412,8 @@ class JwBloodOxygen extends DataClass implements Insertable<JwBloodOxygen> {
     return map;
   }
 
-  JwBloodOxygensCompanion toCompanion(bool nullToAbsent) {
-    return JwBloodOxygensCompanion(
+  JWBloodOxygensCompanion toCompanion(bool nullToAbsent) {
+    return JWBloodOxygensCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -1419,10 +1423,10 @@ class JwBloodOxygen extends DataClass implements Insertable<JwBloodOxygen> {
     );
   }
 
-  factory JwBloodOxygen.fromJson(Map<String, dynamic> json,
+  factory JWBloodOxygenRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwBloodOxygen(
+    return JWBloodOxygenRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -1444,14 +1448,14 @@ class JwBloodOxygen extends DataClass implements Insertable<JwBloodOxygen> {
     };
   }
 
-  JwBloodOxygen copyWith(
+  JWBloodOxygenRow copyWith(
           {String? userId,
           String? deviceMac,
           int? time,
           int? value,
           Value<int?> high = const Value.absent(),
           Value<int?> low = const Value.absent()}) =>
-      JwBloodOxygen(
+      JWBloodOxygenRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
@@ -1459,8 +1463,8 @@ class JwBloodOxygen extends DataClass implements Insertable<JwBloodOxygen> {
         high: high.present ? high.value : this.high,
         low: low.present ? low.value : this.low,
       );
-  JwBloodOxygen copyWithCompanion(JwBloodOxygensCompanion data) {
-    return JwBloodOxygen(
+  JWBloodOxygenRow copyWithCompanion(JWBloodOxygensCompanion data) {
+    return JWBloodOxygenRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -1472,7 +1476,7 @@ class JwBloodOxygen extends DataClass implements Insertable<JwBloodOxygen> {
 
   @override
   String toString() {
-    return (StringBuffer('JwBloodOxygen(')
+    return (StringBuffer('JWBloodOxygenRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -1488,7 +1492,7 @@ class JwBloodOxygen extends DataClass implements Insertable<JwBloodOxygen> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwBloodOxygen &&
+      (other is JWBloodOxygenRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
@@ -1497,7 +1501,7 @@ class JwBloodOxygen extends DataClass implements Insertable<JwBloodOxygen> {
           other.low == this.low);
 }
 
-class JwBloodOxygensCompanion extends UpdateCompanion<JwBloodOxygen> {
+class JWBloodOxygensCompanion extends UpdateCompanion<JWBloodOxygenRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
@@ -1505,7 +1509,7 @@ class JwBloodOxygensCompanion extends UpdateCompanion<JwBloodOxygen> {
   final Value<int?> high;
   final Value<int?> low;
   final Value<int> rowid;
-  const JwBloodOxygensCompanion({
+  const JWBloodOxygensCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
@@ -1514,7 +1518,7 @@ class JwBloodOxygensCompanion extends UpdateCompanion<JwBloodOxygen> {
     this.low = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwBloodOxygensCompanion.insert({
+  JWBloodOxygensCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -1526,7 +1530,7 @@ class JwBloodOxygensCompanion extends UpdateCompanion<JwBloodOxygen> {
         deviceMac = Value(deviceMac),
         time = Value(time),
         value = Value(value);
-  static Insertable<JwBloodOxygen> custom({
+  static Insertable<JWBloodOxygenRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -1546,7 +1550,7 @@ class JwBloodOxygensCompanion extends UpdateCompanion<JwBloodOxygen> {
     });
   }
 
-  JwBloodOxygensCompanion copyWith(
+  JWBloodOxygensCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
@@ -1554,7 +1558,7 @@ class JwBloodOxygensCompanion extends UpdateCompanion<JwBloodOxygen> {
       Value<int?>? high,
       Value<int?>? low,
       Value<int>? rowid}) {
-    return JwBloodOxygensCompanion(
+    return JWBloodOxygensCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -1594,7 +1598,7 @@ class JwBloodOxygensCompanion extends UpdateCompanion<JwBloodOxygen> {
 
   @override
   String toString() {
-    return (StringBuffer('JwBloodOxygensCompanion(')
+    return (StringBuffer('JWBloodOxygensCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -1607,11 +1611,11 @@ class JwBloodOxygensCompanion extends UpdateCompanion<JwBloodOxygen> {
   }
 }
 
-class $JwHrvsTable extends JwHrvs with TableInfo<$JwHrvsTable, JwHrv> {
+class $JWHrvsTable extends JWHrvs with TableInfo<$JWHrvsTable, JWHrvRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwHrvsTable(this.attachedDatabase, [this._alias]);
+  $JWHrvsTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -1641,7 +1645,7 @@ class $JwHrvsTable extends JwHrvs with TableInfo<$JwHrvsTable, JwHrv> {
   String get actualTableName => $name;
   static const String $name = 'jw_hrv';
   @override
-  VerificationContext validateIntegrity(Insertable<JwHrv> instance,
+  VerificationContext validateIntegrity(Insertable<JWHrvRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -1675,9 +1679,9 @@ class $JwHrvsTable extends JwHrvs with TableInfo<$JwHrvsTable, JwHrv> {
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwHrv map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWHrvRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwHrv(
+    return JWHrvRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -1690,17 +1694,17 @@ class $JwHrvsTable extends JwHrvs with TableInfo<$JwHrvsTable, JwHrv> {
   }
 
   @override
-  $JwHrvsTable createAlias(String alias) {
-    return $JwHrvsTable(attachedDatabase, alias);
+  $JWHrvsTable createAlias(String alias) {
+    return $JWHrvsTable(attachedDatabase, alias);
   }
 }
 
-class JwHrv extends DataClass implements Insertable<JwHrv> {
+class JWHrvRow extends DataClass implements Insertable<JWHrvRow> {
   final String userId;
   final String deviceMac;
   final int time;
   final int sdnn;
-  const JwHrv(
+  const JWHrvRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -1715,8 +1719,8 @@ class JwHrv extends DataClass implements Insertable<JwHrv> {
     return map;
   }
 
-  JwHrvsCompanion toCompanion(bool nullToAbsent) {
-    return JwHrvsCompanion(
+  JWHrvsCompanion toCompanion(bool nullToAbsent) {
+    return JWHrvsCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -1724,10 +1728,10 @@ class JwHrv extends DataClass implements Insertable<JwHrv> {
     );
   }
 
-  factory JwHrv.fromJson(Map<String, dynamic> json,
+  factory JWHrvRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwHrv(
+    return JWHrvRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -1745,15 +1749,16 @@ class JwHrv extends DataClass implements Insertable<JwHrv> {
     };
   }
 
-  JwHrv copyWith({String? userId, String? deviceMac, int? time, int? sdnn}) =>
-      JwHrv(
+  JWHrvRow copyWith(
+          {String? userId, String? deviceMac, int? time, int? sdnn}) =>
+      JWHrvRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
         sdnn: sdnn ?? this.sdnn,
       );
-  JwHrv copyWithCompanion(JwHrvsCompanion data) {
-    return JwHrv(
+  JWHrvRow copyWithCompanion(JWHrvsCompanion data) {
+    return JWHrvRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -1763,7 +1768,7 @@ class JwHrv extends DataClass implements Insertable<JwHrv> {
 
   @override
   String toString() {
-    return (StringBuffer('JwHrv(')
+    return (StringBuffer('JWHrvRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -1777,27 +1782,27 @@ class JwHrv extends DataClass implements Insertable<JwHrv> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwHrv &&
+      (other is JWHrvRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
           other.sdnn == this.sdnn);
 }
 
-class JwHrvsCompanion extends UpdateCompanion<JwHrv> {
+class JWHrvsCompanion extends UpdateCompanion<JWHrvRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
   final Value<int> sdnn;
   final Value<int> rowid;
-  const JwHrvsCompanion({
+  const JWHrvsCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
     this.sdnn = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwHrvsCompanion.insert({
+  JWHrvsCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -1807,7 +1812,7 @@ class JwHrvsCompanion extends UpdateCompanion<JwHrv> {
         deviceMac = Value(deviceMac),
         time = Value(time),
         sdnn = Value(sdnn);
-  static Insertable<JwHrv> custom({
+  static Insertable<JWHrvRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -1823,13 +1828,13 @@ class JwHrvsCompanion extends UpdateCompanion<JwHrv> {
     });
   }
 
-  JwHrvsCompanion copyWith(
+  JWHrvsCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
       Value<int>? sdnn,
       Value<int>? rowid}) {
-    return JwHrvsCompanion(
+    return JWHrvsCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -1861,7 +1866,7 @@ class JwHrvsCompanion extends UpdateCompanion<JwHrv> {
 
   @override
   String toString() {
-    return (StringBuffer('JwHrvsCompanion(')
+    return (StringBuffer('JWHrvsCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -1872,12 +1877,12 @@ class JwHrvsCompanion extends UpdateCompanion<JwHrv> {
   }
 }
 
-class $JwPressuresTable extends JwPressures
-    with TableInfo<$JwPressuresTable, JwPressure> {
+class $JWPressuresTable extends JWPressures
+    with TableInfo<$JWPressuresTable, JWPressureRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwPressuresTable(this.attachedDatabase, [this._alias]);
+  $JWPressuresTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -1907,7 +1912,7 @@ class $JwPressuresTable extends JwPressures
   String get actualTableName => $name;
   static const String $name = 'jw_pressure';
   @override
-  VerificationContext validateIntegrity(Insertable<JwPressure> instance,
+  VerificationContext validateIntegrity(Insertable<JWPressureRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -1941,9 +1946,9 @@ class $JwPressuresTable extends JwPressures
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwPressure map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWPressureRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwPressure(
+    return JWPressureRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -1956,17 +1961,17 @@ class $JwPressuresTable extends JwPressures
   }
 
   @override
-  $JwPressuresTable createAlias(String alias) {
-    return $JwPressuresTable(attachedDatabase, alias);
+  $JWPressuresTable createAlias(String alias) {
+    return $JWPressuresTable(attachedDatabase, alias);
   }
 }
 
-class JwPressure extends DataClass implements Insertable<JwPressure> {
+class JWPressureRow extends DataClass implements Insertable<JWPressureRow> {
   final String userId;
   final String deviceMac;
   final int time;
   final int value;
-  const JwPressure(
+  const JWPressureRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -1981,8 +1986,8 @@ class JwPressure extends DataClass implements Insertable<JwPressure> {
     return map;
   }
 
-  JwPressuresCompanion toCompanion(bool nullToAbsent) {
-    return JwPressuresCompanion(
+  JWPressuresCompanion toCompanion(bool nullToAbsent) {
+    return JWPressuresCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -1990,10 +1995,10 @@ class JwPressure extends DataClass implements Insertable<JwPressure> {
     );
   }
 
-  factory JwPressure.fromJson(Map<String, dynamic> json,
+  factory JWPressureRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwPressure(
+    return JWPressureRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -2011,16 +2016,16 @@ class JwPressure extends DataClass implements Insertable<JwPressure> {
     };
   }
 
-  JwPressure copyWith(
+  JWPressureRow copyWith(
           {String? userId, String? deviceMac, int? time, int? value}) =>
-      JwPressure(
+      JWPressureRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
         value: value ?? this.value,
       );
-  JwPressure copyWithCompanion(JwPressuresCompanion data) {
-    return JwPressure(
+  JWPressureRow copyWithCompanion(JWPressuresCompanion data) {
+    return JWPressureRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -2030,7 +2035,7 @@ class JwPressure extends DataClass implements Insertable<JwPressure> {
 
   @override
   String toString() {
-    return (StringBuffer('JwPressure(')
+    return (StringBuffer('JWPressureRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -2044,27 +2049,27 @@ class JwPressure extends DataClass implements Insertable<JwPressure> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwPressure &&
+      (other is JWPressureRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
           other.value == this.value);
 }
 
-class JwPressuresCompanion extends UpdateCompanion<JwPressure> {
+class JWPressuresCompanion extends UpdateCompanion<JWPressureRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
   final Value<int> value;
   final Value<int> rowid;
-  const JwPressuresCompanion({
+  const JWPressuresCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
     this.value = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwPressuresCompanion.insert({
+  JWPressuresCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -2074,7 +2079,7 @@ class JwPressuresCompanion extends UpdateCompanion<JwPressure> {
         deviceMac = Value(deviceMac),
         time = Value(time),
         value = Value(value);
-  static Insertable<JwPressure> custom({
+  static Insertable<JWPressureRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -2090,13 +2095,13 @@ class JwPressuresCompanion extends UpdateCompanion<JwPressure> {
     });
   }
 
-  JwPressuresCompanion copyWith(
+  JWPressuresCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
       Value<int>? value,
       Value<int>? rowid}) {
-    return JwPressuresCompanion(
+    return JWPressuresCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -2128,7 +2133,7 @@ class JwPressuresCompanion extends UpdateCompanion<JwPressure> {
 
   @override
   String toString() {
-    return (StringBuffer('JwPressuresCompanion(')
+    return (StringBuffer('JWPressuresCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -2139,12 +2144,12 @@ class JwPressuresCompanion extends UpdateCompanion<JwPressure> {
   }
 }
 
-class $JwTemperaturesTable extends JwTemperatures
-    with TableInfo<$JwTemperaturesTable, JwTemperature> {
+class $JWTemperaturesTable extends JWTemperatures
+    with TableInfo<$JWTemperaturesTable, JWTemperatureRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwTemperaturesTable(this.attachedDatabase, [this._alias]);
+  $JWTemperaturesTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -2199,7 +2204,7 @@ class $JwTemperaturesTable extends JwTemperatures
   String get actualTableName => $name;
   static const String $name = 'jw_temperature';
   @override
-  VerificationContext validateIntegrity(Insertable<JwTemperature> instance,
+  VerificationContext validateIntegrity(Insertable<JWTemperatureRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -2257,9 +2262,9 @@ class $JwTemperaturesTable extends JwTemperatures
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwTemperature map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWTemperatureRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwTemperature(
+    return JWTemperatureRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -2278,12 +2283,13 @@ class $JwTemperaturesTable extends JwTemperatures
   }
 
   @override
-  $JwTemperaturesTable createAlias(String alias) {
-    return $JwTemperaturesTable(attachedDatabase, alias);
+  $JWTemperaturesTable createAlias(String alias) {
+    return $JWTemperaturesTable(attachedDatabase, alias);
   }
 }
 
-class JwTemperature extends DataClass implements Insertable<JwTemperature> {
+class JWTemperatureRow extends DataClass
+    implements Insertable<JWTemperatureRow> {
   final String userId;
   final String deviceMac;
   final int time;
@@ -2291,7 +2297,7 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
   final int heatStress;
   final bool worn;
   final bool compensated;
-  const JwTemperature(
+  const JWTemperatureRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -2312,8 +2318,8 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
     return map;
   }
 
-  JwTemperaturesCompanion toCompanion(bool nullToAbsent) {
-    return JwTemperaturesCompanion(
+  JWTemperaturesCompanion toCompanion(bool nullToAbsent) {
+    return JWTemperaturesCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -2324,10 +2330,10 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
     );
   }
 
-  factory JwTemperature.fromJson(Map<String, dynamic> json,
+  factory JWTemperatureRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwTemperature(
+    return JWTemperatureRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -2351,7 +2357,7 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
     };
   }
 
-  JwTemperature copyWith(
+  JWTemperatureRow copyWith(
           {String? userId,
           String? deviceMac,
           int? time,
@@ -2359,7 +2365,7 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
           int? heatStress,
           bool? worn,
           bool? compensated}) =>
-      JwTemperature(
+      JWTemperatureRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
@@ -2368,8 +2374,8 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
         worn: worn ?? this.worn,
         compensated: compensated ?? this.compensated,
       );
-  JwTemperature copyWithCompanion(JwTemperaturesCompanion data) {
-    return JwTemperature(
+  JWTemperatureRow copyWithCompanion(JWTemperaturesCompanion data) {
+    return JWTemperatureRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -2386,7 +2392,7 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
 
   @override
   String toString() {
-    return (StringBuffer('JwTemperature(')
+    return (StringBuffer('JWTemperatureRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -2404,7 +2410,7 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwTemperature &&
+      (other is JWTemperatureRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
@@ -2414,7 +2420,7 @@ class JwTemperature extends DataClass implements Insertable<JwTemperature> {
           other.compensated == this.compensated);
 }
 
-class JwTemperaturesCompanion extends UpdateCompanion<JwTemperature> {
+class JWTemperaturesCompanion extends UpdateCompanion<JWTemperatureRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
@@ -2423,7 +2429,7 @@ class JwTemperaturesCompanion extends UpdateCompanion<JwTemperature> {
   final Value<bool> worn;
   final Value<bool> compensated;
   final Value<int> rowid;
-  const JwTemperaturesCompanion({
+  const JWTemperaturesCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
@@ -2433,7 +2439,7 @@ class JwTemperaturesCompanion extends UpdateCompanion<JwTemperature> {
     this.compensated = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwTemperaturesCompanion.insert({
+  JWTemperaturesCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -2449,7 +2455,7 @@ class JwTemperaturesCompanion extends UpdateCompanion<JwTemperature> {
         heatStress = Value(heatStress),
         worn = Value(worn),
         compensated = Value(compensated);
-  static Insertable<JwTemperature> custom({
+  static Insertable<JWTemperatureRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -2471,7 +2477,7 @@ class JwTemperaturesCompanion extends UpdateCompanion<JwTemperature> {
     });
   }
 
-  JwTemperaturesCompanion copyWith(
+  JWTemperaturesCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
@@ -2480,7 +2486,7 @@ class JwTemperaturesCompanion extends UpdateCompanion<JwTemperature> {
       Value<bool>? worn,
       Value<bool>? compensated,
       Value<int>? rowid}) {
-    return JwTemperaturesCompanion(
+    return JWTemperaturesCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -2524,7 +2530,7 @@ class JwTemperaturesCompanion extends UpdateCompanion<JwTemperature> {
 
   @override
   String toString() {
-    return (StringBuffer('JwTemperaturesCompanion(')
+    return (StringBuffer('JWTemperaturesCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -2538,12 +2544,12 @@ class JwTemperaturesCompanion extends UpdateCompanion<JwTemperature> {
   }
 }
 
-class $JwBloodGlucosesTable extends JwBloodGlucoses
-    with TableInfo<$JwBloodGlucosesTable, JwBloodGlucose> {
+class $JWBloodGlucosesTable extends JWBloodGlucoses
+    with TableInfo<$JWBloodGlucosesTable, JWBloodGlucoseRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwBloodGlucosesTable(this.attachedDatabase, [this._alias]);
+  $JWBloodGlucosesTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -2573,7 +2579,7 @@ class $JwBloodGlucosesTable extends JwBloodGlucoses
   String get actualTableName => $name;
   static const String $name = 'jw_blood_glucose';
   @override
-  VerificationContext validateIntegrity(Insertable<JwBloodGlucose> instance,
+  VerificationContext validateIntegrity(Insertable<JWBloodGlucoseRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -2607,9 +2613,9 @@ class $JwBloodGlucosesTable extends JwBloodGlucoses
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwBloodGlucose map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWBloodGlucoseRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwBloodGlucose(
+    return JWBloodGlucoseRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -2622,17 +2628,18 @@ class $JwBloodGlucosesTable extends JwBloodGlucoses
   }
 
   @override
-  $JwBloodGlucosesTable createAlias(String alias) {
-    return $JwBloodGlucosesTable(attachedDatabase, alias);
+  $JWBloodGlucosesTable createAlias(String alias) {
+    return $JWBloodGlucosesTable(attachedDatabase, alias);
   }
 }
 
-class JwBloodGlucose extends DataClass implements Insertable<JwBloodGlucose> {
+class JWBloodGlucoseRow extends DataClass
+    implements Insertable<JWBloodGlucoseRow> {
   final String userId;
   final String deviceMac;
   final int time;
   final int value;
-  const JwBloodGlucose(
+  const JWBloodGlucoseRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -2647,8 +2654,8 @@ class JwBloodGlucose extends DataClass implements Insertable<JwBloodGlucose> {
     return map;
   }
 
-  JwBloodGlucosesCompanion toCompanion(bool nullToAbsent) {
-    return JwBloodGlucosesCompanion(
+  JWBloodGlucosesCompanion toCompanion(bool nullToAbsent) {
+    return JWBloodGlucosesCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -2656,10 +2663,10 @@ class JwBloodGlucose extends DataClass implements Insertable<JwBloodGlucose> {
     );
   }
 
-  factory JwBloodGlucose.fromJson(Map<String, dynamic> json,
+  factory JWBloodGlucoseRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwBloodGlucose(
+    return JWBloodGlucoseRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -2677,16 +2684,16 @@ class JwBloodGlucose extends DataClass implements Insertable<JwBloodGlucose> {
     };
   }
 
-  JwBloodGlucose copyWith(
+  JWBloodGlucoseRow copyWith(
           {String? userId, String? deviceMac, int? time, int? value}) =>
-      JwBloodGlucose(
+      JWBloodGlucoseRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
         value: value ?? this.value,
       );
-  JwBloodGlucose copyWithCompanion(JwBloodGlucosesCompanion data) {
-    return JwBloodGlucose(
+  JWBloodGlucoseRow copyWithCompanion(JWBloodGlucosesCompanion data) {
+    return JWBloodGlucoseRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -2696,7 +2703,7 @@ class JwBloodGlucose extends DataClass implements Insertable<JwBloodGlucose> {
 
   @override
   String toString() {
-    return (StringBuffer('JwBloodGlucose(')
+    return (StringBuffer('JWBloodGlucoseRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -2710,27 +2717,27 @@ class JwBloodGlucose extends DataClass implements Insertable<JwBloodGlucose> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwBloodGlucose &&
+      (other is JWBloodGlucoseRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
           other.value == this.value);
 }
 
-class JwBloodGlucosesCompanion extends UpdateCompanion<JwBloodGlucose> {
+class JWBloodGlucosesCompanion extends UpdateCompanion<JWBloodGlucoseRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
   final Value<int> value;
   final Value<int> rowid;
-  const JwBloodGlucosesCompanion({
+  const JWBloodGlucosesCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
     this.value = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwBloodGlucosesCompanion.insert({
+  JWBloodGlucosesCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -2740,7 +2747,7 @@ class JwBloodGlucosesCompanion extends UpdateCompanion<JwBloodGlucose> {
         deviceMac = Value(deviceMac),
         time = Value(time),
         value = Value(value);
-  static Insertable<JwBloodGlucose> custom({
+  static Insertable<JWBloodGlucoseRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -2756,13 +2763,13 @@ class JwBloodGlucosesCompanion extends UpdateCompanion<JwBloodGlucose> {
     });
   }
 
-  JwBloodGlucosesCompanion copyWith(
+  JWBloodGlucosesCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
       Value<int>? value,
       Value<int>? rowid}) {
-    return JwBloodGlucosesCompanion(
+    return JWBloodGlucosesCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -2794,7 +2801,7 @@ class JwBloodGlucosesCompanion extends UpdateCompanion<JwBloodGlucose> {
 
   @override
   String toString() {
-    return (StringBuffer('JwBloodGlucosesCompanion(')
+    return (StringBuffer('JWBloodGlucosesCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -2805,11 +2812,12 @@ class JwBloodGlucosesCompanion extends UpdateCompanion<JwBloodGlucose> {
   }
 }
 
-class $JwSportsTable extends JwSports with TableInfo<$JwSportsTable, JwSport> {
+class $JWSportsTable extends JWSports
+    with TableInfo<$JWSportsTable, JWSportRow> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $JwSportsTable(this.attachedDatabase, [this._alias]);
+  $JWSportsTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
   @override
   late final GeneratedColumn<String> userId = GeneratedColumn<String>(
@@ -2905,7 +2913,7 @@ class $JwSportsTable extends JwSports with TableInfo<$JwSportsTable, JwSport> {
   String get actualTableName => $name;
   static const String $name = 'jw_sport';
   @override
-  VerificationContext validateIntegrity(Insertable<JwSport> instance,
+  VerificationContext validateIntegrity(Insertable<JWSportRow> instance,
       {bool isInserting = false}) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
@@ -2997,9 +3005,9 @@ class $JwSportsTable extends JwSports with TableInfo<$JwSportsTable, JwSport> {
   @override
   Set<GeneratedColumn> get $primaryKey => {userId, deviceMac, time};
   @override
-  JwSport map(Map<String, dynamic> data, {String? tablePrefix}) {
+  JWSportRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return JwSport(
+    return JWSportRow(
       userId: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
       deviceMac: attachedDatabase.typeMapping
@@ -3030,12 +3038,12 @@ class $JwSportsTable extends JwSports with TableInfo<$JwSportsTable, JwSport> {
   }
 
   @override
-  $JwSportsTable createAlias(String alias) {
-    return $JwSportsTable(attachedDatabase, alias);
+  $JWSportsTable createAlias(String alias) {
+    return $JWSportsTable(attachedDatabase, alias);
   }
 }
 
-class JwSport extends DataClass implements Insertable<JwSport> {
+class JWSportRow extends DataClass implements Insertable<JWSportRow> {
   final String userId;
   final String deviceMac;
   final int time;
@@ -3049,7 +3057,7 @@ class JwSport extends DataClass implements Insertable<JwSport> {
   final int? heartRateMax;
   final int? heartRateAverage;
   final int? heartRateMin;
-  const JwSport(
+  const JWSportRow(
       {required this.userId,
       required this.deviceMac,
       required this.time,
@@ -3088,8 +3096,8 @@ class JwSport extends DataClass implements Insertable<JwSport> {
     return map;
   }
 
-  JwSportsCompanion toCompanion(bool nullToAbsent) {
-    return JwSportsCompanion(
+  JWSportsCompanion toCompanion(bool nullToAbsent) {
+    return JWSportsCompanion(
       userId: Value(userId),
       deviceMac: Value(deviceMac),
       time: Value(time),
@@ -3112,10 +3120,10 @@ class JwSport extends DataClass implements Insertable<JwSport> {
     );
   }
 
-  factory JwSport.fromJson(Map<String, dynamic> json,
+  factory JWSportRow.fromJson(Map<String, dynamic> json,
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return JwSport(
+    return JWSportRow(
       userId: serializer.fromJson<String>(json['userId']),
       deviceMac: serializer.fromJson<String>(json['deviceMac']),
       time: serializer.fromJson<int>(json['time']),
@@ -3151,7 +3159,7 @@ class JwSport extends DataClass implements Insertable<JwSport> {
     };
   }
 
-  JwSport copyWith(
+  JWSportRow copyWith(
           {String? userId,
           String? deviceMac,
           int? time,
@@ -3165,7 +3173,7 @@ class JwSport extends DataClass implements Insertable<JwSport> {
           Value<int?> heartRateMax = const Value.absent(),
           Value<int?> heartRateAverage = const Value.absent(),
           Value<int?> heartRateMin = const Value.absent()}) =>
-      JwSport(
+      JWSportRow(
         userId: userId ?? this.userId,
         deviceMac: deviceMac ?? this.deviceMac,
         time: time ?? this.time,
@@ -3184,8 +3192,8 @@ class JwSport extends DataClass implements Insertable<JwSport> {
         heartRateMin:
             heartRateMin.present ? heartRateMin.value : this.heartRateMin,
       );
-  JwSport copyWithCompanion(JwSportsCompanion data) {
-    return JwSport(
+  JWSportRow copyWithCompanion(JWSportsCompanion data) {
+    return JWSportRow(
       userId: data.userId.present ? data.userId.value : this.userId,
       deviceMac: data.deviceMac.present ? data.deviceMac.value : this.deviceMac,
       time: data.time.present ? data.time.value : this.time,
@@ -3213,7 +3221,7 @@ class JwSport extends DataClass implements Insertable<JwSport> {
 
   @override
   String toString() {
-    return (StringBuffer('JwSport(')
+    return (StringBuffer('JWSportRow(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -3249,7 +3257,7 @@ class JwSport extends DataClass implements Insertable<JwSport> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is JwSport &&
+      (other is JWSportRow &&
           other.userId == this.userId &&
           other.deviceMac == this.deviceMac &&
           other.time == this.time &&
@@ -3265,7 +3273,7 @@ class JwSport extends DataClass implements Insertable<JwSport> {
           other.heartRateMin == this.heartRateMin);
 }
 
-class JwSportsCompanion extends UpdateCompanion<JwSport> {
+class JWSportsCompanion extends UpdateCompanion<JWSportRow> {
   final Value<String> userId;
   final Value<String> deviceMac;
   final Value<int> time;
@@ -3280,7 +3288,7 @@ class JwSportsCompanion extends UpdateCompanion<JwSport> {
   final Value<int?> heartRateAverage;
   final Value<int?> heartRateMin;
   final Value<int> rowid;
-  const JwSportsCompanion({
+  const JWSportsCompanion({
     this.userId = const Value.absent(),
     this.deviceMac = const Value.absent(),
     this.time = const Value.absent(),
@@ -3296,7 +3304,7 @@ class JwSportsCompanion extends UpdateCompanion<JwSport> {
     this.heartRateMin = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  JwSportsCompanion.insert({
+  JWSportsCompanion.insert({
     required String userId,
     required String deviceMac,
     required int time,
@@ -3321,7 +3329,7 @@ class JwSportsCompanion extends UpdateCompanion<JwSport> {
         steps = Value(steps),
         distance = Value(distance),
         energy = Value(energy);
-  static Insertable<JwSport> custom({
+  static Insertable<JWSportRow> custom({
     Expression<String>? userId,
     Expression<String>? deviceMac,
     Expression<int>? time,
@@ -3355,7 +3363,7 @@ class JwSportsCompanion extends UpdateCompanion<JwSport> {
     });
   }
 
-  JwSportsCompanion copyWith(
+  JWSportsCompanion copyWith(
       {Value<String>? userId,
       Value<String>? deviceMac,
       Value<int>? time,
@@ -3370,7 +3378,7 @@ class JwSportsCompanion extends UpdateCompanion<JwSport> {
       Value<int?>? heartRateAverage,
       Value<int?>? heartRateMin,
       Value<int>? rowid}) {
-    return JwSportsCompanion(
+    return JWSportsCompanion(
       userId: userId ?? this.userId,
       deviceMac: deviceMac ?? this.deviceMac,
       time: time ?? this.time,
@@ -3438,7 +3446,7 @@ class JwSportsCompanion extends UpdateCompanion<JwSport> {
 
   @override
   String toString() {
-    return (StringBuffer('JwSportsCompanion(')
+    return (StringBuffer('JWSportsCompanion(')
           ..write('userId: $userId, ')
           ..write('deviceMac: $deviceMac, ')
           ..write('time: $time, ')
@@ -3461,37 +3469,37 @@ class JwSportsCompanion extends UpdateCompanion<JwSport> {
 abstract class _$JWDatabase extends GeneratedDatabase {
   _$JWDatabase(QueryExecutor e) : super(e);
   $JWDatabaseManager get managers => $JWDatabaseManager(this);
-  late final $JwActivitiesTable jwActivities = $JwActivitiesTable(this);
-  late final $JwSleepsTable jwSleeps = $JwSleepsTable(this);
-  late final $JwHeartRatesTable jwHeartRates = $JwHeartRatesTable(this);
-  late final $JwBloodPressuresTable jwBloodPressures =
-      $JwBloodPressuresTable(this);
-  late final $JwBloodOxygensTable jwBloodOxygens = $JwBloodOxygensTable(this);
-  late final $JwHrvsTable jwHrvs = $JwHrvsTable(this);
-  late final $JwPressuresTable jwPressures = $JwPressuresTable(this);
-  late final $JwTemperaturesTable jwTemperatures = $JwTemperaturesTable(this);
-  late final $JwBloodGlucosesTable jwBloodGlucoses =
-      $JwBloodGlucosesTable(this);
-  late final $JwSportsTable jwSports = $JwSportsTable(this);
+  late final $JWActivitiesTable jWActivities = $JWActivitiesTable(this);
+  late final $JWSleepsTable jWSleeps = $JWSleepsTable(this);
+  late final $JWHeartRatesTable jWHeartRates = $JWHeartRatesTable(this);
+  late final $JWBloodPressuresTable jWBloodPressures =
+      $JWBloodPressuresTable(this);
+  late final $JWBloodOxygensTable jWBloodOxygens = $JWBloodOxygensTable(this);
+  late final $JWHrvsTable jWHrvs = $JWHrvsTable(this);
+  late final $JWPressuresTable jWPressures = $JWPressuresTable(this);
+  late final $JWTemperaturesTable jWTemperatures = $JWTemperaturesTable(this);
+  late final $JWBloodGlucosesTable jWBloodGlucoses =
+      $JWBloodGlucosesTable(this);
+  late final $JWSportsTable jWSports = $JWSportsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
-        jwActivities,
-        jwSleeps,
-        jwHeartRates,
-        jwBloodPressures,
-        jwBloodOxygens,
-        jwHrvs,
-        jwPressures,
-        jwTemperatures,
-        jwBloodGlucoses,
-        jwSports
+        jWActivities,
+        jWSleeps,
+        jWHeartRates,
+        jWBloodPressures,
+        jWBloodOxygens,
+        jWHrvs,
+        jWPressures,
+        jWTemperatures,
+        jWBloodGlucoses,
+        jWSports
       ];
 }
 
-typedef $$JwActivitiesTableCreateCompanionBuilder = JwActivitiesCompanion
+typedef $$JWActivitiesTableCreateCompanionBuilder = JWActivitiesCompanion
     Function({
   required String userId,
   required String deviceMac,
@@ -3503,7 +3511,7 @@ typedef $$JwActivitiesTableCreateCompanionBuilder = JwActivitiesCompanion
   required int mode,
   Value<int> rowid,
 });
-typedef $$JwActivitiesTableUpdateCompanionBuilder = JwActivitiesCompanion
+typedef $$JWActivitiesTableUpdateCompanionBuilder = JWActivitiesCompanion
     Function({
   Value<String> userId,
   Value<String> deviceMac,
@@ -3516,9 +3524,9 @@ typedef $$JwActivitiesTableUpdateCompanionBuilder = JwActivitiesCompanion
   Value<int> rowid,
 });
 
-class $$JwActivitiesTableFilterComposer
-    extends Composer<_$JWDatabase, $JwActivitiesTable> {
-  $$JwActivitiesTableFilterComposer({
+class $$JWActivitiesTableFilterComposer
+    extends Composer<_$JWDatabase, $JWActivitiesTable> {
+  $$JWActivitiesTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3550,9 +3558,9 @@ class $$JwActivitiesTableFilterComposer
       column: $table.mode, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwActivitiesTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwActivitiesTable> {
-  $$JwActivitiesTableOrderingComposer({
+class $$JWActivitiesTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWActivitiesTable> {
+  $$JWActivitiesTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3584,9 +3592,9 @@ class $$JwActivitiesTableOrderingComposer
       column: $table.mode, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwActivitiesTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwActivitiesTable> {
-  $$JwActivitiesTableAnnotationComposer({
+class $$JWActivitiesTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWActivitiesTable> {
+  $$JWActivitiesTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3618,28 +3626,31 @@ class $$JwActivitiesTableAnnotationComposer
       $composableBuilder(column: $table.mode, builder: (column) => column);
 }
 
-class $$JwActivitiesTableTableManager extends RootTableManager<
+class $$JWActivitiesTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwActivitiesTable,
-    JwActivity,
-    $$JwActivitiesTableFilterComposer,
-    $$JwActivitiesTableOrderingComposer,
-    $$JwActivitiesTableAnnotationComposer,
-    $$JwActivitiesTableCreateCompanionBuilder,
-    $$JwActivitiesTableUpdateCompanionBuilder,
-    (JwActivity, BaseReferences<_$JWDatabase, $JwActivitiesTable, JwActivity>),
-    JwActivity,
+    $JWActivitiesTable,
+    JWActivityRow,
+    $$JWActivitiesTableFilterComposer,
+    $$JWActivitiesTableOrderingComposer,
+    $$JWActivitiesTableAnnotationComposer,
+    $$JWActivitiesTableCreateCompanionBuilder,
+    $$JWActivitiesTableUpdateCompanionBuilder,
+    (
+      JWActivityRow,
+      BaseReferences<_$JWDatabase, $JWActivitiesTable, JWActivityRow>
+    ),
+    JWActivityRow,
     PrefetchHooks Function()> {
-  $$JwActivitiesTableTableManager(_$JWDatabase db, $JwActivitiesTable table)
+  $$JWActivitiesTableTableManager(_$JWDatabase db, $JWActivitiesTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwActivitiesTableFilterComposer($db: db, $table: table),
+              $$JWActivitiesTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwActivitiesTableOrderingComposer($db: db, $table: table),
+              $$JWActivitiesTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwActivitiesTableAnnotationComposer($db: db, $table: table),
+              $$JWActivitiesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -3651,7 +3662,7 @@ class $$JwActivitiesTableTableManager extends RootTableManager<
             Value<int> mode = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwActivitiesCompanion(
+              JWActivitiesCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -3673,7 +3684,7 @@ class $$JwActivitiesTableTableManager extends RootTableManager<
             required int mode,
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwActivitiesCompanion.insert(
+              JWActivitiesCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -3686,35 +3697,38 @@ class $$JwActivitiesTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwActivitiesTable, JwActivity>(table),
-                    BaseReferences<_$JWDatabase, $JwActivitiesTable,
-                        JwActivity>(db, table, e)
+                    e.readTable<$JWActivitiesTable, JWActivityRow>(table),
+                    BaseReferences<_$JWDatabase, $JWActivitiesTable,
+                        JWActivityRow>(db, table, e)
                   ))
               .toList(),
           prefetchHooksCallback: null,
         ));
 }
 
-typedef $$JwActivitiesTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWActivitiesTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwActivitiesTable,
-    JwActivity,
-    $$JwActivitiesTableFilterComposer,
-    $$JwActivitiesTableOrderingComposer,
-    $$JwActivitiesTableAnnotationComposer,
-    $$JwActivitiesTableCreateCompanionBuilder,
-    $$JwActivitiesTableUpdateCompanionBuilder,
-    (JwActivity, BaseReferences<_$JWDatabase, $JwActivitiesTable, JwActivity>),
-    JwActivity,
+    $JWActivitiesTable,
+    JWActivityRow,
+    $$JWActivitiesTableFilterComposer,
+    $$JWActivitiesTableOrderingComposer,
+    $$JWActivitiesTableAnnotationComposer,
+    $$JWActivitiesTableCreateCompanionBuilder,
+    $$JWActivitiesTableUpdateCompanionBuilder,
+    (
+      JWActivityRow,
+      BaseReferences<_$JWDatabase, $JWActivitiesTable, JWActivityRow>
+    ),
+    JWActivityRow,
     PrefetchHooks Function()>;
-typedef $$JwSleepsTableCreateCompanionBuilder = JwSleepsCompanion Function({
+typedef $$JWSleepsTableCreateCompanionBuilder = JWSleepsCompanion Function({
   required String userId,
   required String deviceMac,
   required int time,
   required int mode,
   Value<int> rowid,
 });
-typedef $$JwSleepsTableUpdateCompanionBuilder = JwSleepsCompanion Function({
+typedef $$JWSleepsTableUpdateCompanionBuilder = JWSleepsCompanion Function({
   Value<String> userId,
   Value<String> deviceMac,
   Value<int> time,
@@ -3722,9 +3736,9 @@ typedef $$JwSleepsTableUpdateCompanionBuilder = JwSleepsCompanion Function({
   Value<int> rowid,
 });
 
-class $$JwSleepsTableFilterComposer
-    extends Composer<_$JWDatabase, $JwSleepsTable> {
-  $$JwSleepsTableFilterComposer({
+class $$JWSleepsTableFilterComposer
+    extends Composer<_$JWDatabase, $JWSleepsTable> {
+  $$JWSleepsTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3744,9 +3758,9 @@ class $$JwSleepsTableFilterComposer
       column: $table.mode, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwSleepsTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwSleepsTable> {
-  $$JwSleepsTableOrderingComposer({
+class $$JWSleepsTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWSleepsTable> {
+  $$JWSleepsTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3766,9 +3780,9 @@ class $$JwSleepsTableOrderingComposer
       column: $table.mode, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwSleepsTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwSleepsTable> {
-  $$JwSleepsTableAnnotationComposer({
+class $$JWSleepsTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWSleepsTable> {
+  $$JWSleepsTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3788,28 +3802,28 @@ class $$JwSleepsTableAnnotationComposer
       $composableBuilder(column: $table.mode, builder: (column) => column);
 }
 
-class $$JwSleepsTableTableManager extends RootTableManager<
+class $$JWSleepsTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwSleepsTable,
-    JwSleep,
-    $$JwSleepsTableFilterComposer,
-    $$JwSleepsTableOrderingComposer,
-    $$JwSleepsTableAnnotationComposer,
-    $$JwSleepsTableCreateCompanionBuilder,
-    $$JwSleepsTableUpdateCompanionBuilder,
-    (JwSleep, BaseReferences<_$JWDatabase, $JwSleepsTable, JwSleep>),
-    JwSleep,
+    $JWSleepsTable,
+    JWSleepRow,
+    $$JWSleepsTableFilterComposer,
+    $$JWSleepsTableOrderingComposer,
+    $$JWSleepsTableAnnotationComposer,
+    $$JWSleepsTableCreateCompanionBuilder,
+    $$JWSleepsTableUpdateCompanionBuilder,
+    (JWSleepRow, BaseReferences<_$JWDatabase, $JWSleepsTable, JWSleepRow>),
+    JWSleepRow,
     PrefetchHooks Function()> {
-  $$JwSleepsTableTableManager(_$JWDatabase db, $JwSleepsTable table)
+  $$JWSleepsTableTableManager(_$JWDatabase db, $JWSleepsTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwSleepsTableFilterComposer($db: db, $table: table),
+              $$JWSleepsTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwSleepsTableOrderingComposer($db: db, $table: table),
+              $$JWSleepsTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwSleepsTableAnnotationComposer($db: db, $table: table),
+              $$JWSleepsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -3817,7 +3831,7 @@ class $$JwSleepsTableTableManager extends RootTableManager<
             Value<int> mode = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwSleepsCompanion(
+              JWSleepsCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -3831,7 +3845,7 @@ class $$JwSleepsTableTableManager extends RootTableManager<
             required int mode,
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwSleepsCompanion.insert(
+              JWSleepsCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -3840,8 +3854,8 @@ class $$JwSleepsTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwSleepsTable, JwSleep>(table),
-                    BaseReferences<_$JWDatabase, $JwSleepsTable, JwSleep>(
+                    e.readTable<$JWSleepsTable, JWSleepRow>(table),
+                    BaseReferences<_$JWDatabase, $JWSleepsTable, JWSleepRow>(
                         db, table, e)
                   ))
               .toList(),
@@ -3849,19 +3863,19 @@ class $$JwSleepsTableTableManager extends RootTableManager<
         ));
 }
 
-typedef $$JwSleepsTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWSleepsTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwSleepsTable,
-    JwSleep,
-    $$JwSleepsTableFilterComposer,
-    $$JwSleepsTableOrderingComposer,
-    $$JwSleepsTableAnnotationComposer,
-    $$JwSleepsTableCreateCompanionBuilder,
-    $$JwSleepsTableUpdateCompanionBuilder,
-    (JwSleep, BaseReferences<_$JWDatabase, $JwSleepsTable, JwSleep>),
-    JwSleep,
+    $JWSleepsTable,
+    JWSleepRow,
+    $$JWSleepsTableFilterComposer,
+    $$JWSleepsTableOrderingComposer,
+    $$JWSleepsTableAnnotationComposer,
+    $$JWSleepsTableCreateCompanionBuilder,
+    $$JWSleepsTableUpdateCompanionBuilder,
+    (JWSleepRow, BaseReferences<_$JWDatabase, $JWSleepsTable, JWSleepRow>),
+    JWSleepRow,
     PrefetchHooks Function()>;
-typedef $$JwHeartRatesTableCreateCompanionBuilder = JwHeartRatesCompanion
+typedef $$JWHeartRatesTableCreateCompanionBuilder = JWHeartRatesCompanion
     Function({
   required String userId,
   required String deviceMac,
@@ -3869,7 +3883,7 @@ typedef $$JwHeartRatesTableCreateCompanionBuilder = JwHeartRatesCompanion
   required int heartRate,
   Value<int> rowid,
 });
-typedef $$JwHeartRatesTableUpdateCompanionBuilder = JwHeartRatesCompanion
+typedef $$JWHeartRatesTableUpdateCompanionBuilder = JWHeartRatesCompanion
     Function({
   Value<String> userId,
   Value<String> deviceMac,
@@ -3878,9 +3892,9 @@ typedef $$JwHeartRatesTableUpdateCompanionBuilder = JwHeartRatesCompanion
   Value<int> rowid,
 });
 
-class $$JwHeartRatesTableFilterComposer
-    extends Composer<_$JWDatabase, $JwHeartRatesTable> {
-  $$JwHeartRatesTableFilterComposer({
+class $$JWHeartRatesTableFilterComposer
+    extends Composer<_$JWDatabase, $JWHeartRatesTable> {
+  $$JWHeartRatesTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3900,9 +3914,9 @@ class $$JwHeartRatesTableFilterComposer
       column: $table.heartRate, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwHeartRatesTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwHeartRatesTable> {
-  $$JwHeartRatesTableOrderingComposer({
+class $$JWHeartRatesTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWHeartRatesTable> {
+  $$JWHeartRatesTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3922,9 +3936,9 @@ class $$JwHeartRatesTableOrderingComposer
       column: $table.heartRate, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwHeartRatesTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwHeartRatesTable> {
-  $$JwHeartRatesTableAnnotationComposer({
+class $$JWHeartRatesTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWHeartRatesTable> {
+  $$JWHeartRatesTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -3944,31 +3958,31 @@ class $$JwHeartRatesTableAnnotationComposer
       $composableBuilder(column: $table.heartRate, builder: (column) => column);
 }
 
-class $$JwHeartRatesTableTableManager extends RootTableManager<
+class $$JWHeartRatesTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwHeartRatesTable,
-    JwHeartRate,
-    $$JwHeartRatesTableFilterComposer,
-    $$JwHeartRatesTableOrderingComposer,
-    $$JwHeartRatesTableAnnotationComposer,
-    $$JwHeartRatesTableCreateCompanionBuilder,
-    $$JwHeartRatesTableUpdateCompanionBuilder,
+    $JWHeartRatesTable,
+    JWHeartRateRow,
+    $$JWHeartRatesTableFilterComposer,
+    $$JWHeartRatesTableOrderingComposer,
+    $$JWHeartRatesTableAnnotationComposer,
+    $$JWHeartRatesTableCreateCompanionBuilder,
+    $$JWHeartRatesTableUpdateCompanionBuilder,
     (
-      JwHeartRate,
-      BaseReferences<_$JWDatabase, $JwHeartRatesTable, JwHeartRate>
+      JWHeartRateRow,
+      BaseReferences<_$JWDatabase, $JWHeartRatesTable, JWHeartRateRow>
     ),
-    JwHeartRate,
+    JWHeartRateRow,
     PrefetchHooks Function()> {
-  $$JwHeartRatesTableTableManager(_$JWDatabase db, $JwHeartRatesTable table)
+  $$JWHeartRatesTableTableManager(_$JWDatabase db, $JWHeartRatesTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwHeartRatesTableFilterComposer($db: db, $table: table),
+              $$JWHeartRatesTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwHeartRatesTableOrderingComposer($db: db, $table: table),
+              $$JWHeartRatesTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwHeartRatesTableAnnotationComposer($db: db, $table: table),
+              $$JWHeartRatesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -3976,7 +3990,7 @@ class $$JwHeartRatesTableTableManager extends RootTableManager<
             Value<int> heartRate = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwHeartRatesCompanion(
+              JWHeartRatesCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -3990,7 +4004,7 @@ class $$JwHeartRatesTableTableManager extends RootTableManager<
             required int heartRate,
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwHeartRatesCompanion.insert(
+              JWHeartRatesCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -3999,32 +4013,32 @@ class $$JwHeartRatesTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwHeartRatesTable, JwHeartRate>(table),
-                    BaseReferences<_$JWDatabase, $JwHeartRatesTable,
-                        JwHeartRate>(db, table, e)
+                    e.readTable<$JWHeartRatesTable, JWHeartRateRow>(table),
+                    BaseReferences<_$JWDatabase, $JWHeartRatesTable,
+                        JWHeartRateRow>(db, table, e)
                   ))
               .toList(),
           prefetchHooksCallback: null,
         ));
 }
 
-typedef $$JwHeartRatesTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWHeartRatesTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwHeartRatesTable,
-    JwHeartRate,
-    $$JwHeartRatesTableFilterComposer,
-    $$JwHeartRatesTableOrderingComposer,
-    $$JwHeartRatesTableAnnotationComposer,
-    $$JwHeartRatesTableCreateCompanionBuilder,
-    $$JwHeartRatesTableUpdateCompanionBuilder,
+    $JWHeartRatesTable,
+    JWHeartRateRow,
+    $$JWHeartRatesTableFilterComposer,
+    $$JWHeartRatesTableOrderingComposer,
+    $$JWHeartRatesTableAnnotationComposer,
+    $$JWHeartRatesTableCreateCompanionBuilder,
+    $$JWHeartRatesTableUpdateCompanionBuilder,
     (
-      JwHeartRate,
-      BaseReferences<_$JWDatabase, $JwHeartRatesTable, JwHeartRate>
+      JWHeartRateRow,
+      BaseReferences<_$JWDatabase, $JWHeartRatesTable, JWHeartRateRow>
     ),
-    JwHeartRate,
+    JWHeartRateRow,
     PrefetchHooks Function()>;
-typedef $$JwBloodPressuresTableCreateCompanionBuilder
-    = JwBloodPressuresCompanion Function({
+typedef $$JWBloodPressuresTableCreateCompanionBuilder
+    = JWBloodPressuresCompanion Function({
   required String userId,
   required String deviceMac,
   required int time,
@@ -4032,8 +4046,8 @@ typedef $$JwBloodPressuresTableCreateCompanionBuilder
   required int diastolic,
   Value<int> rowid,
 });
-typedef $$JwBloodPressuresTableUpdateCompanionBuilder
-    = JwBloodPressuresCompanion Function({
+typedef $$JWBloodPressuresTableUpdateCompanionBuilder
+    = JWBloodPressuresCompanion Function({
   Value<String> userId,
   Value<String> deviceMac,
   Value<int> time,
@@ -4042,9 +4056,9 @@ typedef $$JwBloodPressuresTableUpdateCompanionBuilder
   Value<int> rowid,
 });
 
-class $$JwBloodPressuresTableFilterComposer
-    extends Composer<_$JWDatabase, $JwBloodPressuresTable> {
-  $$JwBloodPressuresTableFilterComposer({
+class $$JWBloodPressuresTableFilterComposer
+    extends Composer<_$JWDatabase, $JWBloodPressuresTable> {
+  $$JWBloodPressuresTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4067,9 +4081,9 @@ class $$JwBloodPressuresTableFilterComposer
       column: $table.diastolic, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwBloodPressuresTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwBloodPressuresTable> {
-  $$JwBloodPressuresTableOrderingComposer({
+class $$JWBloodPressuresTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWBloodPressuresTable> {
+  $$JWBloodPressuresTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4092,9 +4106,9 @@ class $$JwBloodPressuresTableOrderingComposer
       column: $table.diastolic, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwBloodPressuresTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwBloodPressuresTable> {
-  $$JwBloodPressuresTableAnnotationComposer({
+class $$JWBloodPressuresTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWBloodPressuresTable> {
+  $$JWBloodPressuresTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4117,32 +4131,32 @@ class $$JwBloodPressuresTableAnnotationComposer
       $composableBuilder(column: $table.diastolic, builder: (column) => column);
 }
 
-class $$JwBloodPressuresTableTableManager extends RootTableManager<
+class $$JWBloodPressuresTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwBloodPressuresTable,
-    JwBloodPressure,
-    $$JwBloodPressuresTableFilterComposer,
-    $$JwBloodPressuresTableOrderingComposer,
-    $$JwBloodPressuresTableAnnotationComposer,
-    $$JwBloodPressuresTableCreateCompanionBuilder,
-    $$JwBloodPressuresTableUpdateCompanionBuilder,
+    $JWBloodPressuresTable,
+    JWBloodPressureRow,
+    $$JWBloodPressuresTableFilterComposer,
+    $$JWBloodPressuresTableOrderingComposer,
+    $$JWBloodPressuresTableAnnotationComposer,
+    $$JWBloodPressuresTableCreateCompanionBuilder,
+    $$JWBloodPressuresTableUpdateCompanionBuilder,
     (
-      JwBloodPressure,
-      BaseReferences<_$JWDatabase, $JwBloodPressuresTable, JwBloodPressure>
+      JWBloodPressureRow,
+      BaseReferences<_$JWDatabase, $JWBloodPressuresTable, JWBloodPressureRow>
     ),
-    JwBloodPressure,
+    JWBloodPressureRow,
     PrefetchHooks Function()> {
-  $$JwBloodPressuresTableTableManager(
-      _$JWDatabase db, $JwBloodPressuresTable table)
+  $$JWBloodPressuresTableTableManager(
+      _$JWDatabase db, $JWBloodPressuresTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwBloodPressuresTableFilterComposer($db: db, $table: table),
+              $$JWBloodPressuresTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwBloodPressuresTableOrderingComposer($db: db, $table: table),
+              $$JWBloodPressuresTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwBloodPressuresTableAnnotationComposer($db: db, $table: table),
+              $$JWBloodPressuresTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -4151,7 +4165,7 @@ class $$JwBloodPressuresTableTableManager extends RootTableManager<
             Value<int> diastolic = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwBloodPressuresCompanion(
+              JWBloodPressuresCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4167,7 +4181,7 @@ class $$JwBloodPressuresTableTableManager extends RootTableManager<
             required int diastolic,
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwBloodPressuresCompanion.insert(
+              JWBloodPressuresCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4177,31 +4191,32 @@ class $$JwBloodPressuresTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwBloodPressuresTable, JwBloodPressure>(table),
-                    BaseReferences<_$JWDatabase, $JwBloodPressuresTable,
-                        JwBloodPressure>(db, table, e)
+                    e.readTable<$JWBloodPressuresTable, JWBloodPressureRow>(
+                        table),
+                    BaseReferences<_$JWDatabase, $JWBloodPressuresTable,
+                        JWBloodPressureRow>(db, table, e)
                   ))
               .toList(),
           prefetchHooksCallback: null,
         ));
 }
 
-typedef $$JwBloodPressuresTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWBloodPressuresTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwBloodPressuresTable,
-    JwBloodPressure,
-    $$JwBloodPressuresTableFilterComposer,
-    $$JwBloodPressuresTableOrderingComposer,
-    $$JwBloodPressuresTableAnnotationComposer,
-    $$JwBloodPressuresTableCreateCompanionBuilder,
-    $$JwBloodPressuresTableUpdateCompanionBuilder,
+    $JWBloodPressuresTable,
+    JWBloodPressureRow,
+    $$JWBloodPressuresTableFilterComposer,
+    $$JWBloodPressuresTableOrderingComposer,
+    $$JWBloodPressuresTableAnnotationComposer,
+    $$JWBloodPressuresTableCreateCompanionBuilder,
+    $$JWBloodPressuresTableUpdateCompanionBuilder,
     (
-      JwBloodPressure,
-      BaseReferences<_$JWDatabase, $JwBloodPressuresTable, JwBloodPressure>
+      JWBloodPressureRow,
+      BaseReferences<_$JWDatabase, $JWBloodPressuresTable, JWBloodPressureRow>
     ),
-    JwBloodPressure,
+    JWBloodPressureRow,
     PrefetchHooks Function()>;
-typedef $$JwBloodOxygensTableCreateCompanionBuilder = JwBloodOxygensCompanion
+typedef $$JWBloodOxygensTableCreateCompanionBuilder = JWBloodOxygensCompanion
     Function({
   required String userId,
   required String deviceMac,
@@ -4211,7 +4226,7 @@ typedef $$JwBloodOxygensTableCreateCompanionBuilder = JwBloodOxygensCompanion
   Value<int?> low,
   Value<int> rowid,
 });
-typedef $$JwBloodOxygensTableUpdateCompanionBuilder = JwBloodOxygensCompanion
+typedef $$JWBloodOxygensTableUpdateCompanionBuilder = JWBloodOxygensCompanion
     Function({
   Value<String> userId,
   Value<String> deviceMac,
@@ -4222,9 +4237,9 @@ typedef $$JwBloodOxygensTableUpdateCompanionBuilder = JwBloodOxygensCompanion
   Value<int> rowid,
 });
 
-class $$JwBloodOxygensTableFilterComposer
-    extends Composer<_$JWDatabase, $JwBloodOxygensTable> {
-  $$JwBloodOxygensTableFilterComposer({
+class $$JWBloodOxygensTableFilterComposer
+    extends Composer<_$JWDatabase, $JWBloodOxygensTable> {
+  $$JWBloodOxygensTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4250,9 +4265,9 @@ class $$JwBloodOxygensTableFilterComposer
       column: $table.low, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwBloodOxygensTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwBloodOxygensTable> {
-  $$JwBloodOxygensTableOrderingComposer({
+class $$JWBloodOxygensTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWBloodOxygensTable> {
+  $$JWBloodOxygensTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4278,9 +4293,9 @@ class $$JwBloodOxygensTableOrderingComposer
       column: $table.low, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwBloodOxygensTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwBloodOxygensTable> {
-  $$JwBloodOxygensTableAnnotationComposer({
+class $$JWBloodOxygensTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWBloodOxygensTable> {
+  $$JWBloodOxygensTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4306,31 +4321,31 @@ class $$JwBloodOxygensTableAnnotationComposer
       $composableBuilder(column: $table.low, builder: (column) => column);
 }
 
-class $$JwBloodOxygensTableTableManager extends RootTableManager<
+class $$JWBloodOxygensTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwBloodOxygensTable,
-    JwBloodOxygen,
-    $$JwBloodOxygensTableFilterComposer,
-    $$JwBloodOxygensTableOrderingComposer,
-    $$JwBloodOxygensTableAnnotationComposer,
-    $$JwBloodOxygensTableCreateCompanionBuilder,
-    $$JwBloodOxygensTableUpdateCompanionBuilder,
+    $JWBloodOxygensTable,
+    JWBloodOxygenRow,
+    $$JWBloodOxygensTableFilterComposer,
+    $$JWBloodOxygensTableOrderingComposer,
+    $$JWBloodOxygensTableAnnotationComposer,
+    $$JWBloodOxygensTableCreateCompanionBuilder,
+    $$JWBloodOxygensTableUpdateCompanionBuilder,
     (
-      JwBloodOxygen,
-      BaseReferences<_$JWDatabase, $JwBloodOxygensTable, JwBloodOxygen>
+      JWBloodOxygenRow,
+      BaseReferences<_$JWDatabase, $JWBloodOxygensTable, JWBloodOxygenRow>
     ),
-    JwBloodOxygen,
+    JWBloodOxygenRow,
     PrefetchHooks Function()> {
-  $$JwBloodOxygensTableTableManager(_$JWDatabase db, $JwBloodOxygensTable table)
+  $$JWBloodOxygensTableTableManager(_$JWDatabase db, $JWBloodOxygensTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwBloodOxygensTableFilterComposer($db: db, $table: table),
+              $$JWBloodOxygensTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwBloodOxygensTableOrderingComposer($db: db, $table: table),
+              $$JWBloodOxygensTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwBloodOxygensTableAnnotationComposer($db: db, $table: table),
+              $$JWBloodOxygensTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -4340,7 +4355,7 @@ class $$JwBloodOxygensTableTableManager extends RootTableManager<
             Value<int?> low = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwBloodOxygensCompanion(
+              JWBloodOxygensCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4358,7 +4373,7 @@ class $$JwBloodOxygensTableTableManager extends RootTableManager<
             Value<int?> low = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwBloodOxygensCompanion.insert(
+              JWBloodOxygensCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4369,38 +4384,38 @@ class $$JwBloodOxygensTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwBloodOxygensTable, JwBloodOxygen>(table),
-                    BaseReferences<_$JWDatabase, $JwBloodOxygensTable,
-                        JwBloodOxygen>(db, table, e)
+                    e.readTable<$JWBloodOxygensTable, JWBloodOxygenRow>(table),
+                    BaseReferences<_$JWDatabase, $JWBloodOxygensTable,
+                        JWBloodOxygenRow>(db, table, e)
                   ))
               .toList(),
           prefetchHooksCallback: null,
         ));
 }
 
-typedef $$JwBloodOxygensTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWBloodOxygensTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwBloodOxygensTable,
-    JwBloodOxygen,
-    $$JwBloodOxygensTableFilterComposer,
-    $$JwBloodOxygensTableOrderingComposer,
-    $$JwBloodOxygensTableAnnotationComposer,
-    $$JwBloodOxygensTableCreateCompanionBuilder,
-    $$JwBloodOxygensTableUpdateCompanionBuilder,
+    $JWBloodOxygensTable,
+    JWBloodOxygenRow,
+    $$JWBloodOxygensTableFilterComposer,
+    $$JWBloodOxygensTableOrderingComposer,
+    $$JWBloodOxygensTableAnnotationComposer,
+    $$JWBloodOxygensTableCreateCompanionBuilder,
+    $$JWBloodOxygensTableUpdateCompanionBuilder,
     (
-      JwBloodOxygen,
-      BaseReferences<_$JWDatabase, $JwBloodOxygensTable, JwBloodOxygen>
+      JWBloodOxygenRow,
+      BaseReferences<_$JWDatabase, $JWBloodOxygensTable, JWBloodOxygenRow>
     ),
-    JwBloodOxygen,
+    JWBloodOxygenRow,
     PrefetchHooks Function()>;
-typedef $$JwHrvsTableCreateCompanionBuilder = JwHrvsCompanion Function({
+typedef $$JWHrvsTableCreateCompanionBuilder = JWHrvsCompanion Function({
   required String userId,
   required String deviceMac,
   required int time,
   required int sdnn,
   Value<int> rowid,
 });
-typedef $$JwHrvsTableUpdateCompanionBuilder = JwHrvsCompanion Function({
+typedef $$JWHrvsTableUpdateCompanionBuilder = JWHrvsCompanion Function({
   Value<String> userId,
   Value<String> deviceMac,
   Value<int> time,
@@ -4408,8 +4423,8 @@ typedef $$JwHrvsTableUpdateCompanionBuilder = JwHrvsCompanion Function({
   Value<int> rowid,
 });
 
-class $$JwHrvsTableFilterComposer extends Composer<_$JWDatabase, $JwHrvsTable> {
-  $$JwHrvsTableFilterComposer({
+class $$JWHrvsTableFilterComposer extends Composer<_$JWDatabase, $JWHrvsTable> {
+  $$JWHrvsTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4429,9 +4444,9 @@ class $$JwHrvsTableFilterComposer extends Composer<_$JWDatabase, $JwHrvsTable> {
       column: $table.sdnn, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwHrvsTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwHrvsTable> {
-  $$JwHrvsTableOrderingComposer({
+class $$JWHrvsTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWHrvsTable> {
+  $$JWHrvsTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4451,9 +4466,9 @@ class $$JwHrvsTableOrderingComposer
       column: $table.sdnn, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwHrvsTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwHrvsTable> {
-  $$JwHrvsTableAnnotationComposer({
+class $$JWHrvsTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWHrvsTable> {
+  $$JWHrvsTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4473,28 +4488,28 @@ class $$JwHrvsTableAnnotationComposer
       $composableBuilder(column: $table.sdnn, builder: (column) => column);
 }
 
-class $$JwHrvsTableTableManager extends RootTableManager<
+class $$JWHrvsTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwHrvsTable,
-    JwHrv,
-    $$JwHrvsTableFilterComposer,
-    $$JwHrvsTableOrderingComposer,
-    $$JwHrvsTableAnnotationComposer,
-    $$JwHrvsTableCreateCompanionBuilder,
-    $$JwHrvsTableUpdateCompanionBuilder,
-    (JwHrv, BaseReferences<_$JWDatabase, $JwHrvsTable, JwHrv>),
-    JwHrv,
+    $JWHrvsTable,
+    JWHrvRow,
+    $$JWHrvsTableFilterComposer,
+    $$JWHrvsTableOrderingComposer,
+    $$JWHrvsTableAnnotationComposer,
+    $$JWHrvsTableCreateCompanionBuilder,
+    $$JWHrvsTableUpdateCompanionBuilder,
+    (JWHrvRow, BaseReferences<_$JWDatabase, $JWHrvsTable, JWHrvRow>),
+    JWHrvRow,
     PrefetchHooks Function()> {
-  $$JwHrvsTableTableManager(_$JWDatabase db, $JwHrvsTable table)
+  $$JWHrvsTableTableManager(_$JWDatabase db, $JWHrvsTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwHrvsTableFilterComposer($db: db, $table: table),
+              $$JWHrvsTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwHrvsTableOrderingComposer($db: db, $table: table),
+              $$JWHrvsTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwHrvsTableAnnotationComposer($db: db, $table: table),
+              $$JWHrvsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -4502,7 +4517,7 @@ class $$JwHrvsTableTableManager extends RootTableManager<
             Value<int> sdnn = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwHrvsCompanion(
+              JWHrvsCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4516,7 +4531,7 @@ class $$JwHrvsTableTableManager extends RootTableManager<
             required int sdnn,
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwHrvsCompanion.insert(
+              JWHrvsCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4525,8 +4540,8 @@ class $$JwHrvsTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwHrvsTable, JwHrv>(table),
-                    BaseReferences<_$JWDatabase, $JwHrvsTable, JwHrv>(
+                    e.readTable<$JWHrvsTable, JWHrvRow>(table),
+                    BaseReferences<_$JWDatabase, $JWHrvsTable, JWHrvRow>(
                         db, table, e)
                   ))
               .toList(),
@@ -4534,19 +4549,19 @@ class $$JwHrvsTableTableManager extends RootTableManager<
         ));
 }
 
-typedef $$JwHrvsTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWHrvsTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwHrvsTable,
-    JwHrv,
-    $$JwHrvsTableFilterComposer,
-    $$JwHrvsTableOrderingComposer,
-    $$JwHrvsTableAnnotationComposer,
-    $$JwHrvsTableCreateCompanionBuilder,
-    $$JwHrvsTableUpdateCompanionBuilder,
-    (JwHrv, BaseReferences<_$JWDatabase, $JwHrvsTable, JwHrv>),
-    JwHrv,
+    $JWHrvsTable,
+    JWHrvRow,
+    $$JWHrvsTableFilterComposer,
+    $$JWHrvsTableOrderingComposer,
+    $$JWHrvsTableAnnotationComposer,
+    $$JWHrvsTableCreateCompanionBuilder,
+    $$JWHrvsTableUpdateCompanionBuilder,
+    (JWHrvRow, BaseReferences<_$JWDatabase, $JWHrvsTable, JWHrvRow>),
+    JWHrvRow,
     PrefetchHooks Function()>;
-typedef $$JwPressuresTableCreateCompanionBuilder = JwPressuresCompanion
+typedef $$JWPressuresTableCreateCompanionBuilder = JWPressuresCompanion
     Function({
   required String userId,
   required String deviceMac,
@@ -4554,7 +4569,7 @@ typedef $$JwPressuresTableCreateCompanionBuilder = JwPressuresCompanion
   required int value,
   Value<int> rowid,
 });
-typedef $$JwPressuresTableUpdateCompanionBuilder = JwPressuresCompanion
+typedef $$JWPressuresTableUpdateCompanionBuilder = JWPressuresCompanion
     Function({
   Value<String> userId,
   Value<String> deviceMac,
@@ -4563,9 +4578,9 @@ typedef $$JwPressuresTableUpdateCompanionBuilder = JwPressuresCompanion
   Value<int> rowid,
 });
 
-class $$JwPressuresTableFilterComposer
-    extends Composer<_$JWDatabase, $JwPressuresTable> {
-  $$JwPressuresTableFilterComposer({
+class $$JWPressuresTableFilterComposer
+    extends Composer<_$JWDatabase, $JWPressuresTable> {
+  $$JWPressuresTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4585,9 +4600,9 @@ class $$JwPressuresTableFilterComposer
       column: $table.value, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwPressuresTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwPressuresTable> {
-  $$JwPressuresTableOrderingComposer({
+class $$JWPressuresTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWPressuresTable> {
+  $$JWPressuresTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4607,9 +4622,9 @@ class $$JwPressuresTableOrderingComposer
       column: $table.value, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwPressuresTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwPressuresTable> {
-  $$JwPressuresTableAnnotationComposer({
+class $$JWPressuresTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWPressuresTable> {
+  $$JWPressuresTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4629,28 +4644,31 @@ class $$JwPressuresTableAnnotationComposer
       $composableBuilder(column: $table.value, builder: (column) => column);
 }
 
-class $$JwPressuresTableTableManager extends RootTableManager<
+class $$JWPressuresTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwPressuresTable,
-    JwPressure,
-    $$JwPressuresTableFilterComposer,
-    $$JwPressuresTableOrderingComposer,
-    $$JwPressuresTableAnnotationComposer,
-    $$JwPressuresTableCreateCompanionBuilder,
-    $$JwPressuresTableUpdateCompanionBuilder,
-    (JwPressure, BaseReferences<_$JWDatabase, $JwPressuresTable, JwPressure>),
-    JwPressure,
+    $JWPressuresTable,
+    JWPressureRow,
+    $$JWPressuresTableFilterComposer,
+    $$JWPressuresTableOrderingComposer,
+    $$JWPressuresTableAnnotationComposer,
+    $$JWPressuresTableCreateCompanionBuilder,
+    $$JWPressuresTableUpdateCompanionBuilder,
+    (
+      JWPressureRow,
+      BaseReferences<_$JWDatabase, $JWPressuresTable, JWPressureRow>
+    ),
+    JWPressureRow,
     PrefetchHooks Function()> {
-  $$JwPressuresTableTableManager(_$JWDatabase db, $JwPressuresTable table)
+  $$JWPressuresTableTableManager(_$JWDatabase db, $JWPressuresTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwPressuresTableFilterComposer($db: db, $table: table),
+              $$JWPressuresTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwPressuresTableOrderingComposer($db: db, $table: table),
+              $$JWPressuresTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwPressuresTableAnnotationComposer($db: db, $table: table),
+              $$JWPressuresTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -4658,7 +4676,7 @@ class $$JwPressuresTableTableManager extends RootTableManager<
             Value<int> value = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwPressuresCompanion(
+              JWPressuresCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4672,7 +4690,7 @@ class $$JwPressuresTableTableManager extends RootTableManager<
             required int value,
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwPressuresCompanion.insert(
+              JWPressuresCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4681,28 +4699,31 @@ class $$JwPressuresTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwPressuresTable, JwPressure>(table),
-                    BaseReferences<_$JWDatabase, $JwPressuresTable, JwPressure>(
-                        db, table, e)
+                    e.readTable<$JWPressuresTable, JWPressureRow>(table),
+                    BaseReferences<_$JWDatabase, $JWPressuresTable,
+                        JWPressureRow>(db, table, e)
                   ))
               .toList(),
           prefetchHooksCallback: null,
         ));
 }
 
-typedef $$JwPressuresTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWPressuresTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwPressuresTable,
-    JwPressure,
-    $$JwPressuresTableFilterComposer,
-    $$JwPressuresTableOrderingComposer,
-    $$JwPressuresTableAnnotationComposer,
-    $$JwPressuresTableCreateCompanionBuilder,
-    $$JwPressuresTableUpdateCompanionBuilder,
-    (JwPressure, BaseReferences<_$JWDatabase, $JwPressuresTable, JwPressure>),
-    JwPressure,
+    $JWPressuresTable,
+    JWPressureRow,
+    $$JWPressuresTableFilterComposer,
+    $$JWPressuresTableOrderingComposer,
+    $$JWPressuresTableAnnotationComposer,
+    $$JWPressuresTableCreateCompanionBuilder,
+    $$JWPressuresTableUpdateCompanionBuilder,
+    (
+      JWPressureRow,
+      BaseReferences<_$JWDatabase, $JWPressuresTable, JWPressureRow>
+    ),
+    JWPressureRow,
     PrefetchHooks Function()>;
-typedef $$JwTemperaturesTableCreateCompanionBuilder = JwTemperaturesCompanion
+typedef $$JWTemperaturesTableCreateCompanionBuilder = JWTemperaturesCompanion
     Function({
   required String userId,
   required String deviceMac,
@@ -4713,7 +4734,7 @@ typedef $$JwTemperaturesTableCreateCompanionBuilder = JwTemperaturesCompanion
   required bool compensated,
   Value<int> rowid,
 });
-typedef $$JwTemperaturesTableUpdateCompanionBuilder = JwTemperaturesCompanion
+typedef $$JWTemperaturesTableUpdateCompanionBuilder = JWTemperaturesCompanion
     Function({
   Value<String> userId,
   Value<String> deviceMac,
@@ -4725,9 +4746,9 @@ typedef $$JwTemperaturesTableUpdateCompanionBuilder = JwTemperaturesCompanion
   Value<int> rowid,
 });
 
-class $$JwTemperaturesTableFilterComposer
-    extends Composer<_$JWDatabase, $JwTemperaturesTable> {
-  $$JwTemperaturesTableFilterComposer({
+class $$JWTemperaturesTableFilterComposer
+    extends Composer<_$JWDatabase, $JWTemperaturesTable> {
+  $$JWTemperaturesTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4757,9 +4778,9 @@ class $$JwTemperaturesTableFilterComposer
       column: $table.compensated, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwTemperaturesTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwTemperaturesTable> {
-  $$JwTemperaturesTableOrderingComposer({
+class $$JWTemperaturesTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWTemperaturesTable> {
+  $$JWTemperaturesTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4789,9 +4810,9 @@ class $$JwTemperaturesTableOrderingComposer
       column: $table.compensated, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwTemperaturesTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwTemperaturesTable> {
-  $$JwTemperaturesTableAnnotationComposer({
+class $$JWTemperaturesTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWTemperaturesTable> {
+  $$JWTemperaturesTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4820,31 +4841,31 @@ class $$JwTemperaturesTableAnnotationComposer
       column: $table.compensated, builder: (column) => column);
 }
 
-class $$JwTemperaturesTableTableManager extends RootTableManager<
+class $$JWTemperaturesTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwTemperaturesTable,
-    JwTemperature,
-    $$JwTemperaturesTableFilterComposer,
-    $$JwTemperaturesTableOrderingComposer,
-    $$JwTemperaturesTableAnnotationComposer,
-    $$JwTemperaturesTableCreateCompanionBuilder,
-    $$JwTemperaturesTableUpdateCompanionBuilder,
+    $JWTemperaturesTable,
+    JWTemperatureRow,
+    $$JWTemperaturesTableFilterComposer,
+    $$JWTemperaturesTableOrderingComposer,
+    $$JWTemperaturesTableAnnotationComposer,
+    $$JWTemperaturesTableCreateCompanionBuilder,
+    $$JWTemperaturesTableUpdateCompanionBuilder,
     (
-      JwTemperature,
-      BaseReferences<_$JWDatabase, $JwTemperaturesTable, JwTemperature>
+      JWTemperatureRow,
+      BaseReferences<_$JWDatabase, $JWTemperaturesTable, JWTemperatureRow>
     ),
-    JwTemperature,
+    JWTemperatureRow,
     PrefetchHooks Function()> {
-  $$JwTemperaturesTableTableManager(_$JWDatabase db, $JwTemperaturesTable table)
+  $$JWTemperaturesTableTableManager(_$JWDatabase db, $JWTemperaturesTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwTemperaturesTableFilterComposer($db: db, $table: table),
+              $$JWTemperaturesTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwTemperaturesTableOrderingComposer($db: db, $table: table),
+              $$JWTemperaturesTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwTemperaturesTableAnnotationComposer($db: db, $table: table),
+              $$JWTemperaturesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -4855,7 +4876,7 @@ class $$JwTemperaturesTableTableManager extends RootTableManager<
             Value<bool> compensated = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwTemperaturesCompanion(
+              JWTemperaturesCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4875,7 +4896,7 @@ class $$JwTemperaturesTableTableManager extends RootTableManager<
             required bool compensated,
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwTemperaturesCompanion.insert(
+              JWTemperaturesCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -4887,31 +4908,31 @@ class $$JwTemperaturesTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwTemperaturesTable, JwTemperature>(table),
-                    BaseReferences<_$JWDatabase, $JwTemperaturesTable,
-                        JwTemperature>(db, table, e)
+                    e.readTable<$JWTemperaturesTable, JWTemperatureRow>(table),
+                    BaseReferences<_$JWDatabase, $JWTemperaturesTable,
+                        JWTemperatureRow>(db, table, e)
                   ))
               .toList(),
           prefetchHooksCallback: null,
         ));
 }
 
-typedef $$JwTemperaturesTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWTemperaturesTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwTemperaturesTable,
-    JwTemperature,
-    $$JwTemperaturesTableFilterComposer,
-    $$JwTemperaturesTableOrderingComposer,
-    $$JwTemperaturesTableAnnotationComposer,
-    $$JwTemperaturesTableCreateCompanionBuilder,
-    $$JwTemperaturesTableUpdateCompanionBuilder,
+    $JWTemperaturesTable,
+    JWTemperatureRow,
+    $$JWTemperaturesTableFilterComposer,
+    $$JWTemperaturesTableOrderingComposer,
+    $$JWTemperaturesTableAnnotationComposer,
+    $$JWTemperaturesTableCreateCompanionBuilder,
+    $$JWTemperaturesTableUpdateCompanionBuilder,
     (
-      JwTemperature,
-      BaseReferences<_$JWDatabase, $JwTemperaturesTable, JwTemperature>
+      JWTemperatureRow,
+      BaseReferences<_$JWDatabase, $JWTemperaturesTable, JWTemperatureRow>
     ),
-    JwTemperature,
+    JWTemperatureRow,
     PrefetchHooks Function()>;
-typedef $$JwBloodGlucosesTableCreateCompanionBuilder = JwBloodGlucosesCompanion
+typedef $$JWBloodGlucosesTableCreateCompanionBuilder = JWBloodGlucosesCompanion
     Function({
   required String userId,
   required String deviceMac,
@@ -4919,7 +4940,7 @@ typedef $$JwBloodGlucosesTableCreateCompanionBuilder = JwBloodGlucosesCompanion
   required int value,
   Value<int> rowid,
 });
-typedef $$JwBloodGlucosesTableUpdateCompanionBuilder = JwBloodGlucosesCompanion
+typedef $$JWBloodGlucosesTableUpdateCompanionBuilder = JWBloodGlucosesCompanion
     Function({
   Value<String> userId,
   Value<String> deviceMac,
@@ -4928,9 +4949,9 @@ typedef $$JwBloodGlucosesTableUpdateCompanionBuilder = JwBloodGlucosesCompanion
   Value<int> rowid,
 });
 
-class $$JwBloodGlucosesTableFilterComposer
-    extends Composer<_$JWDatabase, $JwBloodGlucosesTable> {
-  $$JwBloodGlucosesTableFilterComposer({
+class $$JWBloodGlucosesTableFilterComposer
+    extends Composer<_$JWDatabase, $JWBloodGlucosesTable> {
+  $$JWBloodGlucosesTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4950,9 +4971,9 @@ class $$JwBloodGlucosesTableFilterComposer
       column: $table.value, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwBloodGlucosesTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwBloodGlucosesTable> {
-  $$JwBloodGlucosesTableOrderingComposer({
+class $$JWBloodGlucosesTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWBloodGlucosesTable> {
+  $$JWBloodGlucosesTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4972,9 +4993,9 @@ class $$JwBloodGlucosesTableOrderingComposer
       column: $table.value, builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwBloodGlucosesTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwBloodGlucosesTable> {
-  $$JwBloodGlucosesTableAnnotationComposer({
+class $$JWBloodGlucosesTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWBloodGlucosesTable> {
+  $$JWBloodGlucosesTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -4994,32 +5015,32 @@ class $$JwBloodGlucosesTableAnnotationComposer
       $composableBuilder(column: $table.value, builder: (column) => column);
 }
 
-class $$JwBloodGlucosesTableTableManager extends RootTableManager<
+class $$JWBloodGlucosesTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwBloodGlucosesTable,
-    JwBloodGlucose,
-    $$JwBloodGlucosesTableFilterComposer,
-    $$JwBloodGlucosesTableOrderingComposer,
-    $$JwBloodGlucosesTableAnnotationComposer,
-    $$JwBloodGlucosesTableCreateCompanionBuilder,
-    $$JwBloodGlucosesTableUpdateCompanionBuilder,
+    $JWBloodGlucosesTable,
+    JWBloodGlucoseRow,
+    $$JWBloodGlucosesTableFilterComposer,
+    $$JWBloodGlucosesTableOrderingComposer,
+    $$JWBloodGlucosesTableAnnotationComposer,
+    $$JWBloodGlucosesTableCreateCompanionBuilder,
+    $$JWBloodGlucosesTableUpdateCompanionBuilder,
     (
-      JwBloodGlucose,
-      BaseReferences<_$JWDatabase, $JwBloodGlucosesTable, JwBloodGlucose>
+      JWBloodGlucoseRow,
+      BaseReferences<_$JWDatabase, $JWBloodGlucosesTable, JWBloodGlucoseRow>
     ),
-    JwBloodGlucose,
+    JWBloodGlucoseRow,
     PrefetchHooks Function()> {
-  $$JwBloodGlucosesTableTableManager(
-      _$JWDatabase db, $JwBloodGlucosesTable table)
+  $$JWBloodGlucosesTableTableManager(
+      _$JWDatabase db, $JWBloodGlucosesTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwBloodGlucosesTableFilterComposer($db: db, $table: table),
+              $$JWBloodGlucosesTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwBloodGlucosesTableOrderingComposer($db: db, $table: table),
+              $$JWBloodGlucosesTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwBloodGlucosesTableAnnotationComposer($db: db, $table: table),
+              $$JWBloodGlucosesTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -5027,7 +5048,7 @@ class $$JwBloodGlucosesTableTableManager extends RootTableManager<
             Value<int> value = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwBloodGlucosesCompanion(
+              JWBloodGlucosesCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -5041,7 +5062,7 @@ class $$JwBloodGlucosesTableTableManager extends RootTableManager<
             required int value,
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwBloodGlucosesCompanion.insert(
+              JWBloodGlucosesCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -5050,31 +5071,32 @@ class $$JwBloodGlucosesTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwBloodGlucosesTable, JwBloodGlucose>(table),
-                    BaseReferences<_$JWDatabase, $JwBloodGlucosesTable,
-                        JwBloodGlucose>(db, table, e)
+                    e.readTable<$JWBloodGlucosesTable, JWBloodGlucoseRow>(
+                        table),
+                    BaseReferences<_$JWDatabase, $JWBloodGlucosesTable,
+                        JWBloodGlucoseRow>(db, table, e)
                   ))
               .toList(),
           prefetchHooksCallback: null,
         ));
 }
 
-typedef $$JwBloodGlucosesTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWBloodGlucosesTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwBloodGlucosesTable,
-    JwBloodGlucose,
-    $$JwBloodGlucosesTableFilterComposer,
-    $$JwBloodGlucosesTableOrderingComposer,
-    $$JwBloodGlucosesTableAnnotationComposer,
-    $$JwBloodGlucosesTableCreateCompanionBuilder,
-    $$JwBloodGlucosesTableUpdateCompanionBuilder,
+    $JWBloodGlucosesTable,
+    JWBloodGlucoseRow,
+    $$JWBloodGlucosesTableFilterComposer,
+    $$JWBloodGlucosesTableOrderingComposer,
+    $$JWBloodGlucosesTableAnnotationComposer,
+    $$JWBloodGlucosesTableCreateCompanionBuilder,
+    $$JWBloodGlucosesTableUpdateCompanionBuilder,
     (
-      JwBloodGlucose,
-      BaseReferences<_$JWDatabase, $JwBloodGlucosesTable, JwBloodGlucose>
+      JWBloodGlucoseRow,
+      BaseReferences<_$JWDatabase, $JWBloodGlucosesTable, JWBloodGlucoseRow>
     ),
-    JwBloodGlucose,
+    JWBloodGlucoseRow,
     PrefetchHooks Function()>;
-typedef $$JwSportsTableCreateCompanionBuilder = JwSportsCompanion Function({
+typedef $$JWSportsTableCreateCompanionBuilder = JWSportsCompanion Function({
   required String userId,
   required String deviceMac,
   required int time,
@@ -5090,7 +5112,7 @@ typedef $$JwSportsTableCreateCompanionBuilder = JwSportsCompanion Function({
   Value<int?> heartRateMin,
   Value<int> rowid,
 });
-typedef $$JwSportsTableUpdateCompanionBuilder = JwSportsCompanion Function({
+typedef $$JWSportsTableUpdateCompanionBuilder = JWSportsCompanion Function({
   Value<String> userId,
   Value<String> deviceMac,
   Value<int> time,
@@ -5107,9 +5129,9 @@ typedef $$JwSportsTableUpdateCompanionBuilder = JwSportsCompanion Function({
   Value<int> rowid,
 });
 
-class $$JwSportsTableFilterComposer
-    extends Composer<_$JWDatabase, $JwSportsTable> {
-  $$JwSportsTableFilterComposer({
+class $$JWSportsTableFilterComposer
+    extends Composer<_$JWDatabase, $JWSportsTable> {
+  $$JWSportsTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -5157,9 +5179,9 @@ class $$JwSportsTableFilterComposer
       column: $table.heartRateMin, builder: (column) => ColumnFilters(column));
 }
 
-class $$JwSportsTableOrderingComposer
-    extends Composer<_$JWDatabase, $JwSportsTable> {
-  $$JwSportsTableOrderingComposer({
+class $$JWSportsTableOrderingComposer
+    extends Composer<_$JWDatabase, $JWSportsTable> {
+  $$JWSportsTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -5210,9 +5232,9 @@ class $$JwSportsTableOrderingComposer
       builder: (column) => ColumnOrderings(column));
 }
 
-class $$JwSportsTableAnnotationComposer
-    extends Composer<_$JWDatabase, $JwSportsTable> {
-  $$JwSportsTableAnnotationComposer({
+class $$JWSportsTableAnnotationComposer
+    extends Composer<_$JWDatabase, $JWSportsTable> {
+  $$JWSportsTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -5259,28 +5281,28 @@ class $$JwSportsTableAnnotationComposer
       column: $table.heartRateMin, builder: (column) => column);
 }
 
-class $$JwSportsTableTableManager extends RootTableManager<
+class $$JWSportsTableTableManager extends RootTableManager<
     _$JWDatabase,
-    $JwSportsTable,
-    JwSport,
-    $$JwSportsTableFilterComposer,
-    $$JwSportsTableOrderingComposer,
-    $$JwSportsTableAnnotationComposer,
-    $$JwSportsTableCreateCompanionBuilder,
-    $$JwSportsTableUpdateCompanionBuilder,
-    (JwSport, BaseReferences<_$JWDatabase, $JwSportsTable, JwSport>),
-    JwSport,
+    $JWSportsTable,
+    JWSportRow,
+    $$JWSportsTableFilterComposer,
+    $$JWSportsTableOrderingComposer,
+    $$JWSportsTableAnnotationComposer,
+    $$JWSportsTableCreateCompanionBuilder,
+    $$JWSportsTableUpdateCompanionBuilder,
+    (JWSportRow, BaseReferences<_$JWDatabase, $JWSportsTable, JWSportRow>),
+    JWSportRow,
     PrefetchHooks Function()> {
-  $$JwSportsTableTableManager(_$JWDatabase db, $JwSportsTable table)
+  $$JWSportsTableTableManager(_$JWDatabase db, $JWSportsTable table)
       : super(TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$JwSportsTableFilterComposer($db: db, $table: table),
+              $$JWSportsTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$JwSportsTableOrderingComposer($db: db, $table: table),
+              $$JWSportsTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$JwSportsTableAnnotationComposer($db: db, $table: table),
+              $$JWSportsTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
             Value<String> userId = const Value.absent(),
             Value<String> deviceMac = const Value.absent(),
@@ -5297,7 +5319,7 @@ class $$JwSportsTableTableManager extends RootTableManager<
             Value<int?> heartRateMin = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwSportsCompanion(
+              JWSportsCompanion(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -5329,7 +5351,7 @@ class $$JwSportsTableTableManager extends RootTableManager<
             Value<int?> heartRateMin = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
-              JwSportsCompanion.insert(
+              JWSportsCompanion.insert(
             userId: userId,
             deviceMac: deviceMac,
             time: time,
@@ -5347,8 +5369,8 @@ class $$JwSportsTableTableManager extends RootTableManager<
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
-                    e.readTable<$JwSportsTable, JwSport>(table),
-                    BaseReferences<_$JWDatabase, $JwSportsTable, JwSport>(
+                    e.readTable<$JWSportsTable, JWSportRow>(table),
+                    BaseReferences<_$JWDatabase, $JWSportsTable, JWSportRow>(
                         db, table, e)
                   ))
               .toList(),
@@ -5356,40 +5378,40 @@ class $$JwSportsTableTableManager extends RootTableManager<
         ));
 }
 
-typedef $$JwSportsTableProcessedTableManager = ProcessedTableManager<
+typedef $$JWSportsTableProcessedTableManager = ProcessedTableManager<
     _$JWDatabase,
-    $JwSportsTable,
-    JwSport,
-    $$JwSportsTableFilterComposer,
-    $$JwSportsTableOrderingComposer,
-    $$JwSportsTableAnnotationComposer,
-    $$JwSportsTableCreateCompanionBuilder,
-    $$JwSportsTableUpdateCompanionBuilder,
-    (JwSport, BaseReferences<_$JWDatabase, $JwSportsTable, JwSport>),
-    JwSport,
+    $JWSportsTable,
+    JWSportRow,
+    $$JWSportsTableFilterComposer,
+    $$JWSportsTableOrderingComposer,
+    $$JWSportsTableAnnotationComposer,
+    $$JWSportsTableCreateCompanionBuilder,
+    $$JWSportsTableUpdateCompanionBuilder,
+    (JWSportRow, BaseReferences<_$JWDatabase, $JWSportsTable, JWSportRow>),
+    JWSportRow,
     PrefetchHooks Function()>;
 
 class $JWDatabaseManager {
   final _$JWDatabase _db;
   $JWDatabaseManager(this._db);
-  $$JwActivitiesTableTableManager get jwActivities =>
-      $$JwActivitiesTableTableManager(_db, _db.jwActivities);
-  $$JwSleepsTableTableManager get jwSleeps =>
-      $$JwSleepsTableTableManager(_db, _db.jwSleeps);
-  $$JwHeartRatesTableTableManager get jwHeartRates =>
-      $$JwHeartRatesTableTableManager(_db, _db.jwHeartRates);
-  $$JwBloodPressuresTableTableManager get jwBloodPressures =>
-      $$JwBloodPressuresTableTableManager(_db, _db.jwBloodPressures);
-  $$JwBloodOxygensTableTableManager get jwBloodOxygens =>
-      $$JwBloodOxygensTableTableManager(_db, _db.jwBloodOxygens);
-  $$JwHrvsTableTableManager get jwHrvs =>
-      $$JwHrvsTableTableManager(_db, _db.jwHrvs);
-  $$JwPressuresTableTableManager get jwPressures =>
-      $$JwPressuresTableTableManager(_db, _db.jwPressures);
-  $$JwTemperaturesTableTableManager get jwTemperatures =>
-      $$JwTemperaturesTableTableManager(_db, _db.jwTemperatures);
-  $$JwBloodGlucosesTableTableManager get jwBloodGlucoses =>
-      $$JwBloodGlucosesTableTableManager(_db, _db.jwBloodGlucoses);
-  $$JwSportsTableTableManager get jwSports =>
-      $$JwSportsTableTableManager(_db, _db.jwSports);
+  $$JWActivitiesTableTableManager get jWActivities =>
+      $$JWActivitiesTableTableManager(_db, _db.jWActivities);
+  $$JWSleepsTableTableManager get jWSleeps =>
+      $$JWSleepsTableTableManager(_db, _db.jWSleeps);
+  $$JWHeartRatesTableTableManager get jWHeartRates =>
+      $$JWHeartRatesTableTableManager(_db, _db.jWHeartRates);
+  $$JWBloodPressuresTableTableManager get jWBloodPressures =>
+      $$JWBloodPressuresTableTableManager(_db, _db.jWBloodPressures);
+  $$JWBloodOxygensTableTableManager get jWBloodOxygens =>
+      $$JWBloodOxygensTableTableManager(_db, _db.jWBloodOxygens);
+  $$JWHrvsTableTableManager get jWHrvs =>
+      $$JWHrvsTableTableManager(_db, _db.jWHrvs);
+  $$JWPressuresTableTableManager get jWPressures =>
+      $$JWPressuresTableTableManager(_db, _db.jWPressures);
+  $$JWTemperaturesTableTableManager get jWTemperatures =>
+      $$JWTemperaturesTableTableManager(_db, _db.jWTemperatures);
+  $$JWBloodGlucosesTableTableManager get jWBloodGlucoses =>
+      $$JWBloodGlucosesTableTableManager(_db, _db.jWBloodGlucoses);
+  $$JWSportsTableTableManager get jWSports =>
+      $$JWSportsTableTableManager(_db, _db.jWSports);
 }

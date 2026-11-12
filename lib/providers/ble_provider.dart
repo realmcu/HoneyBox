@@ -150,7 +150,8 @@ class BleNotifier extends StateNotifier<BleState> {
             serviceUuids: result.advertisementData.serviceUuids
                 .map((u) => u.toString())
                 .toSet(),
-            manufacturerData: result.advertisementData.manufacturerData),
+            manufacturerData: result.advertisementData.manufacturerData,
+            deviceName: name),
       );
       if (!_batchScanResults) {
         devicesNotifier.addDevice(scanDevice);

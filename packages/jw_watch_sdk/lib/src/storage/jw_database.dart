@@ -11,7 +11,8 @@ abstract class JWHistoryTable extends Table {
   Set<Column> get primaryKey => {userId, deviceMac, time};
 }
 
-class JwActivities extends JWHistoryTable {
+@DataClassName('JWActivityRow')
+class JWActivities extends JWHistoryTable {
   @override
   String get tableName => 'jw_activity';
   IntColumn get steps => integer()();
@@ -21,26 +22,30 @@ class JwActivities extends JWHistoryTable {
   IntColumn get mode => integer()();
 }
 
-class JwSleeps extends JWHistoryTable {
+@DataClassName('JWSleepRow')
+class JWSleeps extends JWHistoryTable {
   @override
   String get tableName => 'jw_sleep';
   IntColumn get mode => integer()();
 }
 
-class JwHeartRates extends JWHistoryTable {
+@DataClassName('JWHeartRateRow')
+class JWHeartRates extends JWHistoryTable {
   @override
   String get tableName => 'jw_heart_rate';
   IntColumn get heartRate => integer()();
 }
 
-class JwBloodPressures extends JWHistoryTable {
+@DataClassName('JWBloodPressureRow')
+class JWBloodPressures extends JWHistoryTable {
   @override
   String get tableName => 'jw_blood_pressure';
   IntColumn get systolic => integer()();
   IntColumn get diastolic => integer()();
 }
 
-class JwBloodOxygens extends JWHistoryTable {
+@DataClassName('JWBloodOxygenRow')
+class JWBloodOxygens extends JWHistoryTable {
   @override
   String get tableName => 'jw_blood_oxygen';
   IntColumn get value => integer()();
@@ -48,19 +53,22 @@ class JwBloodOxygens extends JWHistoryTable {
   IntColumn get low => integer().nullable()();
 }
 
-class JwHrvs extends JWHistoryTable {
+@DataClassName('JWHrvRow')
+class JWHrvs extends JWHistoryTable {
   @override
   String get tableName => 'jw_hrv';
   IntColumn get sdnn => integer()();
 }
 
-class JwPressures extends JWHistoryTable {
+@DataClassName('JWPressureRow')
+class JWPressures extends JWHistoryTable {
   @override
   String get tableName => 'jw_pressure';
   IntColumn get value => integer()();
 }
 
-class JwTemperatures extends JWHistoryTable {
+@DataClassName('JWTemperatureRow')
+class JWTemperatures extends JWHistoryTable {
   @override
   String get tableName => 'jw_temperature';
   RealColumn get skinTemperature => real()();
@@ -69,13 +77,15 @@ class JwTemperatures extends JWHistoryTable {
   BoolColumn get compensated => boolean()();
 }
 
-class JwBloodGlucoses extends JWHistoryTable {
+@DataClassName('JWBloodGlucoseRow')
+class JWBloodGlucoses extends JWHistoryTable {
   @override
   String get tableName => 'jw_blood_glucose';
   IntColumn get value => integer()();
 }
 
-class JwSports extends JWHistoryTable {
+@DataClassName('JWSportRow')
+class JWSports extends JWHistoryTable {
   @override
   String get tableName => 'jw_sport';
   IntColumn get mode => integer()();
@@ -91,16 +101,16 @@ class JwSports extends JWHistoryTable {
 }
 
 @DriftDatabase(tables: [
-  JwActivities,
-  JwSleeps,
-  JwHeartRates,
-  JwBloodPressures,
-  JwBloodOxygens,
-  JwHrvs,
-  JwPressures,
-  JwTemperatures,
-  JwBloodGlucoses,
-  JwSports,
+  JWActivities,
+  JWSleeps,
+  JWHeartRates,
+  JWBloodPressures,
+  JWBloodOxygens,
+  JWHrvs,
+  JWPressures,
+  JWTemperatures,
+  JWBloodGlucoses,
+  JWSports,
 ])
 class JWDatabase extends _$JWDatabase {
   JWDatabase(super.executor);
@@ -113,9 +123,25 @@ class JWDatabase extends _$JWDatabase {
   /// generated default accidentally touch a database with a different schema.
   @override
   MigrationStrategy get migration => MigrationStrategy(
-      onCreate: (migrator) => migrator.createAll(),
-      onUpgrade: (migrator, from, to) async {
-        // Version 1 is the initial JW-only schema. Add ordered JW migrations
-        // here whenever [schemaVersion] advances; WS has a separate database.
-      });
+        onCreate: (migrator) => migrator.createAll(),
+        onUpgrade: (migrator, from, to) async {
+          // Version 1 is the initial JW-only schema. Add ordered JW migrations
+          // here whenever [schemaVersion] advances; WS has a separate database.
+        },
+      );
+}
+
+/// Drift lower-cases only the first letter of `JW*` table classes (`jW*`).
+/// These aliases keep call sites as `jw*` table getters (file-style prefix).
+extension JWDatabaseHistoryTables on JWDatabase {
+  $JWActivitiesTable get jwActivities => jWActivities;
+  $JWSleepsTable get jwSleeps => jWSleeps;
+  $JWHeartRatesTable get jwHeartRates => jWHeartRates;
+  $JWBloodPressuresTable get jwBloodPressures => jWBloodPressures;
+  $JWBloodOxygensTable get jwBloodOxygens => jWBloodOxygens;
+  $JWHrvsTable get jwHrvs => jWHrvs;
+  $JWPressuresTable get jwPressures => jWPressures;
+  $JWTemperaturesTable get jwTemperatures => jWTemperatures;
+  $JWBloodGlucosesTable get jwBloodGlucoses => jWBloodGlucoses;
+  $JWSportsTable get jwSports => jWSports;
 }

@@ -9,7 +9,7 @@ import 'package:jw_watch_sdk/src/storage/jw_database.dart';
 void main() {
   test('spo2 decode uses device-local wall time', () {
     // User log sample: 35 68 00 F1 0B 63 63 61
-    final records = jwDecodeHistoryFieldForTest(0x2c, Uint8List.fromList([
+    final records = decodeJWHistoryFieldForTest(0x2c, Uint8List.fromList([
       0x35,
       0x68,
       0x00,

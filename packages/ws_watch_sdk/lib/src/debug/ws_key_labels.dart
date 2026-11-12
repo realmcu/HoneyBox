@@ -1,5 +1,5 @@
-/// Honey L2 cmd/key names for [WSWatchDebugLog] (HoneyProtocol).
-abstract final class HoneyKeyLabels {
+/// WS L2 cmd/key names for [WSWatchDebugLog] (WS protocol).
+abstract final class WSKeyLabels {
   static const _cmdNames = <int, String>{
     0x02: 'SETTINGS(0x02)',
     0x03: 'BIND(0x03)',
@@ -48,9 +48,22 @@ abstract final class HoneyKeyLabels {
     (0x05, 0x42): 'SYNC_CONFIRM',
     (0x05, 0x60): 'TODAY_QUERY',
     (0x05, 0x61): 'TODAY_PAYLOAD',
+    (0x02, 0x40): 'HR_AUTO',
+    (0x02, 0x41): 'HR_ALARM',
+    (0x02, 0x48): 'BP_AUTO',
+    (0x02, 0x4C): 'GLU_AUTO',
+    (0x02, 0x50): 'SPO2_AUTO',
+    (0x02, 0x51): 'SPO2_ALARM',
+    (0x02, 0x54): 'PRESSURE_AUTO',
+    (0x02, 0x58): 'TEMP_AUTO',
+    (0x02, 0x5A): 'TEMP_UNIT',
+    (0x02, 0x5C): 'HEAT_STRESS_AUTO',
     (0x11, 0x03): 'HR_SPOT_START',
     (0x11, 0x04): 'HR_SPOT_START_REPLY',
     (0x11, 0x05): 'HR_SPOT_STOP',
+    (0x11, 0x0D): 'SPO2_SPOT_START',
+    (0x11, 0x0E): 'SPO2_SPOT_START_REPLY',
+    (0x11, 0x0F): 'SPO2_SPOT_STOP',
   };
 
   /// 中文说明，便于对照协议文档。
@@ -93,9 +106,16 @@ abstract final class HoneyKeyLabels {
     (0x05, 0x42): '同步确认',
     (0x05, 0x60): '今日汇总查询',
     (0x05, 0x61): '今日汇总应答',
+    (0x02, 0x40): '心率自动监测',
+    (0x02, 0x41): '心率告警',
+    (0x02, 0x50): '血氧自动监测',
+    (0x02, 0x51): '血氧告警',
     (0x11, 0x03): '点测心率-开始',
     (0x11, 0x04): '点测心率-开始应答',
     (0x11, 0x05): '点测心率-停止',
+    (0x11, 0x0D): '点测血氧-开始',
+    (0x11, 0x0E): '点测血氧-开始应答',
+    (0x11, 0x0F): '点测血氧-停止',
   };
 
   static String annotate(int command, int key) => describeKey(command, key);

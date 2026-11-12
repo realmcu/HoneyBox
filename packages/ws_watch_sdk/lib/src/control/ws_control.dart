@@ -1,32 +1,32 @@
 import '../connection/ws_link.dart';
-import '../honey/honey_control.dart';
+import '../wire/ws_control_command.dart';
 
 final class WSControl {
   WSControl({
     required WSLink link,
-    required bool Function() isReady,
+    required bool Function() isConnected,
     Duration replyTimeout = const Duration(seconds: 8),
   })  : _link = link,
-        _isReady = isReady,
+        _isConnected = isConnected,
         _replyTimeout = replyTimeout;
 
   final WSLink _link;
-  final bool Function() _isReady;
+  final bool Function() _isConnected;
   final Duration _replyTimeout;
 
   Future<int> queryBatteryPercent() async {
-    _requireReady();
+    _requireConnected();
     final reply = await _link.request(
-      HoneyControlCommand.batteryQuery(),
-      replyKey: HoneyControlCommand.keyBatteryReply,
+      WSControlCommand.batteryQuery(),
+      replyKey: WSControlCommand.keyBatteryReply,
       timeout: _replyTimeout,
     );
-    return HoneyControlCommand.decodeBatteryPercent(reply);
+    return WSControlCommand.decodeBatteryPercent(reply);
   }
 
-  void _requireReady() {
-    if (!_isReady()) {
-      throw StateError('WSControl requires an authenticated ready session');
+  void _requireConnected() {
+    if (!_isConnected()) {
+      throw StateError('WSControl requires an open connected session');
     }
   }
 }

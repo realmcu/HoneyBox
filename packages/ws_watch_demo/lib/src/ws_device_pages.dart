@@ -183,7 +183,7 @@ class _JWDeviceHubPageState extends State<WSDeviceHubPage> {
                           _DeviceApiTitle(
                             title: '设备功能',
                             apiCode: '''await session.readDeviceFeatures();
-final functions = session.state.functionInfo;
+final capabilities = session.state.capabilities;
 final supportsHeartRate = functions?.supports(WSDeviceFunction.rate);''',
                           ),
                           const SizedBox(height: 12),
@@ -254,6 +254,14 @@ class WsDeviceIdentityFieldList extends StatelessWidget {
       children: [
         _infoTile(context, '名称', text(device.name)),
         _infoTile(context, 'MAC', device.deviceMac),
+        if (device.modelId != null)
+          _infoTile(
+            context,
+            '型号 ID',
+            '0x${device.modelId!.toRadixString(16).padLeft(4, "0")}',
+          ),
+        if (device.serialNumber != null && device.serialNumber!.isNotEmpty)
+          _infoTile(context, '序列号', device.serialNumber!),
       ],
     );
   }
