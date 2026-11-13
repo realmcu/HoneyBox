@@ -25,3 +25,5 @@ export 'src/simulation/ws_sim_constants.dart';
 export 'src/storage/ws_history_store.dart';
 export 'src/today/ws_today.dart';
 export 'src/today/ws_today_models.dart';
+
+export 'src/connection/ws_attached_session.dart';

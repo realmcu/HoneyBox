@@ -120,12 +120,15 @@ class _JWDeviceHubPageState extends State<WSDeviceHubPage> {
                           const SizedBox(height: 12),
                           FilledButton.icon(
                             key: const Key('jw.demo.device.info.read'),
-                            onPressed: _infoLoading ? null : () => unawaited(_readInfo()),
+                            onPressed: _infoLoading
+                                ? null
+                                : () => unawaited(_readInfo()),
                             icon: _infoLoading
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
                                 : const Icon(Icons.refresh),
                             label: Text(_infoLoading ? '正在读取…' : '读取设备信息'),
@@ -146,17 +149,21 @@ class _JWDeviceHubPageState extends State<WSDeviceHubPage> {
                         children: [
                           _DeviceApiTitle(
                             title: '电量',
-                            apiCode: 'final level = await session.readBattery();',
+                            apiCode:
+                                'final level = await session.readBattery();',
                           ),
                           const SizedBox(height: 12),
                           FilledButton.icon(
                             key: const Key('jw.demo.device.battery.read'),
-                            onPressed: _batteryLoading ? null : () => unawaited(_readBattery()),
+                            onPressed: _batteryLoading
+                                ? null
+                                : () => unawaited(_readBattery()),
                             icon: _batteryLoading
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
                                 : const Icon(Icons.battery_std_outlined),
                             label: Text(_batteryLoading ? '正在读取…' : '读取电量'),
@@ -189,12 +196,15 @@ final supportsHeartRate = functions?.supports(WSDeviceFunction.rate);''',
                           const SizedBox(height: 12),
                           FilledButton.icon(
                             key: const Key('jw.demo.device.features.read'),
-                            onPressed: _featuresLoading ? null : () => unawaited(_readFeatures()),
+                            onPressed: _featuresLoading
+                                ? null
+                                : () => unawaited(_readFeatures()),
                             icon: _featuresLoading
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
                                 : const Icon(Icons.list_alt),
                             label: Text(_featuresLoading ? '正在读取…' : '读取设备功能'),
@@ -249,7 +259,8 @@ class WsDeviceIdentityFieldList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String text(String? value) => value == null || value.isEmpty ? '未提供' : value;
+    String text(String? value) =>
+        value == null || value.isEmpty ? '未提供' : value;
     return Column(
       children: [
         _infoTile(context, '名称', text(device.name)),
@@ -266,11 +277,20 @@ class WsDeviceIdentityFieldList extends StatelessWidget {
     );
   }
 
-  Widget _infoTile(BuildContext context, String label, String value) => ListTile(
-        contentPadding: EdgeInsets.zero,
-        title: Text(label),
-        trailing: Text(value, style: Theme.of(context).textTheme.bodyLarge),
-      );
+  Widget _infoTile(BuildContext context, String label, String value) =>
+      LayoutBuilder(
+          builder: (context, constraints) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(label),
+                trailing: ConstrainedBox(
+                  constraints:
+                      BoxConstraints(maxWidth: constraints.maxWidth * .65),
+                  child: Text(value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyLarge),
+                ),
+              ));
 }
 
 /// Home guide detail: identity + optional battery when already read.

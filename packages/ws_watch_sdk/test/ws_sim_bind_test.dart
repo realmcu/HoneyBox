@@ -10,7 +10,7 @@ void main() {
       historyStore: store,
     );
     await watch.initialize();
-  final session = watch.createSession(kWsWatchSimDeviceId);
+    final session = watch.createSession(kWsWatchSimDeviceId);
     try {
       await session.connect();
       expect(session.state.phase, WSSessionPhase.connected);
@@ -23,7 +23,7 @@ void main() {
 
       await session.dispose();
 
-      final session2 = watch.createSession(kWsWatchSimDeviceId);
+      final session2 = await watch.openSession(kWsWatchSimDeviceId);
       await session2.connect();
       await session2.login(userId);
       expect(session2.state.phase, WSSessionPhase.ready);

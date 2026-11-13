@@ -23,6 +23,10 @@ final class WSLink {
           mapError: _mapFrameError,
         );
 
+  static int _nextSessionId = 0;
+  final int _sessionId = ++_nextSessionId;
+  String get _logContext =>
+      'device=${connection.target.deviceId} session=$_sessionId';
   final WatchTransportConnection connection;
   final WatchFrameChannel _channel;
   final _failures = StreamController<WSException>.broadcast(sync: true);
@@ -32,25 +36,35 @@ final class WSLink {
   WatchFrameSend? _outboundSend;
   _PendingWSRequest? _pending;
   Future<void> _tail = Future.value();
+  WSException? _failure;
+  Future<void>? _closing;
   bool _open = false;
   bool _disposed = false;
 
   Stream<WSException> get failures => _failures.stream;
   Stream<WSL2Message> get incoming => _incoming.stream;
-  bool get isOpen => _open && !_disposed;
+  bool get isOpen => _open && !_disposed && _failure == null;
 
   Future<void> open() async {
     if (_disposed) {
       throw const WSException(WSErrorCode.disposed, 'Link disposed');
     }
     if (_open) return;
-    _payloadSubscription = _channel.payloads.listen(_onPayload);
-    _wireSubscription = _channel.frames.listen(_onWireFrame);
+    _payloadSubscription = _channel.payloads.listen((payload) => runZoned(
+        () => _onPayload(payload),
+        zoneValues: {#wsLogContext: _logContext}));
+    _wireSubscription = _channel.frames.listen((event) => runZoned(
+        () => _onWireFrame(event),
+        zoneValues: {#wsLogContext: _logContext}));
     unawaited(
       _channel.terminated.then((error) => _fail(_mapFrameError(error))),
     );
     try {
       await connection.connect();
+      if (_disposed)
+        throw const WSException(
+            WSErrorCode.disposed, "Link closed during connect");
+      if (_failure != null) throw _failure!;
       _open = true;
     } catch (error) {
       _fail(_mapFrameError(error));
@@ -63,7 +77,8 @@ final class WSLink {
     required int replyKey,
     Duration? timeout,
   }) {
-    return _enqueue(() => _execute(message, replyKey: replyKey, timeout: timeout));
+    return _enqueue(
+        () => _execute(message, replyKey: replyKey, timeout: timeout));
   }
 
   Future<WSL2Message> requestWhere(
@@ -88,8 +103,7 @@ final class WSLink {
         await outbound.completed;
         WSWatchDebugLog.apiOut('WSLink.send', 'ok seq=${outbound.sequence}');
       } catch (error) {
-        final mapped =
-            error is WSException ? error : _mapFrameError(error);
+        final mapped = error is WSException ? error : _mapFrameError(error);
         WSWatchDebugLog.linkFailure(
           'WSLink.send',
           mapped,
@@ -102,31 +116,45 @@ final class WSLink {
     });
   }
 
-  Future<void> close() async {
-    if (_disposed) return;
+  Future<void> close() => _closing ??= _close().catchError((Object error) {
+        _closing = null;
+        throw error;
+      });
+
+  Future<void> _close() async {
+    const error = WSException(WSErrorCode.disposed, 'Link closed before reply');
+    _fail(error);
     _disposed = true;
+    _open = false;
     await _wireSubscription?.cancel();
     _wireSubscription = null;
     await _payloadSubscription?.cancel();
     _payloadSubscription = null;
-    _pending?.fail(const WSException(
-        WSErrorCode.disposed, 'Link closed before reply'));
-    _pending = null;
-    await _channel.close(
-        const WSException(WSErrorCode.disposed, 'link closed'));
-    if (_open) {
-      try {
-        await connection.disconnect();
-      } finally {
-        await connection.dispose();
-      }
-    }
+    await _channel.close(error);
+    // Surface cleanup failures to the Hub; the frame channel cleanup is best effort.
+    await connection.dispose();
     await _failures.close();
     await _incoming.close();
   }
 
+  void _requireOpen() {
+    if (_disposed)
+      throw const WSException(WSErrorCode.disposed, 'Link disposed');
+    if (_failure != null) throw _failure!;
+    if (!_open)
+      throw const WSException(WSErrorCode.unavailable, 'Link not open');
+  }
+
   Future<T> _enqueue<T>(Future<T> Function() action) {
-    final run = _tail.then((_) => action());
+    try {
+      _requireOpen();
+    } catch (error, stack) {
+      return Future.error(error, stack);
+    }
+    final run = _tail.then((_) {
+      _requireOpen();
+      return runZoned(action, zoneValues: {#wsLogContext: _logContext});
+    });
     _tail = run.then((_) {}, onError: (_) {});
     return run;
   }
@@ -155,6 +183,7 @@ final class WSLink {
       matches: matches,
       completer: Completer<WSL2Message>(),
     );
+    pending.completer.future.ignore();
     _pending = pending;
     final outbound = _channel.startSend(message.encode());
     _outboundSend = outbound;
@@ -162,8 +191,7 @@ final class WSLink {
       try {
         await outbound.completed;
       } catch (error) {
-        final mapped =
-            error is WSException ? error : _mapFrameError(error);
+        final mapped = error is WSException ? error : _mapFrameError(error);
         WSWatchDebugLog.linkFailure(
           'WSLink.request',
           mapped,
@@ -229,7 +257,9 @@ final class WSLink {
   }
 
   void _fail(WSException error) {
-    if (_disposed) return;
+    if (_disposed || _failure != null) return;
+    _failure = error;
+    _open = false;
     _pending?.fail(error);
     _pending = null;
     if (!_failures.isClosed) _failures.add(error);
@@ -263,6 +293,7 @@ final class _PendingWSRequest {
 }
 
 WSException _mapFrameError(Object error) {
+  if (error is WSException) return error;
   if (error is WatchFrameWriteException) {
     return WSException(WSErrorCode.writeFailed, error.cause.toString());
   }

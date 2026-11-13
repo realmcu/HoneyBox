@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
@@ -8,6 +7,8 @@ import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'jw_demo_last_device_store.dart';
+import 'jw_history_sync_run_controller.dart';
+import 'jw_demo_log.dart';
 
 /// Turns public SDK errors into short, actionable UI copy.
 ///
@@ -42,6 +43,18 @@ String describeJWDemoError(Object error) {
 /// coalesce to at most one UI refresh per frame.
 class JWDemoController extends ChangeNotifier {
   JWDemoController({JWWatch? watch}) : _watch = watch ?? JWWatch() {
+    _subscriptions.add(_watch.attachedSessions.listen((entries) {
+      final live =
+          _watch.attachedSessionsSnapshot.map((e) => e.session).toSet();
+      _deviceErrors.removeWhere((session, _) => !live.contains(session));
+      for (final session in _syncs.keys.toList()) {
+        if (!live.contains(session)) _syncs.remove(session)?.dispose();
+      }
+      for (final entry in entries) {
+        _recordState(entry.deviceId, entry.state);
+      }
+      _notifyUi();
+    }));
     _subscriptions.add(_watch.scanResults.listen((devices) {
       _devices = devices;
       _scheduleScanUiUpdate();
@@ -61,17 +74,40 @@ class JWDemoController extends ChangeNotifier {
   bool _uiNotifyScheduled = false;
 
   List<JWScanDevice> _devices = const [];
-  JWWatchSession? _session;
+  String? _selectedDeviceId;
+  String? get selectedDeviceId => _selectedDeviceId;
+  bool get usesBleScan => _watch.usesBleScan;
+  List<JWAttachedSession> get attachedSessions =>
+      _watch.attachedSessionsSnapshot;
+  JWWatchSession? get _session =>
+      _selectedDeviceId == null ? null : _watch.sessionOf(_selectedDeviceId!);
+  JWSessionState get _state =>
+      _session?.state ??
+      const JWSessionState(phase: JWSessionPhase.disconnected);
+  final _deviceErrors = <JWWatchSession, Object>{};
+  final _logs = <String, List<String>>{};
+  final _syncs = <JWWatchSession, JwHistorySyncRunController>{};
+
+  JwHistorySyncRunController syncFor(JWWatchSession session) =>
+      _syncs.putIfAbsent(session, JwHistorySyncRunController.new);
+
+  void selectDevice(String deviceId) {
+    final target = _watch.sessionOf(deviceId);
+    if (target == null) throw StateError('Device session is unavailable');
+    _selectedDeviceId = target.connection.target.deviceId;
+    _notifyUi();
+  }
+
   String _userId = '123456';
-  JWSessionState _state = const JWSessionState();
   Object? _error;
   bool _disposed = false;
-  final _sessionLog = <String>[];
+  List<String> get _sessionLog =>
+      _logs.putIfAbsent(_selectedDeviceId ?? "", () => []);
 
   List<JWScanDevice> get devices => scanDevices.value;
   JWWatchSession? get session => _session;
   JWSessionState get state => _state;
-  Object? get error => _error ?? sheetError.value;
+  Object? get error => _deviceErrors[_session] ?? _error ?? sheetError.value;
   bool get isScanning => scanActive.value;
   bool get isInitialized => _watch.isInitialized;
   bool get isConnecting => _connecting;
@@ -91,7 +127,9 @@ class JWDemoController extends ChangeNotifier {
   JwDemoLastDevice? get lastDevice => _lastDevice;
 
   Future<void> loadLastDevice() async {
-    _lastDevice = await JwDemoLastDeviceStore.read();
+    final stored = await JwDemoLastDeviceStore.read();
+    if (_disposed) return;
+    _lastDevice = stored?.isSimulated == !usesBleScan ? stored : null;
     _notifyUi();
   }
 
@@ -99,7 +137,7 @@ class JWDemoController extends ChangeNotifier {
   Future<bool> connectLastDevice() async {
     final last = _lastDevice;
     if (last == null) return false;
-    await _ensurePermissions();
+    if (usesBleScan) await _ensurePermissions();
     return connect(JWScanDevice(
       deviceMac: last.deviceMac,
       name: last.name,
@@ -111,7 +149,9 @@ class JWDemoController extends ChangeNotifier {
     final snapshot = JwDemoLastDevice(
       name: device.name.trim().isEmpty ? 'JW 设备' : device.name.trim(),
       deviceMac: device.deviceMac,
+      isSimulated: !usesBleScan,
     );
+    if (_disposed) return;
     _lastDevice = snapshot;
     await JwDemoLastDeviceStore.write(snapshot);
     _notifyUi();
@@ -162,10 +202,10 @@ class JWDemoController extends ChangeNotifier {
       if (!isInitialized) {
         throw StateError('JW SDK must be initialized before scanning.');
       }
-      await _ensurePermissions();
+      if (usesBleScan) await _ensurePermissions();
       await _watch.stopScan();
       clearScanResults();
-      scanActive.value = true;
+      scanActive.value = usesBleScan;
       await _watch.startScan();
       _publishScanUiNow();
     } catch (error) {
@@ -197,41 +237,29 @@ class JWDemoController extends ChangeNotifier {
   }
 
   Future<bool> connect(JWScanDevice device) async {
+    if (_disposed) return false;
     if (_connecting) return false;
-    if (_state.isConnected) return true;
-    if (!isInitialized) {
-      final error = StateError('JW SDK must be initialized before connecting.');
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
-      return false;
-    }
     _connecting = true;
     _connectingDevice = device;
-    clearScanResults();
-    _notifyUi();
-    await stopScan();
-    await _session?.dispose();
-    _sessionLog.clear();
-    _session = _watch.createSession(device.deviceMac);
-    _subscriptions.add(_session!.states.listen((state) {
-      _state = state;
-      _recordState(state);
-      _notifyUi();
-    }));
-    _error = null;
-    sheetError.value = null;
     _notifyUi();
     try {
-      await _session!.connect();
-      if (_state.isConnected) {
-        unawaited(_rememberConnectedDevice(device));
-      }
-      return _state.isConnected;
+      await stopScan();
+      final session = await _watch.openSession(device.deviceMac);
+      if (_disposed) return false;
+      _selectedDeviceId = session.connection.target.deviceId;
+      _error = null;
+      sheetError.value = null;
+      await session.connect();
+      if (_disposed) return false;
+      unawaited(_rememberConnectedDevice(device).catchError((Object error) {
+        JwDemoLog.info('Remember device failed: $error');
+      }));
+      return session.state.isConnected;
     } catch (error) {
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
+      if (!_disposed) {
+        _error = error;
+        sheetError.value = error;
+      }
       return false;
     } finally {
       _connecting = false;
@@ -334,17 +362,17 @@ class JWDemoController extends ChangeNotifier {
           (session) => session.sendNotifyMessage(channel, text: text));
 
   Future<JWSettingSubmission> sendIncomingCall({String display = ''}) =>
-      _runSessionValue(
-          (session) => session.sendIncomingCall(display: display));
+      _runSessionValue((session) => session.sendIncomingCall(display: display));
 
   Future<Uint8List> resetHistorySyncMarkers() =>
       _runSessionValue((session) => session.resetHistorySyncMarkers());
 
   /// Sends factory RESET (`0x06/0xFC`), then tears down the local session.
   Future<void> clearDeviceData({required bool confirmed}) async {
-    await _runSessionValue(
-        (session) => session.clearDeviceData(confirmed: confirmed));
-    await disconnect();
+    final session = _session;
+    if (session == null) throw StateError('请先连接 JW 设备');
+    await session.clearDeviceData(confirmed: confirmed);
+    await disconnectDevice(session.connection.target.deviceId);
   }
 
   bool get isHealthSyncActive => _session?.isHealthSyncActive ?? false;
@@ -373,8 +401,7 @@ class JWDemoController extends ChangeNotifier {
   Future<JWBloodSugarAutoMeasureConfig> readBloodSugarAutoMeasure() =>
       _runSessionValue((s) => s.measure.readBloodSugarAutoMeasure());
 
-  Future<void> setBloodSugarAutoMeasure(
-          JWBloodSugarAutoMeasureConfig config) =>
+  Future<void> setBloodSugarAutoMeasure(JWBloodSugarAutoMeasureConfig config) =>
       _runSession((s) => s.measure.setBloodSugarAutoMeasure(config));
 
   Future<JWTemperatureControlSetting> readTemperatureControl() =>
@@ -484,10 +511,21 @@ class JWDemoController extends ChangeNotifier {
           session.setAlarms(values, previousIds: previousAlarmIds));
 
   Future<void> disconnect() async {
-    final session = _session;
-    _session = null;
-    _state = const JWSessionState(phase: JWSessionPhase.disconnected);
-    await session?.dispose();
+    final id = _selectedDeviceId;
+    if (id != null) await disconnectDevice(id);
+  }
+
+  Future<void> disconnectDevice(String deviceId) async {
+    await _watch.closeSession(deviceId);
+    final selected = _selectedDeviceId;
+    if (selected != null &&
+        (usesBleScan
+            ? selected.toLowerCase() == deviceId.trim().toLowerCase()
+            : selected == deviceId.trim())) {
+      final live = attachedSessions
+          .where((entry) => !entry.isClosing && !entry.session.isDisposed);
+      _selectedDeviceId = live.isEmpty ? null : live.first.deviceId;
+    }
     _notifyUi();
   }
 
@@ -503,7 +541,7 @@ class JWDemoController extends ChangeNotifier {
 
   /// Whether scan can start without showing a permission dialog (Android).
   Future<bool> scanPermissionsGranted() async {
-    if (!Platform.isAndroid) return true;
+    if (!usesBleScan || !Platform.isAndroid) return true;
     if (await Permission.bluetoothScan.isGranted &&
         await Permission.bluetoothConnect.isGranted) {
       return true;
@@ -513,11 +551,7 @@ class JWDemoController extends ChangeNotifier {
 
   /// Called when the connection page opens: scan only if permissions are already granted.
   Future<void> autoStartScanOnConnectionPage() async {
-    if (_disposed ||
-        !isInitialized ||
-        _state.isConnected ||
-        _connecting ||
-        isScanning) {
+    if (_disposed || !isInitialized || _connecting || isScanning) {
       return;
     }
     if (!await scanPermissionsGranted()) return;
@@ -527,52 +561,33 @@ class JWDemoController extends ChangeNotifier {
   void rememberUserId(String value) => _userId = value.trim();
 
   Future<void> _runSession(
-      Future<void> Function(JWWatchSession session) operation) async {
-    final session = _session;
-    if (session == null) {
-      _error = StateError('请先连接 JW 设备');
-      sheetError.value = _error;
-      _notifyUi();
-      return;
-    }
-    _error = null;
-    sheetError.value = null;
-    _notifyUi();
-    try {
-      await operation(session);
-      _state = session.state;
-      _notifyUi();
-    } catch (error) {
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
-    }
-  }
+          Future<void> Function(JWWatchSession session) operation) =>
+      _runSessionValue(operation);
 
   Future<T> _runSessionValue<T>(
       Future<T> Function(JWWatchSession session) operation) async {
+    // Capture once: selecting B while A is awaiting a reply must not redirect
+    // A's result/error to B or change A's command target.
     final session = _session;
-    if (session == null) {
-      final error = StateError('JW device must be connected first');
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
-      throw error;
-    }
-    _error = null;
-    sheetError.value = null;
+    if (session == null) throw StateError('请先连接 JW 设备');
+    _deviceErrors.remove(session);
     _notifyUi();
     try {
       return await operation(session);
     } catch (error) {
-      _error = error;
-      sheetError.value = error;
-      _notifyUi();
+      if (!_disposed &&
+          identical(
+              _watch.sessionOf(session.connection.target.deviceId), session)) {
+        _deviceErrors[session] = error;
+      }
       rethrow;
+    } finally {
+      _notifyUi();
     }
   }
 
-  void _recordState(JWSessionState state) {
+  void _recordState(String deviceId, JWSessionState state) {
+    final log = _logs.putIfAbsent(deviceId, () => []);
     final message = switch (state.phase) {
       JWSessionPhase.connecting => '正在连接设备',
       JWSessionPhase.connected => '设备已连接',
@@ -583,13 +598,14 @@ class JWDemoController extends ChangeNotifier {
       JWSessionPhase.failed => '会话失败：${state.error}',
       _ => null,
     };
-    if (message == null ||
-        (_sessionLog.isNotEmpty && _sessionLog.last == message)) {
+    if (message == null || (log.isNotEmpty && log.last == message)) {
       return;
     }
-    _sessionLog.add(message);
-    if (_sessionLog.length > 12) _sessionLog.removeAt(0);
+    log.add(message);
+    if (log.length > 12) log.removeAt(0);
   }
+
+  Future<void> shutdown() => _watch.dispose();
 
   @override
   void dispose() {
@@ -597,8 +613,12 @@ class JWDemoController extends ChangeNotifier {
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());
     }
-    unawaited(_session?.dispose());
-    unawaited(_watch.dispose());
+    unawaited(_watch.dispose().catchError((Object error) {
+      JwDemoLog.info('JW cleanup failed: $error');
+    }));
+    for (final sync in _syncs.values) {
+      sync.dispose();
+    }
     scanDevices.dispose();
     scanActive.dispose();
     sheetError.dispose();

@@ -28,6 +28,7 @@ import 'ws_link.dart';
 final class WSWatchSession {
   WSWatchSession({
     required this.connection,
+    this.onConnectRequested,
     required WSHistoryStore historyStore,
     WSSessionConfig config = const WSSessionConfig(),
     WSLinkConfig linkConfig = const WSLinkConfig(),
@@ -36,6 +37,9 @@ final class WSWatchSession {
         _link = WSLink(connection, config: linkConfig),
         _state = const WSSessionState();
 
+  final void Function()? onConnectRequested;
+  bool get isDisposed => _disposed;
+  Future<void>? _disposing;
   final WatchTransportConnection connection;
   final WSHistoryStore _historyStore;
   final WSSessionConfig _config;
@@ -81,13 +85,13 @@ final class WSWatchSession {
 
   WSToday get today => _today ??= WSToday(
         link: _link,
-        isConnected: () => _state.isConnected,
+        isConnected: () => !_disposed && _state.isConnected,
         replyTimeout: _config.replyTimeout,
       );
 
   WSMeasure get measure => _measure ??= WSMeasure(
         link: _link,
-        isConnected: () => _state.isConnected,
+        isConnected: () => !_disposed && _state.isConnected,
         isHealthSyncActive: () => isHealthSyncActive,
         coordinator: _measureCoordinator ??= WSMeasureCoordinator(
           link: _link,
@@ -98,23 +102,38 @@ final class WSWatchSession {
 
   WSControl get control => _control ??= WSControl(
         link: _link,
-        isConnected: () => _state.isConnected,
+        isConnected: () => !_disposed && _state.isConnected,
         replyTimeout: _config.replyTimeout,
       );
 
-  Future<void> connect() => _opening ??= _connect();
+  Future<void> connect() {
+    if (_disposed)
+      return Future.error(
+          const WSException(WSErrorCode.disposed, 'Session disposed'));
+    if (_opening != null) return _opening!;
+    try {
+      onConnectRequested?.call();
+      return _opening = _connect();
+    } catch (error, stack) {
+      return Future.error(error, stack);
+    }
+  }
 
   Future<void> _connect() async {
-    _publish(_state.copyWith(
-        phase: WSSessionPhase.connecting, clearError: true));
+    _publish(
+        _state.copyWith(phase: WSSessionPhase.connecting, clearError: true));
     _linkFailures = _link.failures.listen((error) {
       if (!_disposed) {
-        _publish(_state.copyWith(
-            phase: WSSessionPhase.disconnected, error: error));
+        _authenticatedUserId = null;
+        _publish(
+            _state.copyWith(phase: WSSessionPhase.disconnected, error: error));
       }
     });
     try {
       await _link.open();
+      if (_disposed)
+        throw const WSException(
+            WSErrorCode.disposed, "Session closed during connect");
       final deviceMac = connection.target.deviceId;
       _publish(_state.copyWith(
         phase: WSSessionPhase.connected,
@@ -127,25 +146,13 @@ final class WSWatchSession {
       ));
     } catch (error) {
       if (!_disposed) {
-        _publish(
-            _state.copyWith(phase: WSSessionPhase.failed, error: error));
+        _publish(_state.copyWith(phase: WSSessionPhase.failed, error: error));
       }
       rethrow;
     }
   }
 
-  Future<void> disconnect() async {
-    if (_disposed) return;
-    _authenticatedUserId = null;
-    _opening = null;
-    await _linkFailures?.cancel();
-    _linkFailures = null;
-    await _link.close();
-    _publish(_state.copyWith(
-      phase: WSSessionPhase.disconnected,
-      clearCapabilities: true,
-    ));
-  }
+  Future<void> disconnect() => dispose();
 
   /// Reads WS device info (`0x02` key `0x30`). Updates [WSSessionState.device].
   Future<void> readDeviceInfo() async {
@@ -168,18 +175,19 @@ final class WSWatchSession {
           deviceMac: deviceMac,
           name: current?.name,
           modelId: stub.modelId,
-          serialNumber:
-              stub.serialNumber.isEmpty ? null : stub.serialNumber,
+          serialNumber: stub.serialNumber.isEmpty ? null : stub.serialNumber,
         ),
       ));
       WSWatchDebugLog.apiOut(
         'WSWatchSession.readDeviceInfo',
         'model=0x${stub.modelId.toRadixString(16)} '
-        'serial=${stub.serialNumber.isEmpty ? "—" : stub.serialNumber}',
+            'serial=${stub.serialNumber.isEmpty ? "—" : stub.serialNumber}',
       );
     } catch (error) {
       if (!_disposed) {
-        _publish(_state.copyWith(phase: phaseAfter, error: error));
+        _publish(_state.copyWith(
+            phase: _state.isConnected ? phaseAfter : _state.phase,
+            error: error));
       }
       rethrow;
     }
@@ -212,7 +220,9 @@ final class WSWatchSession {
       );
     } catch (error) {
       if (!_disposed) {
-        _publish(_state.copyWith(phase: phaseAfter, error: error));
+        _publish(_state.copyWith(
+            phase: _state.isConnected ? phaseAfter : _state.phase,
+            error: error));
       }
       rethrow;
     }
@@ -251,13 +261,13 @@ final class WSWatchSession {
         return;
       }
       _authenticatedUserId = identity.value;
-      _publish(_state.copyWith(phase: WSSessionPhase.ready));
       await _applyPhoneDefaults();
+      _publish(_state.copyWith(phase: WSSessionPhase.ready));
     } catch (error) {
       _authenticatedUserId = null;
       if (!_disposed) {
         _publish(_state.copyWith(
-          phase: WSSessionPhase.connected,
+          phase: _state.isConnected ? WSSessionPhase.connected : _state.phase,
           error: error,
         ));
       }
@@ -286,13 +296,13 @@ final class WSWatchSession {
         return;
       }
       _authenticatedUserId = identity.value;
-      _publish(_state.copyWith(phase: WSSessionPhase.ready));
       await _applyPhoneDefaults();
+      _publish(_state.copyWith(phase: WSSessionPhase.ready));
     } catch (error) {
       _authenticatedUserId = null;
       if (!_disposed) {
         _publish(_state.copyWith(
-          phase: WSSessionPhase.connected,
+          phase: _state.isConnected ? WSSessionPhase.connected : _state.phase,
           error: error,
         ));
       }
@@ -333,14 +343,24 @@ final class WSWatchSession {
     return _healthSync!;
   }
 
-  Future<void> dispose() async {
-    if (_disposed) return;
+  Future<void> dispose() =>
+      _disposing ??= _dispose().catchError((Object error) {
+        _disposing = null;
+        throw error;
+      });
+
+  Future<void> _dispose() async {
     _disposed = true;
+    _authenticatedUserId = null;
     _measureCoordinator?.dispose();
     _measureCoordinator = null;
     await _linkFailures?.cancel();
     await _link.close();
-    _publish(_state.copyWith(phase: WSSessionPhase.disposed));
+    try {
+      await _healthSync;
+    } catch (_) {}
+    _state = _state.copyWith(phase: WSSessionPhase.disposed);
+    if (!_states.isClosed) _states.add(_state);
     await _states.close();
   }
 
@@ -354,6 +374,10 @@ final class WSWatchSession {
   }
 
   void _publish(WSSessionState next) {
+    if (_disposed) return;
+    if ((_state.phase == WSSessionPhase.disconnected ||
+            _state.phase == WSSessionPhase.failed) &&
+        next.isConnected) return;
     _state = next;
     if (!_states.isClosed) _states.add(next);
   }

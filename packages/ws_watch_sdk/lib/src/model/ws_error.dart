@@ -10,6 +10,9 @@ enum WSErrorCode {
   /// Link or channel cannot accept this call right now (e.g. busy, not open).
   unavailable,
 
+  /// Hub capacity reached.
+  sessionLimit,
+
   /// BLE / GATT transport is no longer connected.
   transportDisconnected,
 
@@ -68,4 +71,12 @@ final class WSException implements Exception {
 
   @override
   String toString() => 'WS ${code.name}: $msg';
+}
+
+/// Batch cleanup failed for some devices; all devices were attempted.
+final class WSSessionCloseException implements Exception {
+  const WSSessionCloseException(this.failures);
+  final Map<String, Object> failures;
+  @override
+  String toString() => 'WS session cleanup failed: $failures';
 }

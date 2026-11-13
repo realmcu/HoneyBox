@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import 'ws_settings_app_theme.dart';
 import 'package:ws_watch_sdk/ws_watch_sdk.dart';
 
 import 'ws_data_home_page.dart';
@@ -11,11 +13,11 @@ import 'ws_device_pages.dart';
 import 'ws_settings_home_page.dart';
 import 'ws_demo_session_chrome.dart';
 import 'ws_demo_ui_feedback.dart';
-import 'compat/ws_demo_compat.dart';
 
 /// JW SDK Demo shell: 首页 / 数据 / 设置；数据与设置 Tab 需会话 `ready`。
 class WSWatchLabHome extends StatefulWidget {
-  const WSWatchLabHome({super.key});
+  const WSWatchLabHome({super.key, this.watch});
+  final WSWatch? watch;
 
   @override
   State<WSWatchLabHome> createState() => _JWWatchLabHomeState();
@@ -32,7 +34,7 @@ class _JWWatchLabHomeState extends State<WSWatchLabHome> {
   @override
   void initState() {
     super.initState();
-    _controller = WSDemoController();
+    _controller = WSDemoController(watch: widget.watch);
   }
 
   @override
@@ -129,15 +131,20 @@ class _JWWatchLabHomeState extends State<WSWatchLabHome> {
               ),
             ],
           ),
-          body: WsDemoSessionChrome(
-            controller: _controller,
-            child: KeyedSubtree(
-              key: ValueKey<String>(
-                '$_selectedIndex-${_tabsUnlocked ? 'ready' : 'locked'}',
+          body: Column(children: [
+            if (_controller.attachedSessions.isNotEmpty)
+              _SessionSelector(
+                  controller: _controller, onAdd: _openConnectionPage),
+            Expanded(
+                child: WsDemoSessionChrome(
+              controller: _controller,
+              child: KeyedSubtree(
+                key: ValueKey(
+                    '$_selectedIndex-${_controller.session.hashCode}-${_tabsUnlocked ? "ready" : "locked"}'),
+                child: _buildTabBody(),
               ),
-              child: _buildTabBody(),
-            ),
-          ),
+            )),
+          ]),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _selectedIndex,
             onDestinationSelected: _onTabSelected,
@@ -152,15 +159,11 @@ class _JWWatchLabHomeState extends State<WSWatchLabHome> {
                 key: const Key('jw.demo.tab.data'),
                 icon: Icon(
                   Icons.insights_outlined,
-                  color: _tabsUnlocked
-                      ? null
-                      : Theme.of(context).disabledColor,
+                  color: _tabsUnlocked ? null : Theme.of(context).disabledColor,
                 ),
                 selectedIcon: Icon(
                   Icons.insights,
-                  color: _tabsUnlocked
-                      ? null
-                      : Theme.of(context).disabledColor,
+                  color: _tabsUnlocked ? null : Theme.of(context).disabledColor,
                 ),
                 label: '数据',
                 enabled: _tabsUnlocked,
@@ -169,15 +172,11 @@ class _JWWatchLabHomeState extends State<WSWatchLabHome> {
                 key: const Key('jw.demo.tab.settings'),
                 icon: Icon(
                   Icons.tune_outlined,
-                  color: _tabsUnlocked
-                      ? null
-                      : Theme.of(context).disabledColor,
+                  color: _tabsUnlocked ? null : Theme.of(context).disabledColor,
                 ),
                 selectedIcon: Icon(
                   Icons.tune,
-                  color: _tabsUnlocked
-                      ? null
-                      : Theme.of(context).disabledColor,
+                  color: _tabsUnlocked ? null : Theme.of(context).disabledColor,
                 ),
                 label: '设置',
                 enabled: _tabsUnlocked,
@@ -292,6 +291,13 @@ class _HomePageState extends State<_HomePage> {
 await watch.initialize();''',
             detailPanel: _SdkInitTransportPicker(controller: controller),
           ),
+          if (controller.isInitialized)
+            OutlinedButton.icon(
+              key: const Key('ws.demo.add_device'),
+              onPressed: widget.onConnect,
+              icon: const Icon(Icons.add),
+              label: const Text('扫描并添加设备（保留已有连接）'),
+            ),
           _GuideTile(
             '2',
             '连接设备',
@@ -305,13 +311,11 @@ await watch.initialize();''',
             keyName: 'jw.demo.guide.connect',
             showTrailingAction:
                 !controller.isInitialized || controller.state.isConnected,
-            actionLabel: controller.state.isConnected
-                ? '已连接'
-                : '等待',
+            actionLabel: controller.state.isConnected ? '已连接' : '等待',
             onAction: null,
             completed: controller.state.isConnected,
             code: '''await watch.startScan();
-final session = watch.createSession(device.deviceMac);
+final session = await watch.openSession(device.deviceMac);
 await session.connect();''',
             detailPanel: controller.isInitialized
                 ? _ConnectDeviceStepPanel(
@@ -387,8 +391,7 @@ final capabilities = session.state.capabilities;
 final supportsHeartRate = functions?.supports(WSDeviceFunction.rate);''',
             detailPanel: controller.functionInfo == null
                 ? null
-                : WsDeviceFunctionPanel(
-                    functions: controller.functionInfo!),
+                : WsDeviceFunctionPanel(functions: controller.functionInfo!),
           ),
         ],
       ),
@@ -445,19 +448,17 @@ String _authenticationDetail(WSDemoController controller) =>
           ? '正在首次绑定，请等待设备回应（真机可能弹窗确认）。'
           : '正在登录，请等待设备回应。',
       WSSessionPhase.loginRejected => '设备拒绝当前身份登录，请确认后首次绑定。',
-      _ when controller.state.isConnected =>
-        controller.preferBindOverLogin
-            ? '真机 BLE：固件暂未实现登录，请直接「首次绑定」。'
-            : '连接后请登录；仅在登录被拒绝时执行首次绑定。',
+      _ when controller.state.isConnected => controller.preferBindOverLogin
+          ? '真机 BLE：固件暂未实现登录，请直接「首次绑定」。'
+          : '连接后请登录；仅在登录被拒绝时执行首次绑定。',
       _ => '请先连接设备。',
     };
 
 String _authenticationActionLabel(WSDemoController controller) =>
     switch (controller.state.phase) {
       WSSessionPhase.ready => '解绑',
-      WSSessionPhase.loggingIn => controller.preferBindOverLogin
-          ? '正在绑定…'
-          : '正在登录…',
+      WSSessionPhase.loggingIn =>
+        controller.preferBindOverLogin ? '正在绑定…' : '正在登录…',
       WSSessionPhase.loginRejected => '首次绑定',
       _ when controller.state.isConnected =>
         controller.preferBindOverLogin ? '首次绑定' : '登录',
@@ -507,7 +508,9 @@ class _SdkInitTransportPicker extends StatelessWidget {
   ];
 
   bool get _canChange =>
-      !controller.state.isConnected && !controller.isConnecting;
+      !controller.attachedSessions.any((e) =>
+          e.state.isConnected || e.state.phase == WSSessionPhase.connecting) &&
+      !controller.isConnecting;
 
   Future<void> _onPick(BuildContext context, WSTransportMode? mode) async {
     if (mode == null || mode == controller.transportMode) return;
@@ -528,15 +531,15 @@ class _SdkInitTransportPicker extends StatelessWidget {
       value: controller.transportMode,
       decoration: InputDecoration(
         labelText: '传输方式',
-        helperText: _canChange
-            ? '选好后再点「初始化」；已连接时需先断开才能更换。'
-            : '已连接设备，请先断开再更换传输方式。',
+        helperText:
+            _canChange ? '选好后再点「初始化」；已连接时需先断开才能更换。' : '已连接设备，请先断开再更换传输方式。',
       ),
       items: [
         for (final (mode, label) in _modes)
           DropdownMenuItem(value: mode, child: Text(label)),
       ],
-      onChanged: _canChange ? (mode) => unawaited(_onPick(context, mode)) : null,
+      onChanged:
+          _canChange ? (mode) => unawaited(_onPick(context, mode)) : null,
     );
   }
 }
@@ -840,16 +843,7 @@ class _ConnectionPageState extends State<_ConnectionPage> {
               SliverToBoxAdapter(
                 child: _ConnectionScanHeader(controller: controller),
               ),
-              if (controller.state.isConnected)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-                    child: Text(
-                      '已连接 ${controller.state.device?.name ?? 'JW 设备'}。',
-                    ),
-                  ),
-                )
-              else if (devices.isEmpty)
+              if (devices.isEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -958,25 +952,13 @@ class _ConnectionScanHeader extends StatelessWidget {
             key: const Key('jw.demo.scan'),
             onPressed: !controller.isInitialized || controller.isConnecting
                 ? null
-                : controller.state.isConnected
-                    ? () => unawaited(controller.disconnect())
-                    : controller.isScanning
-                        ? () => unawaited(controller.stopScan())
-                        : () => unawaited(controller.startScan()),
-            icon: Icon(
-              controller.state.isConnected
-                  ? Icons.bluetooth_disabled
-                  : controller.isScanning
-                      ? Icons.stop
-                      : Icons.search,
-            ),
-            label: Text(
-              controller.state.isConnected
-                  ? '断开连接'
-                  : controller.isScanning
-                      ? '停止'
-                      : '扫描',
-            ),
+                : () => unawaited(wsDemoRunWithSnackBar(
+                    context,
+                    () => controller.isScanning
+                        ? controller.stopScan()
+                        : controller.startScan())),
+            icon: Icon(controller.isScanning ? Icons.stop : Icons.search),
+            label: Text(controller.isScanning ? '停止' : '扫描'),
           ),
           if (controller.state.isConnected) ...[
             const SizedBox(height: 12),
@@ -1033,4 +1015,163 @@ class _ScanDeviceTile extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SessionSelector extends StatelessWidget {
+  const _SessionSelector({required this.controller, required this.onAdd});
+  final WSDemoController controller;
+  final VoidCallback onAdd;
+
+  Future<void> _close(BuildContext context, String id) async {
+    try {
+      await controller.disconnectDevice(id);
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeWSDemoError(error))),
+        );
+      }
+    }
+  }
+
+  String _status(
+      WSAttachedSession entry, bool syncing, int received, int total) {
+    if (entry.closeError != null) return '关闭失败 · 请重试';
+    if (entry.isClosing) return '正在断开…';
+    if (syncing) return '同步中 $received/$total';
+    return switch (entry.state.phase) {
+      WSSessionPhase.ready => '已就绪',
+      WSSessionPhase.connecting => '连接中…',
+      WSSessionPhase.loggingIn => '登录中…',
+      WSSessionPhase.loginRejected => '等待绑定',
+      WSSessionPhase.connected => '已连接 · 待登录',
+      _ => '未连接',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          final width = ((constraints.maxWidth - 84) / 2).clamp(148.0, 220.0);
+          return Container(
+            height: 82,
+            color: WsSettingsAppTheme.background,
+            padding: const EdgeInsets.fromLTRB(16, 6, 8, 8),
+            child: Row(children: [
+              Expanded(
+                child: ListView.separated(
+                  key: const Key('ws.demo.sessions'),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: controller.attachedSessions.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final entry = controller.attachedSessions[index];
+                    final selected =
+                        controller.selectedDeviceId == entry.deviceId;
+                    final name = entry.state.device?.name;
+                    final suffix = entry.deviceId.length > 5
+                        ? entry.deviceId.substring(entry.deviceId.length - 5)
+                        : entry.deviceId;
+                    return SizedBox(
+                      width: width,
+                      child: ListenableBuilder(
+                        listenable: controller.syncFor(entry.session),
+                        builder: (context, _) {
+                          final sync = controller.syncFor(entry.session).state;
+                          final status = _status(entry, sync.isActive,
+                              sync.receivedWire, sync.totalWire);
+                          final color = entry.closeError != null
+                              ? WsSettingsAppTheme.positiveButton
+                              : selected
+                                  ? WsSettingsAppTheme.accent
+                                  : WsSettingsAppTheme.subtitle;
+                          return Material(
+                            color: selected
+                                ? const Color(0xFFF0F0FF)
+                                : WsSettingsAppTheme.card,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                  WsSettingsAppTheme.itemRadius),
+                              side: BorderSide(
+                                  color: selected
+                                      ? WsSettingsAppTheme.accent
+                                      : WsSettingsAppTheme.divider),
+                            ),
+                            child: ListTile(
+                              key: Key('ws.demo.session.${entry.deviceId}'),
+                              selected: selected,
+                              dense: true,
+                              minTileHeight: 68,
+                              minVerticalPadding: 8,
+                              contentPadding:
+                                  const EdgeInsets.only(left: 10, right: 0),
+                              horizontalTitleGap: 0,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(
+                                      WsSettingsAppTheme.itemRadius)),
+                              title: Text(
+                                name == null || name.isEmpty
+                                    ? '设备 · $suffix'
+                                    : name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    height: 1.3,
+                                    fontWeight: FontWeight.w600,
+                                    color: selected
+                                        ? WsSettingsAppTheme.accent
+                                        : WsSettingsAppTheme.title),
+                              ),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(status,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        height: 1.2,
+                                        color: color)),
+                              ),
+                              onTap: entry.isClosing || entry.session.isDisposed
+                                  ? null
+                                  : () =>
+                                      controller.selectDevice(entry.deviceId),
+                              trailing: IconButton(
+                                key: Key('ws.demo.close.${entry.deviceId}'),
+                                tooltip:
+                                    entry.closeError == null ? '断开此设备' : '重试关闭',
+                                onPressed: entry.isClosing
+                                    ? null
+                                    : () => unawaited(
+                                        _close(context, entry.deviceId)),
+                                constraints: const BoxConstraints.tightFor(
+                                    width: 40, height: 48),
+                                padding: EdgeInsets.zero,
+                                icon: Icon(
+                                    entry.closeError == null
+                                        ? Icons.close_rounded
+                                        : Icons.refresh_rounded,
+                                    size: 16,
+                                    color: WsSettingsAppTheme.subtitle),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: '添加设备',
+                onPressed: onAdd,
+                icon: const Icon(Icons.add_circle_outline_rounded,
+                    size: 22, color: WsSettingsAppTheme.accent),
+              ),
+            ]),
+          );
+        },
+      );
 }

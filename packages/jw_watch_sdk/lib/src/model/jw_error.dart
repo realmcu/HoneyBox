@@ -4,6 +4,9 @@
 /// [JWException.msg] is always English and intended for developers and logs;
 /// it is not localized UI copy.
 enum JWErrorCode {
+  /// Configured Hub capacity has been reached.
+  sessionLimit,
+
   /// Link or session was torn down; in-flight work must not continue.
   disposed,
 
@@ -65,4 +68,12 @@ final class JWException implements Exception {
 
   @override
   String toString() => 'JW ${code.name}: $msg';
+}
+
+/// Batch cleanup failed for some devices; all devices were attempted.
+final class JWSessionCloseException implements Exception {
+  const JWSessionCloseException(this.failures);
+  final Map<String, Object> failures;
+  @override
+  String toString() => 'JW session cleanup failed: $failures';
 }

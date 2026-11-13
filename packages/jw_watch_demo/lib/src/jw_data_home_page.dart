@@ -22,6 +22,7 @@ const _kDataHomeIconSize = 40.0;
 abstract final class JwDataHomeCardColors {
   /// 偶数序（含第一条）：中性浅灰，与顶区白卡区分
   static const low = Color(0xFFF9F9F9);
+
   /// 奇数序：白卡
   static const deep = Color(0xFFFFFFFF);
   static const cardShadow = Color(0x14171C3C);
@@ -40,6 +41,7 @@ class JwDataHomePage extends StatefulWidget {
 
 class _JwDataHomePageState extends State<JwDataHomePage> {
   late final JwHistorySyncRunController _sync;
+  bool _ownsSync = false;
   final Map<JwDataTypeId, JwDataHomeCardData> _cards = {};
   var _loadingCards = false;
   Object? _cardError;
@@ -52,7 +54,11 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
   @override
   void initState() {
     super.initState();
-    _sync = JwHistorySyncRunController();
+    final session = controller.session;
+    _ownsSync = session == null;
+    _sync = session == null
+        ? JwHistorySyncRunController()
+        : controller.syncFor(session);
     _sync.addListener(_onSyncChanged);
     controller.addListener(_onControllerChanged);
     unawaited(_refreshCards());
@@ -63,7 +69,8 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
   void dispose() {
     _sync.removeListener(_onSyncChanged);
     controller.removeListener(_onControllerChanged);
-    _sync.dispose();
+    // The Demo controller owns device progress across tab/device changes.
+    if (_ownsSync) _sync.dispose();
     super.dispose();
   }
 
@@ -247,8 +254,9 @@ class _JwDataHomePageState extends State<JwDataHomePage> {
             syncing: _sync.state.isActive,
             resettingMarkers: _resettingMarkers,
             onSync: _sync.state.isActive ? null : () => unawaited(_startSync()),
-            onResetMarkers:
-                _sync.state.isActive ? null : () => unawaited(_resetSyncMarkers()),
+            onResetMarkers: _sync.state.isActive
+                ? null
+                : () => unawaited(_resetSyncMarkers()),
           ),
           if (_cardError != null) ...[
             const SizedBox(height: 8),
@@ -293,9 +301,8 @@ class _DataHomeChartCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final today = jwDataDayStart(DateTime.now());
     final fallback = jwDataHomePresentationFallback(item.id);
-    final presentation = deviceUnsupported
-        ? fallback
-        : (data?.presentation ?? fallback);
+    final presentation =
+        deviceUnsupported ? fallback : (data?.presentation ?? fallback);
     final chartBundle = deviceUnsupported
         ? JwAppDayChartBundle.build(id: item.id, rows: const [], day: today)
         : (data?.bundle ??

@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import 'jw_settings_app_theme.dart';
 import 'package:jw_watch_sdk/jw_watch_sdk.dart';
 
 import 'jw_data_home_page.dart';
@@ -12,7 +14,9 @@ import 'jw_settings_home_page.dart';
 
 /// JW SDK Demo shell: 首页 / 数据 / 设置；数据与设置 Tab 需会话 `ready`。
 class JWWatchLabHome extends StatefulWidget {
-  const JWWatchLabHome({super.key});
+  const JWWatchLabHome({super.key, this.watch});
+
+  final JWWatch? watch;
 
   @override
   State<JWWatchLabHome> createState() => _JWWatchLabHomeState();
@@ -24,18 +28,45 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
   static const _tabSettings = 2;
 
   var _selectedIndex = _tabHome;
-  late final JWDemoController _controller;
+  late JWDemoController _controller;
+  bool _simulation = false;
+  bool _switchingTransport = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = JWDemoController();
+    _controller = JWDemoController(watch: widget.watch);
+    _simulation = !_controller.usesBleScan;
   }
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _switchTransport() async {
+    if (_switchingTransport) return;
+    setState(() => _switchingTransport = true);
+    try {
+      await _controller.shutdown();
+      if (!mounted) return;
+      _controller.dispose();
+      setState(() {
+        _simulation = !_simulation;
+        _controller = JWDemoController(
+            watch: _simulation ? JWWatch.simulation() : JWWatch());
+        _selectedIndex = _tabHome;
+      });
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeJWDemoError(error))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _switchingTransport = false);
+    }
   }
 
   bool get _sessionReady => _controller.state.isReady;
@@ -110,8 +141,16 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
       builder: (context, _) {
         return Scaffold(
           appBar: AppBar(
-            title: const Text('JW SDK Demo'),
+            title: Text(_simulation ? 'JW Demo · 双机模拟' : 'JW SDK Demo'),
             actions: [
+              if (widget.watch == null)
+                TextButton(
+                  key: const Key('jw.demo.transport'),
+                  onPressed: _switchingTransport
+                      ? null
+                      : () => unawaited(_switchTransport()),
+                  child: Text(_simulation ? '切换 BLE' : '双机模拟'),
+                ),
               IconButton(
                 key: const Key('jw.demo.developer_tools'),
                 onPressed: _showDeveloperTools,
@@ -120,12 +159,18 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
               ),
             ],
           ),
-          body: KeyedSubtree(
-            key: ValueKey<String>(
-              '$_selectedIndex-${_tabsUnlocked ? 'ready' : 'locked'}',
-            ),
-            child: _buildTabBody(),
-          ),
+          body: Column(children: [
+            if (_controller.attachedSessions.isNotEmpty)
+              _SessionSelector(
+                  controller: _controller, onAdd: _openConnectionPage),
+            Expanded(
+                child: KeyedSubtree(
+              key: ValueKey<String>(
+                '$_selectedIndex-${identityHashCode(_controller)}-${identityHashCode(_controller.session)}-${_tabsUnlocked ? 'ready' : 'locked'}',
+              ),
+              child: _buildTabBody(),
+            )),
+          ]),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _selectedIndex,
             onDestinationSelected: _onTabSelected,
@@ -140,15 +185,11 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
                 key: const Key('jw.demo.tab.data'),
                 icon: Icon(
                   Icons.insights_outlined,
-                  color: _tabsUnlocked
-                      ? null
-                      : Theme.of(context).disabledColor,
+                  color: _tabsUnlocked ? null : Theme.of(context).disabledColor,
                 ),
                 selectedIcon: Icon(
                   Icons.insights,
-                  color: _tabsUnlocked
-                      ? null
-                      : Theme.of(context).disabledColor,
+                  color: _tabsUnlocked ? null : Theme.of(context).disabledColor,
                 ),
                 label: '数据',
                 enabled: _tabsUnlocked,
@@ -157,15 +198,11 @@ class _JWWatchLabHomeState extends State<JWWatchLabHome> {
                 key: const Key('jw.demo.tab.settings'),
                 icon: Icon(
                   Icons.tune_outlined,
-                  color: _tabsUnlocked
-                      ? null
-                      : Theme.of(context).disabledColor,
+                  color: _tabsUnlocked ? null : Theme.of(context).disabledColor,
                 ),
                 selectedIcon: Icon(
                   Icons.tune,
-                  color: _tabsUnlocked
-                      ? null
-                      : Theme.of(context).disabledColor,
+                  color: _tabsUnlocked ? null : Theme.of(context).disabledColor,
                 ),
                 label: '设置',
                 enabled: _tabsUnlocked,
@@ -262,6 +299,13 @@ class _HomePageState extends State<_HomePage> {
                 ),
           ),
           const SizedBox(height: 20),
+          if (controller.isInitialized)
+            OutlinedButton.icon(
+              key: const Key('jw.demo.add_device'),
+              onPressed: widget.onConnect,
+              icon: const Icon(Icons.add),
+              label: const Text('扫描并添加设备（保留已有连接）'),
+            ),
           Text('首次接入', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           _GuideTile(
@@ -287,13 +331,11 @@ class _HomePageState extends State<_HomePage> {
             keyName: 'jw.demo.guide.connect',
             showTrailingAction:
                 !controller.isInitialized || controller.state.isConnected,
-            actionLabel: controller.state.isConnected
-                ? '已连接'
-                : '等待',
+            actionLabel: controller.state.isConnected ? '已连接' : '等待',
             onAction: null,
             completed: controller.state.isConnected,
             code: '''await watch.startScan();
-final session = watch.createSession(device.deviceMac);
+final session = await watch.openSession(device.deviceMac);
 await session.connect();''',
             detailPanel: controller.isInitialized
                 ? _ConnectDeviceStepPanel(
@@ -493,6 +535,18 @@ class _GuideTile extends StatelessWidget {
   final bool loading;
   final bool showTrailingAction;
 
+  Future<void> _run(BuildContext context) async {
+    try {
+      await onAction!();
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeJWDemoError(error))),
+        );
+      }
+    }
+  }
+
   static ButtonStyle _compactFilledStyle(BuildContext context) =>
       FilledButton.styleFrom(
         minimumSize: const Size(72, 40),
@@ -515,13 +569,13 @@ class _GuideTile extends StatelessWidget {
         ? FilledButton(
             key: Key(keyName),
             style: _compactFilledStyle(context),
-            onPressed: onAction == null ? null : () => unawaited(onAction!()),
+            onPressed: onAction == null ? null : () => unawaited(_run(context)),
             child: Text(actionLabel),
           )
         : OutlinedButton(
             key: Key(keyName),
             style: _compactOutlinedStyle(context),
-            onPressed: onAction == null ? null : () => unawaited(onAction!()),
+            onPressed: onAction == null ? null : () => unawaited(_run(context)),
             child: Text(actionLabel),
           );
     return Card(
@@ -764,16 +818,7 @@ class _ConnectionPageState extends State<_ConnectionPage> {
               SliverToBoxAdapter(
                 child: _ConnectionScanHeader(controller: controller),
               ),
-              if (controller.state.isConnected)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-                    child: Text(
-                      '已连接 ${controller.state.device?.name ?? 'JW 设备'}。',
-                    ),
-                  ),
-                )
-              else if (devices.isEmpty)
+              if (devices.isEmpty)
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
@@ -881,29 +926,16 @@ class _ConnectionScanHeader extends StatelessWidget {
             key: const Key('jw.demo.scan'),
             onPressed: !controller.isInitialized || controller.isConnecting
                 ? null
-                : controller.state.isConnected
-                    ? () => unawaited(controller.disconnect())
-                    : controller.isScanning
-                        ? () => unawaited(controller.stopScan())
-                        : () => unawaited(controller.startScan()),
-            icon: Icon(
-              controller.state.isConnected
-                  ? Icons.bluetooth_disabled
-                  : controller.isScanning
-                      ? Icons.stop
-                      : Icons.search,
-            ),
-            label: Text(
-              controller.state.isConnected
-                  ? '断开连接'
-                  : controller.isScanning
-                      ? '停止'
-                      : '扫描',
-            ),
+                : controller.isScanning
+                    ? () => unawaited(controller.stopScan())
+                    : () => unawaited(controller.startScan()),
+            icon: Icon(controller.isScanning ? Icons.stop : Icons.search),
+            label: Text(controller.isScanning ? '停止' : '扫描 / 刷新模拟设备'),
           ),
-          if (controller.state.isConnected) ...[
+          if (controller.attachedSessions.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text('已连接 ${controller.state.device?.name ?? 'JW 设备'}'),
+            Text(
+                '已有 ${controller.attachedSessions.where((e) => e.state.isConnected).length} 台连接；添加设备会保留其他连接。'),
           ],
           if (sheetError != null) ...[
             const SizedBox(height: 12),
@@ -968,4 +1000,163 @@ class _ScanDeviceTile extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SessionSelector extends StatelessWidget {
+  const _SessionSelector({required this.controller, required this.onAdd});
+  final JWDemoController controller;
+  final VoidCallback onAdd;
+
+  Future<void> _close(BuildContext context, String id) async {
+    try {
+      await controller.disconnectDevice(id);
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(describeJWDemoError(error))),
+        );
+      }
+    }
+  }
+
+  String _status(
+      JWAttachedSession entry, bool syncing, int received, int total) {
+    if (entry.closeError != null) return '关闭失败 · 请重试';
+    if (entry.isClosing) return '正在断开…';
+    if (syncing) return '同步中 $received/$total';
+    return switch (entry.state.phase) {
+      JWSessionPhase.ready => '已就绪',
+      JWSessionPhase.connecting => '连接中…',
+      JWSessionPhase.loggingIn => '登录中…',
+      JWSessionPhase.loginRejected => '等待绑定',
+      JWSessionPhase.connected => '已连接 · 待登录',
+      _ => '未连接',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          final width = ((constraints.maxWidth - 84) / 2).clamp(148.0, 220.0);
+          return Container(
+            height: 82,
+            color: JwSettingsAppTheme.background,
+            padding: const EdgeInsets.fromLTRB(16, 6, 8, 8),
+            child: Row(children: [
+              Expanded(
+                child: ListView.separated(
+                  key: const Key('jw.demo.sessions'),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: controller.attachedSessions.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final entry = controller.attachedSessions[index];
+                    final selected =
+                        controller.selectedDeviceId == entry.deviceId;
+                    final name = entry.state.device?.name;
+                    final suffix = entry.deviceId.length > 5
+                        ? entry.deviceId.substring(entry.deviceId.length - 5)
+                        : entry.deviceId;
+                    return SizedBox(
+                      width: width,
+                      child: ListenableBuilder(
+                        listenable: controller.syncFor(entry.session),
+                        builder: (context, _) {
+                          final sync = controller.syncFor(entry.session).state;
+                          final status = _status(entry, sync.isActive,
+                              sync.receivedWire, sync.totalWire);
+                          final color = entry.closeError != null
+                              ? JwSettingsAppTheme.positiveButton
+                              : selected
+                                  ? JwSettingsAppTheme.accent
+                                  : JwSettingsAppTheme.subtitle;
+                          return Material(
+                            color: selected
+                                ? const Color(0xFFF0F0FF)
+                                : JwSettingsAppTheme.card,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                  JwSettingsAppTheme.itemRadius),
+                              side: BorderSide(
+                                  color: selected
+                                      ? JwSettingsAppTheme.accent
+                                      : JwSettingsAppTheme.divider),
+                            ),
+                            child: ListTile(
+                              key: Key('jw.demo.session.${entry.deviceId}'),
+                              selected: selected,
+                              dense: true,
+                              minTileHeight: 68,
+                              minVerticalPadding: 8,
+                              contentPadding:
+                                  const EdgeInsets.only(left: 10, right: 0),
+                              horizontalTitleGap: 0,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(
+                                      JwSettingsAppTheme.itemRadius)),
+                              title: Text(
+                                name == null || name.isEmpty
+                                    ? '设备 · $suffix'
+                                    : name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    height: 1.3,
+                                    fontWeight: FontWeight.w600,
+                                    color: selected
+                                        ? JwSettingsAppTheme.accent
+                                        : JwSettingsAppTheme.title),
+                              ),
+                              subtitle: Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(status,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        height: 1.2,
+                                        color: color)),
+                              ),
+                              onTap: entry.isClosing || entry.session.isDisposed
+                                  ? null
+                                  : () =>
+                                      controller.selectDevice(entry.deviceId),
+                              trailing: IconButton(
+                                key: Key('jw.demo.close.${entry.deviceId}'),
+                                tooltip:
+                                    entry.closeError == null ? '断开此设备' : '重试关闭',
+                                onPressed: entry.isClosing
+                                    ? null
+                                    : () => unawaited(
+                                        _close(context, entry.deviceId)),
+                                constraints: const BoxConstraints.tightFor(
+                                    width: 40, height: 48),
+                                padding: EdgeInsets.zero,
+                                icon: Icon(
+                                    entry.closeError == null
+                                        ? Icons.close_rounded
+                                        : Icons.refresh_rounded,
+                                    size: 16,
+                                    color: JwSettingsAppTheme.subtitle),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: '添加设备',
+                onPressed: onAdd,
+                icon: const Icon(Icons.add_circle_outline_rounded,
+                    size: 22, color: JwSettingsAppTheme.accent),
+              ),
+            ]),
+          );
+        },
+      );
 }

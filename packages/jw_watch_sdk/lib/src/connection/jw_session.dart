@@ -32,12 +32,19 @@ import 'jw_protocol.dart';
 
 /// One owned connection/session. Reconnection creates a new instance.
 final class JWWatchSession {
-  JWWatchSession(this.connection, {required JWHistoryStore historyStore})
-      : _historyStore = historyStore,
+  JWWatchSession(
+    this.connection, {
+    required JWHistoryStore historyStore,
+    void Function()? onConnectRequested,
+  })  : _onConnectRequested = onConnectRequested,
+        _historyStore = historyStore,
         _link = JWLink(connection),
         _state = const JWSessionState();
 
   final WatchTransportConnection connection;
+  final void Function()? _onConnectRequested;
+  Future<void>? _disposing;
+  bool get isDisposed => _disposed;
   final JWHistoryStore _historyStore;
   final JWLink _link;
   final _states = StreamController<JWSessionState>.broadcast(sync: true);
@@ -144,7 +151,8 @@ final class JWWatchSession {
   /// [JWDeviceFunction.todayAdjust] when [JWSessionState.functionInfo] is present.
   Future<JWTodayActivitySummary> fetchTodayActivitySummary() async {
     _requireReadyForSettings();
-    _requireDeviceFunction(JWDeviceFunction.todayAdjust, 'today activity summary');
+    _requireDeviceFunction(
+        JWDeviceFunction.todayAdjust, 'today activity summary');
     final reply =
         await _link.request(JWProtocolCommands.queryTodayActivitySummary);
     return decodeJWTodayActivitySummary(reply.value);
@@ -171,7 +179,8 @@ final class JWWatchSession {
   /// timeout after a successful enqueue is treated as success.
   Future<void> clearDeviceData({required bool confirmed}) async {
     if (!confirmed) {
-      throw StateError('JW clearDeviceData requires explicit user confirmation');
+      throw StateError(
+          'JW clearDeviceData requires explicit user confirmation');
     }
     _requireReadyForSettings();
     if (_healthSync != null) {
@@ -189,7 +198,19 @@ final class JWWatchSession {
 
   /// Opens the JW byte channel. This does not log in, bind, or query device
   /// characteristics; applications can present those as explicit steps.
-  Future<void> connect() => _opening ??= _connect();
+  Future<void> connect() {
+    if (_disposed) {
+      return Future.error(
+          const JWException(JWErrorCode.disposed, 'Session disposed'));
+    }
+    if (_opening != null) return _opening!;
+    try {
+      _onConnectRequested?.call();
+      return _opening = _connect();
+    } catch (error, stack) {
+      return Future.error(error, stack);
+    }
+  }
 
   Future<void> _connect() async {
     _measureConfigCache.clear();
@@ -197,6 +218,7 @@ final class JWWatchSession {
         _state.copyWith(phase: JWSessionPhase.connecting, clearError: true));
     _linkFailures = _link.failures.listen((error) {
       if (!_disposed) {
+        _authenticatedUserId = null;
         _measureConfigCache.clear();
         _measureConfigIngest?.stop();
         _publish(
@@ -205,6 +227,10 @@ final class JWWatchSession {
     });
     try {
       await _link.open();
+      if (_disposed) {
+        throw const JWException(
+            JWErrorCode.disposed, 'Session closed during connect');
+      }
       _measureConfigIngest ??=
           JWMeasureConfigIngest(link: _link, cache: _measureConfigCache);
       _measureConfigIngest!.start();
@@ -349,15 +375,7 @@ final class JWWatchSession {
     _requireConnected();
     _publish(
         _state.copyWith(phase: JWSessionPhase.loggingIn, clearError: true));
-    final reply = await _link.request(JWProtocolCommands.login(identity.bytes));
-    if (!_isSuccess(reply)) {
-      _authenticatedUserId = null;
-      _publish(_state.copyWith(phase: JWSessionPhase.loginRejected));
-      return;
-    }
-    await _syncClockAfterAuthentication();
-    _authenticatedUserId = identity.value;
-    _publish(_state.copyWith(phase: JWSessionPhase.ready));
+    await _authenticate(identity, JWProtocolCommands.login(identity.bytes));
   }
 
   Future<void> bindFirstTime(String userId, {required bool confirmed}) async {
@@ -365,6 +383,7 @@ final class JWWatchSession {
     if (!confirmed) {
       throw StateError('First JW bind requires explicit user confirmation');
     }
+    _requireConnected();
     if (_state.phase != JWSessionPhase.loginRejected &&
         _state.phase != JWSessionPhase.connected &&
         _state.phase != JWSessionPhase.readOnly) {
@@ -372,15 +391,32 @@ final class JWWatchSession {
     }
     _publish(
         _state.copyWith(phase: JWSessionPhase.loggingIn, clearError: true));
-    final reply = await _link.request(JWProtocolCommands.bind(identity.bytes));
-    if (!_isSuccess(reply)) {
+    await _authenticate(identity, JWProtocolCommands.bind(identity.bytes));
+  }
+
+  Future<void> _authenticate(
+      JWIdentity identity, JWProtocolRequest request) async {
+    _authenticatedUserId = null;
+    try {
+      final reply = await _link.request(request);
+      if (!_isSuccess(reply)) {
+        _publish(_state.copyWith(phase: JWSessionPhase.loginRejected));
+        return;
+      }
+      await _syncClockAfterAuthentication();
+      _requireConnected();
+      _authenticatedUserId = identity.value;
+      _publish(_state.copyWith(phase: JWSessionPhase.ready));
+    } catch (error) {
       _authenticatedUserId = null;
-      _publish(_state.copyWith(phase: JWSessionPhase.loginRejected));
-      return;
+      // Command failure must not manufacture a disconnect, or leave the UI
+      // stuck at loggingIn. A real disconnect retains its terminal phase.
+      if (_link.isOpen) {
+        _publish(
+            _state.copyWith(phase: JWSessionPhase.connected, error: error));
+      }
+      rethrow;
     }
-    await _syncClockAfterAuthentication();
-    _authenticatedUserId = identity.value;
-    _publish(_state.copyWith(phase: JWSessionPhase.ready));
   }
 
   /// Removes this installation's binding after an explicit application-level
@@ -586,8 +622,8 @@ final class JWWatchSession {
     _requireDeviceFunction(JWDeviceFunction.addressBook, 'address book');
     final list = List<JWAddressBookEntry>.unmodifiable(entries);
     if (list.length > kJWMaxAddressBookEntries) {
-      throw ArgumentError.value(list.length, 'entries',
-          'must not exceed $kJWMaxAddressBookEntries');
+      throw ArgumentError.value(
+          list.length, 'entries', 'must not exceed $kJWMaxAddressBookEntries');
     }
     final count = list.length;
     if (count == 0) {
@@ -924,8 +960,7 @@ final class JWWatchSession {
       JWFeature.history:
           support(JWFeature.history, bit(34) || bit(36) || bit(37)),
       JWFeature.notifications: support(JWFeature.notifications, bit(40)),
-      JWFeature.controls: support(
-          JWFeature.controls,
+      JWFeature.controls: support(JWFeature.controls,
           bit(0) || bit(12) || bit(13) /* music, camera, findPhone */),
       JWFeature.sport: support(JWFeature.sport, bit(3) || bit(48)),
       JWFeature.advancedHealth: support(
@@ -999,8 +1034,13 @@ final class JWWatchSession {
     _states.add(next);
   }
 
-  Future<void> dispose() async {
-    if (_disposed) return;
+  Future<void> dispose() =>
+      _disposing ??= _dispose().catchError((Object error) {
+        _disposing = null;
+        throw error;
+      });
+
+  Future<void> _dispose() async {
     _disposed = true;
     _authenticatedUserId = null;
     _measureConfigIngest?.stop();
@@ -1014,7 +1054,12 @@ final class JWWatchSession {
     _control = null;
     await _linkFailures?.cancel();
     await _link.dispose();
+    // History completion includes draining its database writer.
+    try {
+      await _healthSync;
+    } catch (_) {}
     _state = _state.copyWith(phase: JWSessionPhase.disposed);
+    if (!_states.isClosed) _states.add(_state);
     await _states.close();
   }
 }

@@ -8,6 +8,18 @@ import 'jw_history_sync_state.dart';
 /// Drives [JWWatchSession.syncHealthData] and mirrors listener callbacks into UI state.
 final class JwHistorySyncRunController extends ChangeNotifier
     implements JWHistorySyncListener {
+  bool _disposed = false;
+  String? _deviceId;
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
   JwHistorySyncRunState _state = const JwHistorySyncRunState.idle();
   Future<void>? _active;
   bool _wireCompleteLogged = false;
@@ -16,9 +28,11 @@ final class JwHistorySyncRunController extends ChangeNotifier
   JwHistorySyncRunState get state => _state;
 
   Future<void> start(JWWatchSession session) {
+    if (_disposed) return Future.error(StateError('Sync controller disposed'));
     if (_active != null) {
       return Future.error(StateError('JW health sync is already active'));
     }
+    _deviceId = session.connection.target.deviceId;
     final startedAt = DateTime.now();
     _wireCompleteLogged = false;
     _lastProgressLogWire = -1;
@@ -28,19 +42,27 @@ final class JwHistorySyncRunController extends ChangeNotifier
       totalWire: 0,
       startedAt: startedAt,
     );
-    notifyListeners();
+    _notify();
     _log('已发起历史同步，等待设备计划…');
-    final run = session.syncHealthData(this, onHistoryFrame: _logRawFrame);
+    final run = Future<void>.sync(
+        () => session.syncHealthData(this, onHistoryFrame: _logRawFrame));
     _active = run;
-    return run.whenComplete(() {
+    return run.catchError((Object error, StackTrace stack) {
+      // Preconditions can fail before SDK listener callbacks are installed.
+      if (_state.isActive) {
+        onSyncFailed(JWHistorySyncFailure(
+          code: error is JWException ? error.code : JWErrorCode.unavailable,
+          message: error.toString(),
+        ));
+      }
+      Error.throwWithStackTrace(error, stack);
+    }).whenComplete(() {
       _active = null;
     });
   }
 
   void _logRawFrame(JWHistorySyncFrame frame) {
-    final preview = frame.value.isEmpty
-        ? '(empty)'
-        : _hexPreview(frame.value);
+    final preview = frame.value.isEmpty ? '(empty)' : _hexPreview(frame.value);
     _log(
       'RX 0x05 key 0x${frame.key.toRadixString(16)} '
       'len ${frame.value.length} $preview',
@@ -61,21 +83,23 @@ final class JwHistorySyncRunController extends ChangeNotifier
   void reset() {
     if (_active != null) return;
     _state = const JwHistorySyncRunState.idle();
-    notifyListeners();
+    _notify();
   }
 
   Future<void> resetDeviceSyncMarkers(JWWatchSession session) async {
     if (_active != null) {
       throw StateError('JW health sync is already active');
     }
+    _deviceId = session.connection.target.deviceId;
     _log('正在重置设备同步标记…');
-    notifyListeners();
+    _notify();
     await session.resetHistorySyncMarkers();
     _log('已发送重置同步标记');
-    notifyListeners();
+    _notify();
   }
 
-  void _log(String message) => JwDemoLog.sync(message);
+  void _log(String message) =>
+      JwDemoLog.sync('device=${_deviceId ?? "?"} $message');
 
   @override
   void onSyncStart(JWHistorySyncPlan plan) {
@@ -96,7 +120,7 @@ final class JwHistorySyncRunController extends ChangeNotifier
     if (plan.totalWireRecords == 0) {
       _log('  · 设备未声明待传条目（可能无新数据）');
     }
-    notifyListeners();
+    _notify();
   }
 
   @override
@@ -122,14 +146,15 @@ final class JwHistorySyncRunController extends ChangeNotifier
         _log('蓝牙传输完成，正在写入本地数据库…');
       }
     }
-    notifyListeners();
+    _notify();
   }
 
   @override
   void onSyncFinished() {
     final finishedAt = DateTime.now();
     final parsed = jwDemoParsedRowTotal(_state.receivedRowsByCategory);
-    final tempParsed = jwDemoTemperatureParsedCount(_state.receivedRowsByCategory);
+    final tempParsed =
+        jwDemoTemperatureParsedCount(_state.receivedRowsByCategory);
     _state = _state.copyWith(
       phase: JwHistorySyncPhase.success,
       finishedAt: finishedAt,
@@ -140,7 +165,7 @@ final class JwHistorySyncRunController extends ChangeNotifier
         : '同步结束：传输 ${_state.receivedWire}/${_state.totalWire}，'
             '解析 $parsed 条健康记录';
     _log(endLog);
-    notifyListeners();
+    _notify();
   }
 
   @override
@@ -152,7 +177,7 @@ final class JwHistorySyncRunController extends ChangeNotifier
       finishedAt: finishedAt,
     );
     _log('同步失败：${describeJwHistorySyncFailure(failure)}');
-    notifyListeners();
+    _notify();
   }
 
   @override
@@ -194,14 +219,14 @@ final class JwHistorySyncRunController extends ChangeNotifier
   void _count(JWHistorySyncCategory category, int added) {
     if (added <= 0) return;
     if (!jwHistorySyncCategoryVisibleInDemo(category)) return;
-    final rows = Map<JWHistorySyncCategory, int>.from(
-        _state.receivedRowsByCategory);
+    final rows =
+        Map<JWHistorySyncCategory, int>.from(_state.receivedRowsByCategory);
     final next = (rows[category] ?? 0) + added;
     rows[category] = next;
     _state = _state.copyWith(receivedRowsByCategory: rows);
     if (next <= 50 || next % 200 == 0) {
       _log('收到 ${jwHistorySyncCategoryLabel(category)} $added 条（累计 $next）');
     }
-    notifyListeners();
+    _notify();
   }
 }

@@ -253,7 +253,11 @@ class WatchFrameChannel {
                 seq: job.seq, requestId: job.requestId, traceId: job.traceId);
             _checkOpen();
             await _deadline(
-                connection.write(chunk),
+                Future<void>.sync(() => connection.write(chunk)).catchError(
+                  (Object error) => throw mapError(WatchFrameWriteException(
+                      error,
+                      isControl: job.isControl)),
+                ),
                 config.chunkWriteTimeout,
                 _error(
                     WatchFrameErrorKind.writeTimeout, 'chunk write timed out'));
@@ -265,12 +269,7 @@ class WatchFrameChannel {
           // signal. The transport's disconnected callback alone closes this
           // channel. Keeping the channel open also lets callers inspect and
           // retry without manufacturing a physical disconnect.
-          final failure = error is WatchFrameException ||
-                  identical(error, _failure)
-              ? error
-              : mapError(
-                  WatchFrameWriteException(error, isControl: job.isControl));
-          if (!job.done.isCompleted) job.done.completeError(failure, stack);
+          if (!job.done.isCompleted) job.done.completeError(error, stack);
         } finally {
           _writes.remove(job);
         }

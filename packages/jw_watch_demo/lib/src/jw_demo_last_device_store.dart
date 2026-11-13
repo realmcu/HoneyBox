@@ -7,14 +7,17 @@ import 'package:path_provider/path_provider.dart';
 /// Demo-only persistence for the last successfully connected JW watch.
 @immutable
 final class JwDemoLastDevice {
-  const JwDemoLastDevice({required this.name, required this.deviceMac});
+  const JwDemoLastDevice(
+      {required this.name, required this.deviceMac, this.isSimulated = false});
 
   final String name;
   final String deviceMac;
+  final bool isSimulated;
 
   Map<String, Object> toJson() => {
         'name': name,
         'deviceMac': deviceMac,
+        'isSimulated': isSimulated,
       };
 
   static JwDemoLastDevice? fromJson(Object? raw) {
@@ -27,6 +30,7 @@ final class JwDemoLastDevice {
     return JwDemoLastDevice(
       name: name.trim().isEmpty ? 'JW 设备' : name.trim(),
       deviceMac: trimmedMac,
+      isSimulated: raw['isSimulated'] == true,
     );
   }
 }

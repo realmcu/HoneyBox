@@ -45,7 +45,7 @@ await watch.dispose();
 | 规则 | 说明 |
 | --- | --- |
 | 单 Session | 独占一条连接；重连 **new Session**（同 JW） |
-| 多设备 | 多 Session 可共享同一 `WSWatch` / DB；同一设备标识同时仅一个活动 Session（规则同 JW） |
+| 多设备 | 多 Session 可共享同一 `WSWatch` / DB；同一设备标识同时仅一个活动 Session（规则同 JW）；**Session 登记与重复获取**见 [ws-watch-multi-device-session-hub.md](ws-watch-multi-device-session-hub.md)（Hub 里程碑） |
 | initialize | 未 initialize 时 scan/connect 抛 `StateError`（对齐 JW） |
 
 ---

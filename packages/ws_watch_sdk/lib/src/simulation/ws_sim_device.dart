@@ -54,7 +54,7 @@ WatchSimulationDeviceSession _attach(
           case WSSettingsCommand.command:
             _handleSettings(channel, state, message);
           case WSDataCommand.command:
-            unawaited(_handleData(channel, state, message));
+            _ignoreDetached(_handleData(channel, state, message));
           case WSMeasureCommand.command:
             _handleMeasure(channel, state, message);
           case WSControlCommand.command:
@@ -80,11 +80,12 @@ void _handleBind(
     case WSBindCommand.keyLoginRequest:
       final user = WSBindCommand.decodeUserIdWire(message.value);
       final result = state.boundUserId == user ? 0 : 1;
-      unawaited(channel.send(_bindReply(WSBindCommand.keyLoginReply, result)));
+      _ignoreDetached(
+          channel.send(_bindReply(WSBindCommand.keyLoginReply, result)));
     case WSBindCommand.keyBindRequest:
       final user = WSBindCommand.decodeUserIdWire(message.value);
       state.boundUserId = user;
-      unawaited(channel.send(_bindReply(WSBindCommand.keyBindReply, 0)));
+      _ignoreDetached(channel.send(_bindReply(WSBindCommand.keyBindReply, 0)));
     case WSBindCommand.keyUnbind:
       state.boundUserId = null;
   }
@@ -106,7 +107,8 @@ void _handleSettings(
       if (opcode == WSSettingsCommand.opcodeSet && message.value.length >= 2) {
         state.language = message.value[1];
       } else if (opcode == WSSettingsCommand.opcodeRead) {
-        unawaited(_sendSettingsRead(channel, message.key, Uint8List.fromList([state.language])));
+        _ignoreDetached(_sendSettingsRead(
+            channel, message.key, Uint8List.fromList([state.language])));
       }
     case WSSettingsCommand.keyTime:
       break;
@@ -138,7 +140,7 @@ void _handleSettings(
       if (opcode == WSSettingsCommand.opcodeSet && message.value.length >= 2) {
         state.temperatureUnitCelsius = message.value[1] == 0x00;
       } else if (opcode == WSSettingsCommand.opcodeRead) {
-        unawaited(_sendSettingsRead(
+        _ignoreDetached(_sendSettingsRead(
           channel,
           message.key,
           Uint8List.fromList([state.temperatureUnitCelsius ? 0x00 : 0x01]),
@@ -146,11 +148,11 @@ void _handleSettings(
       }
     case WSDeviceCommand.keyDeviceInfo:
       if (opcode == WSSettingsCommand.opcodeRead) {
-        unawaited(channel.send(_deviceInfoReply()));
+        _ignoreDetached(channel.send(_deviceInfoReply()));
       }
     case WSDeviceCommand.keyCapabilities:
       if (opcode == WSSettingsCommand.opcodeRead) {
-        unawaited(channel.send(_capabilitiesReply()));
+        _ignoreDetached(channel.send(_capabilitiesReply()));
       }
   }
 }
@@ -169,7 +171,7 @@ void _handleAutoMonitorSetting(
     );
   } else if (opcode == WSSettingsCommand.opcodeRead) {
     final body = state.autoMonitorBodies[key]!;
-    unawaited(_sendSettingsRead(channel, key, body));
+    _ignoreDetached(_sendSettingsRead(channel, key, body));
   }
 }
 
@@ -187,7 +189,7 @@ void _handleAlarmSetting(
       message.value.sublist(1, 1 + WSHealthMonitorCodec.alarmBodyLength),
     ));
   } else if (opcode == WSSettingsCommand.opcodeRead) {
-    unawaited(_sendSettingsRead(channel, message.key, getBody()));
+    _ignoreDetached(_sendSettingsRead(channel, message.key, getBody()));
   }
 }
 
@@ -210,7 +212,7 @@ void _handleMeasure(
   WSL2Message message,
 ) {
   if (message.key == WSMeasureCommand.keyQueryStatus) {
-    unawaited(channel.send(_spotStatusReply(state)));
+    _ignoreDetached(channel.send(_spotStatusReply(state)));
     return;
   }
 
@@ -219,13 +221,14 @@ void _handleMeasure(
 
   if (message.key == lane.start) {
     final busy = state.spotBusy && state.activeSpotLane != lane;
-    final result = busy ? WSMeasureCommand.resultBusy : WSMeasureCommand.resultStarted;
+    final result =
+        busy ? WSMeasureCommand.resultBusy : WSMeasureCommand.resultStarted;
     if (!busy) {
       state.activeSpotLane = lane;
       state.spotStartedAtUnix = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      unawaited(_runSpotSimulation(channel, state, lane));
+      _ignoreDetached(_runSpotSimulation(channel, state, lane));
     }
-    unawaited(channel.send(_measureMessage(
+    _ignoreDetached(channel.send(_measureMessage(
       lane.startReply,
       Uint8List.fromList([result]),
     )));
@@ -235,7 +238,7 @@ void _handleMeasure(
   if (message.key == lane.stop) {
     if (state.activeSpotLane == lane) {
       state.activeSpotLane = null;
-      unawaited(channel.send(_measureMessage(
+      _ignoreDetached(channel.send(_measureMessage(
         lane.result,
         Uint8List.fromList([WSMeasureCommand.resultBusy]),
       )));
@@ -251,10 +254,12 @@ Future<void> _runSpotSimulation(
   for (var i = 0; i < 3; i++) {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (state.activeSpotLane != lane) return;
-    await channel.send(_measureMessage(lane.realtime, _spotRealtimePayload(lane, i)));
+    await channel
+        .send(_measureMessage(lane.realtime, _spotRealtimePayload(lane, i)));
   }
   if (state.activeSpotLane != lane) return;
-  await channel.send(_measureMessage(lane.result, _spotResultPayload(lane, state)));
+  await channel
+      .send(_measureMessage(lane.result, _spotResultPayload(lane, state)));
   state.activeSpotLane = null;
 }
 
@@ -276,15 +281,13 @@ Uint8List _spotResultPayload(WSSpotMeasureLane lane, WsSimWatchState state) {
   final ts = ByteData(4)..setUint32(0, now);
   final stamp = ts.buffer.asUint8List();
   return switch (lane) {
-    WSSpotMeasureLanes.heartRate =>
-      Uint8List.fromList([0x00, ...stamp, 0x48]),
+    WSSpotMeasureLanes.heartRate => Uint8List.fromList([0x00, ...stamp, 0x48]),
     WSSpotMeasureLanes.bloodPressure =>
       Uint8List.fromList([0x00, ...stamp, 0x78, 0x50]),
     WSSpotMeasureLanes.bloodOxygen =>
       Uint8List.fromList([0x00, ...stamp, 0x62, 0x63, 0x60]),
     WSSpotMeasureLanes.hrv => Uint8List.fromList([0x00, ...stamp, 0x00, 0x34]),
-    WSSpotMeasureLanes.pressure =>
-      Uint8List.fromList([0x00, ...stamp, 0x3E]),
+    WSSpotMeasureLanes.pressure => Uint8List.fromList([0x00, ...stamp, 0x3E]),
     WSSpotMeasureLanes.temperature =>
       Uint8List.fromList([0x00, ...stamp, 0x0E, 0x44, 0x0C, 0xEE, 0x00, 0x03]),
     WSSpotMeasureLanes.bloodGlucose =>
@@ -306,7 +309,8 @@ Uint8List _spotStatusReply(WsSimWatchState state) {
   data.setUint8(1, lane.dataTypeCode);
   data.setUint8(2, 0x00);
   data.setUint32(3, state.spotStartedAtUnix);
-  return _measureMessage(WSMeasureCommand.keyStatusReply, data.buffer.asUint8List());
+  return _measureMessage(
+      WSMeasureCommand.keyStatusReply, data.buffer.asUint8List());
 }
 
 void _handleControl(
@@ -315,7 +319,7 @@ void _handleControl(
   WSL2Message message,
 ) {
   if (message.key == WSControlCommand.keyBatteryQuery) {
-    unawaited(channel.send(_controlMessage(
+    _ignoreDetached(channel.send(_controlMessage(
       WSControlCommand.keyBatteryReply,
       Uint8List.fromList([state.batteryPercent, state.batteryCharging]),
     )));
@@ -355,17 +359,18 @@ Future<void> _handleData(
   state.historyBusy = true;
   try {
     if (message.key == WSDataCommand.keySyncAll) {
-      await _pushFullSnapshot(channel);
+      await _pushFullSnapshot(channel, state);
     } else {
-      await _pushSingleType(channel, message.key);
+      await _pushSingleType(channel, state, message.key);
     }
   } finally {
     state.historyBusy = false;
   }
 }
 
-Future<void> _pushFullSnapshot(WatchFrameChannel channel) async {
-  final now = DateTime.now();
+Future<void> _pushFullSnapshot(
+    WatchFrameChannel channel, WsSimWatchState state) async {
+  final now = state.historyTimestamp;
   await channel.send(_dataMessage(
     WSDataCommand.keySyncStart,
     WsSimFixtures.syncStartMulti(),
@@ -382,7 +387,7 @@ Future<void> _pushFullSnapshot(WatchFrameChannel channel) async {
       ),
     (
       WSDataCommand.keyDataHeartRate,
-      WsSimFixtures.liveBytes(WsSimFixtures.dataHeartRate, now: now),
+      WsSimFixtures.liveBytes(state.heartRateDataFrame, now: now),
     ),
     (
       WSDataCommand.keyDataBloodPressure,
@@ -423,8 +428,9 @@ Future<void> _pushFullSnapshot(WatchFrameChannel channel) async {
   ));
 }
 
-Future<void> _pushSingleType(WatchFrameChannel channel, int syncKey) async {
-  final now = DateTime.now();
+Future<void> _pushSingleType(
+    WatchFrameChannel channel, WsSimWatchState state, int syncKey) async {
+  final now = state.historyTimestamp;
   const count = 2;
   await channel.send(_dataMessage(
     WSDataCommand.keySyncStart,
@@ -437,12 +443,13 @@ Future<void> _pushSingleType(WatchFrameChannel channel, int syncKey) async {
     WSDataCommand.keySyncSleep =>
       WsSimFixtures.liveBytes(WsSimFixtures.dataSleep, now: now),
     WSDataCommand.keySyncHeartRate =>
-      WsSimFixtures.liveBytes(WsSimFixtures.dataHeartRate, now: now),
+      WsSimFixtures.liveBytes(state.heartRateDataFrame, now: now),
     WSDataCommand.keySyncBloodPressure =>
       WsSimFixtures.liveBytes(WsSimFixtures.dataBloodPressure, now: now),
     WSDataCommand.keySyncBloodOxygen =>
       WsSimFixtures.liveBytes(WsSimFixtures.dataBloodOxygen, now: now),
-    WSDataCommand.keySyncHrv => WsSimFixtures.liveBytes(WsSimFixtures.dataHrv, now: now),
+    WSDataCommand.keySyncHrv =>
+      WsSimFixtures.liveBytes(WsSimFixtures.dataHrv, now: now),
     WSDataCommand.keySyncPressure =>
       WsSimFixtures.liveBytes(WsSimFixtures.dataPressure, now: now),
     WSDataCommand.keySyncTemperature =>
@@ -519,3 +526,8 @@ Uint8List _capabilitiesReply() => WSL2Message(
         ...List<int>.filled(8, 0),
       ]),
     ).encode();
+
+// Replies may still be queued when a simulated peer is detached.
+void _ignoreDetached(Future<void> work) {
+  work.ignore();
+}

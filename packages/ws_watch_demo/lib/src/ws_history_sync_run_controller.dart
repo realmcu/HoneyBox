@@ -10,6 +10,18 @@ import 'ws_history_sync_state.dart';
 /// Drives [WSWatchSession.syncHealthData] and mirrors listener callbacks into UI state.
 final class WsHistorySyncRunController extends ChangeNotifier
     implements WSHistorySyncListener {
+  bool _disposed = false;
+  String? _deviceId;
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
   WsHistorySyncRunState _state = const WsHistorySyncRunState.idle();
   Future<void>? _active;
   bool _wireCompleteLogged = false;
@@ -18,6 +30,8 @@ final class WsHistorySyncRunController extends ChangeNotifier
   WsHistorySyncRunState get state => _state;
 
   Future<void> start(WSWatchSession session) {
+    if (_disposed) return Future.error(StateError("Sync controller disposed"));
+    _deviceId = session.connection.target.deviceId;
     if (_active != null) {
       return Future.error(StateError('WS health sync is already active'));
     }
@@ -30,11 +44,18 @@ final class WsHistorySyncRunController extends ChangeNotifier
       totalWire: 0,
       startedAt: startedAt,
     );
-    notifyListeners();
+    _notify();
     _log('已发起历史同步，等待设备计划…');
-    final run = session.syncHealthData(this, onHistoryFrame: _logRawFrame);
+    final run = Future<void>.sync(
+        () => session.syncHealthData(this, onHistoryFrame: _logRawFrame));
     _active = run;
-    return run.whenComplete(() {
+    return run.catchError((Object error, StackTrace stack) {
+      if (_state.isActive)
+        onSyncFailed(WSHistorySyncFailure(
+            code: error is WSException ? error.code : WSErrorCode.unavailable,
+            message: error.toString()));
+      Error.throwWithStackTrace(error, stack);
+    }).whenComplete(() {
       _active = null;
     });
   }
@@ -42,7 +63,7 @@ final class WsHistorySyncRunController extends ChangeNotifier
   void reset() {
     if (_active != null) return;
     _state = const WsHistorySyncRunState.idle();
-    notifyListeners();
+    _notify();
   }
 
   Future<void> resetDeviceSyncMarkers(WSWatchSession session) async {
@@ -50,15 +71,13 @@ final class WsHistorySyncRunController extends ChangeNotifier
       throw StateError('WS health sync is already active');
     }
     _log('重置同步标记暂未接入 WS SDK（跳过）');
-    notifyListeners();
+    _notify();
   }
 
-  void _log(String message) => WsDemoLog.sync(message);
+  void _log(String message) => WsDemoLog.sync("device=$_deviceId $message");
 
   void _logRawFrame(WSHistorySyncFrame frame) {
-    final preview = frame.value.isEmpty
-        ? '(empty)'
-        : _hexPreview(frame.value);
+    final preview = frame.value.isEmpty ? '(empty)' : _hexPreview(frame.value);
     _log(
       'RX 0x05 key 0x${frame.key.toRadixString(16)} '
       'len ${frame.value.length} $preview',
@@ -95,7 +114,7 @@ final class WsHistorySyncRunController extends ChangeNotifier
     if (plan.totalWireRecords == 0) {
       _log('  · 设备未声明待传条目（可能无新数据）');
     }
-    notifyListeners();
+    _notify();
   }
 
   @override
@@ -121,20 +140,20 @@ final class WsHistorySyncRunController extends ChangeNotifier
         _log('蓝牙传输完成，正在写入本地数据库…');
       }
     }
-    notifyListeners();
+    _notify();
   }
 
   @override
   void onSyncFinished() {
     final finishedAt = DateTime.now();
-  _state = _state.copyWith(
+    _state = _state.copyWith(
       phase: WsHistorySyncPhase.success,
       finishedAt: finishedAt,
     );
     _log(
       '同步结束：传输 ${_state.receivedWire}/${_state.totalWire}',
     );
-    notifyListeners();
+    _notify();
   }
 
   @override
@@ -146,11 +165,6 @@ final class WsHistorySyncRunController extends ChangeNotifier
       finishedAt: finishedAt,
     );
     _log('同步失败：${describeWsHistorySyncFailure(failure)}');
-    notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
+    _notify();
   }
 }

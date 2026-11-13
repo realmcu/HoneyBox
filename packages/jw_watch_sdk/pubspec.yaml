@@ -16,6 +16,8 @@ dependencies:
     path: ../watch_frame_channel
   watch_transport:
     path: ../watch_transport
+  watch_transport_simulation:
+    path: ../watch_transport_simulation
   watch_transport_ble:
     path: ../watch_transport_ble
   path_provider: ^2.1.4

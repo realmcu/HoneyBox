@@ -35,6 +35,8 @@ final class WSHealthHistorySync {
   final void Function(WSHistorySyncFrame frame)? _onHistoryFrame;
 
   StreamSubscription<WSL2Message>? _sub;
+  StreamSubscription<WSException>? _failures;
+  Future<void>? _finishing;
   Completer<void>? _done;
   Timer? _idle;
   final _declared = <int, int>{};
@@ -59,6 +61,8 @@ final class WSHealthHistorySync {
       throw StateError('WS health sync is already active');
     }
     _done = Completer<void>();
+    _done!.future.ignore();
+    _failures = _link.failures.listen(_fail);
     _sub = _link.incoming.listen(_onMessage, onError: _fail);
     _armIdle();
     WSWatchDebugLog.apiIn(
@@ -69,7 +73,13 @@ final class WSHealthHistorySync {
       await _link.send(WSDataCommand.syncRequest(_syncKey));
       await _done!.future;
       WSWatchDebugLog.apiOut('WSHealthHistorySync.run', 'finished');
+    } catch (error, stack) {
+      _fail(error, stack);
+      Error.throwWithStackTrace(_operationError(error), stack);
     } finally {
+      try {
+        await _finishing;
+      } catch (_) {}
       await _cleanup();
     }
   }
@@ -87,7 +97,10 @@ final class WSHealthHistorySync {
       } else if (WSDataCommand.isDataKey(message.key)) {
         _readData(message);
       } else if (message.key == WSDataCommand.keySyncEnd) {
-        unawaited(_readEnd(message.value));
+        _finishing ??= _readEnd(message.value)
+            .catchError((Object error, StackTrace stack) {
+          _fail(error, stack);
+        });
       }
     } catch (error, stack) {
       _fail(error, stack);
@@ -199,6 +212,7 @@ final class WSHealthHistorySync {
           'sport=${_sports.length}',
     );
     await _link.send(WSDataCommand.syncConfirm());
+    if (_finished) return;
     _finished = true;
     _listener.onSyncFinished();
     _done?.complete();
@@ -261,19 +275,24 @@ final class WSHealthHistorySync {
     _done?.completeError(WSException(failure.code, failure.message));
   }
 
+  WSException _operationError(Object error) => error is WSException
+      ? error
+      : WSException(WSErrorCode.historySyncFailed, error.toString());
+
   void _fail(Object error, [StackTrace? stack]) {
     if (_finished) return;
     _finished = true;
     final failure = WSHistorySyncFailure(
-      code: WSErrorCode.historySyncFailed,
+      code: error is WSException ? error.code : WSErrorCode.historySyncFailed,
       message: error.toString(),
     );
     _listener.onSyncFailed(failure);
-    _done?.completeError(error, stack);
+    _done?.completeError(_operationError(error), stack);
   }
 
   Future<void> _cleanup() async {
     _idle?.cancel();
+    await _failures?.cancel();
     await _sub?.cancel();
     _sub = null;
     _done = null;

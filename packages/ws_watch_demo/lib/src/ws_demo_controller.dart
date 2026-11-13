@@ -10,6 +10,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'compat/ws_demo_compat.dart';
 import 'ws_demo_last_device_store.dart';
 import 'ws_demo_time.dart';
+import 'ws_history_sync_run_controller.dart';
+import 'ws_demo_log.dart';
 
 const _kDemoDayRange = WSTimeRange(
   startHour: 0,
@@ -63,7 +65,7 @@ class WSDemoController extends ChangeNotifier {
   WSDemoController({
     WSConfig config = const WSConfig.simulation(),
     WSWatch? watch,
-  })  : _config = config,
+  })  : _config = watch?.config ?? config,
         _watch = watch ?? WSWatch(config: config) {
     _attachWatchStreams(_watch);
   }
@@ -82,11 +84,38 @@ class WSDemoController extends ChangeNotifier {
   bool _uiNotifyScheduled = false;
 
   List<WSScanDevice> _devices = const [];
-  WSWatchSession? _session;
+  String? _selectedDeviceId;
+  String? get selectedDeviceId => _selectedDeviceId;
+  List<WSAttachedSession> get attachedSessions =>
+      _watch.attachedSessionsSnapshot;
+  WSWatchSession? get _session =>
+      _selectedDeviceId == null ? null : _watch.sessionOf(_selectedDeviceId!);
+  final _syncs = <WSWatchSession, WsHistorySyncRunController>{};
+  final _deviceErrors = <WSWatchSession, Object>{};
+  Object? get error => _deviceErrors[_session];
+  final _busy = <WSWatchSession, int>{};
+  final _logs = <String, List<String>>{};
+  WsHistorySyncRunController syncFor(WSWatchSession session) =>
+      _syncs.putIfAbsent(session, WsHistorySyncRunController.new);
+  void selectDevice(String id) {
+    final target = _watch.sessionOf(id);
+    if (target == null) throw StateError('Device session unavailable');
+    _selectedDeviceId = target.connection.target.deviceId;
+    _refreshBusy();
+    _notifyUi();
+  }
+
+  void _refreshBusy() {
+    if (!_disposed) sessionBusy.value = _busy[_session] ?? 0;
+  }
+
   String _userId = '123456';
-  WSSessionState _state = const WSSessionState();
+  WSSessionState get _state =>
+      _session?.state ??
+      const WSSessionState(phase: WSSessionPhase.disconnected);
   bool _disposed = false;
-  final _sessionLog = <String>[];
+  List<String> get _sessionLog =>
+      _logs.putIfAbsent(_selectedDeviceId ?? "", () => []);
 
   List<WSScanDevice> get devices => scanDevices.value;
   WSWatchSession? get session => _session;
@@ -115,6 +144,22 @@ class WSDemoController extends ChangeNotifier {
   bool get preferBindOverLogin => transportMode == WSTransportMode.ble;
 
   void _attachWatchStreams(WSWatch watch) {
+    _subscriptions.add(watch.attachedSessions.listen((entries) {
+      if (_disposed) return;
+      final live = watch.attachedSessionsSnapshot.map((e) => e.session).toSet();
+      for (final session in _syncs.keys.toList()) {
+        if (!live.contains(session)) _syncs.remove(session)?.dispose();
+      }
+      _functionInfos.removeWhere((s, _) => !live.contains(s));
+      _batteryPercents.removeWhere((s, _) => !live.contains(s));
+      _deviceErrors.removeWhere((s, _) => !live.contains(s));
+      _busy.removeWhere((s, _) => !live.contains(s));
+      for (final entry in entries) {
+        _recordState(entry.deviceId, entry.state);
+      }
+      _refreshBusy();
+      _notifyUi();
+    }));
     _subscriptions.add(watch.scanResults.listen((devices) {
       _devices = devices;
       _scheduleScanUiUpdate();
@@ -133,14 +178,15 @@ class WSDemoController extends ChangeNotifier {
     if (_disposed) return;
     final nextConfig = WSConfig.forTransportMode(mode);
     if (nextConfig.transportMode == _config.transportMode) return;
-    if (_state.isConnected || _connecting) {
+    if (attachedSessions.any((e) =>
+            e.state.isConnected ||
+            e.state.phase == WSSessionPhase.connecting) ||
+        _connecting) {
       throw StateError('请先断开当前设备，再切换传输方式。');
     }
     final wasInitialized = _watch.isInitialized;
-    await _session?.dispose();
-    _session = null;
-    _sessionLog.clear();
-    _state = const WSSessionState();
+    _selectedDeviceId = null;
+    _logs.clear();
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
@@ -161,10 +207,10 @@ class WSDemoController extends ChangeNotifier {
     if (stored == null) {
       _lastDevice = null;
     } else if (_watch.transportMode == WSTransportMode.simulation &&
-        stored.deviceMac != kWsWatchSimDeviceId) {
+        !stored.isSimulated) {
       _lastDevice = null;
     } else if (_watch.transportMode == WSTransportMode.ble &&
-        stored.deviceMac == kWsWatchSimDeviceId) {
+        stored.isSimulated) {
       _lastDevice = null;
     } else {
       _lastDevice = stored;
@@ -183,7 +229,7 @@ class WSDemoController extends ChangeNotifier {
       deviceMac: last.deviceMac,
       name: last.name,
       rssi: 0,
-      isSimulated: last.deviceMac == kWsWatchSimDeviceId,
+      isSimulated: last.isSimulated,
     ));
   }
 
@@ -191,9 +237,14 @@ class WSDemoController extends ChangeNotifier {
     final snapshot = WsDemoLastDevice(
       name: device.name.trim().isEmpty ? 'WS 设备' : device.name.trim(),
       deviceMac: device.deviceMac,
+      isSimulated: device.isSimulated,
     );
     _lastDevice = snapshot;
-    await WsDemoLastDeviceStore.write(snapshot);
+    try {
+      await WsDemoLastDeviceStore.write(snapshot);
+    } catch (error) {
+      WsDemoLog.info("保存最近设备失败: $error");
+    }
     _notifyUi();
   }
 
@@ -274,30 +325,19 @@ class WSDemoController extends ChangeNotifier {
 
   Future<bool> connect(WSScanDevice device) async {
     if (_connecting) return false;
-    if (_state.isConnected) return true;
-    if (!isInitialized) {
-      throw StateError('WS SDK must be initialized before connecting.');
-    }
+    if (!isInitialized) throw StateError('Initialize WS SDK first');
     _connecting = true;
     _connectingDevice = device;
-    clearScanResults();
-    _notifyUi();
-    await stopScan();
-    await _session?.dispose();
-    _sessionLog.clear();
-    _session = _watch.createSession(device.deviceMac);
-    _subscriptions.add(_session!.states.listen((state) {
-      _state = state;
-      _recordState(state);
-      _notifyUi();
-    }));
     _notifyUi();
     try {
-      await _session!.connect();
-      if (_state.isConnected) {
+      await stopScan();
+      final target = await _watch.openSession(device.deviceMac);
+      selectDevice(device.deviceMac);
+      await target.connect();
+      if (target.state.isConnected) {
         unawaited(_rememberConnectedDevice(device));
       }
-      return _state.isConnected;
+      return target.state.isConnected;
     } finally {
       _connecting = false;
       _connectingDevice = null;
@@ -317,10 +357,10 @@ class WSDemoController extends ChangeNotifier {
   Future<void> unbind({required bool confirmed}) =>
       _runSession((session) => session.unbind(confirmed: confirmed));
 
-  WSDeviceFunctionInfo? _functionInfo;
-  WSDeviceFunctionInfo? get functionInfo => _functionInfo;
-  int? _batteryPercent;
-  int? get batteryPercent => _batteryPercent;
+  final _functionInfos = <WSWatchSession, WSDeviceFunctionInfo?>{};
+  WSDeviceFunctionInfo? get functionInfo => _functionInfos[_session];
+  final _batteryPercents = <WSWatchSession, int?>{};
+  int? get batteryPercent => _batteryPercents[_session];
 
   bool get isHealthSyncActive => _session?.isHealthSyncActive ?? false;
 
@@ -328,14 +368,15 @@ class WSDemoController extends ChangeNotifier {
       _runSession((s) => s.syncHealthData(listener));
 
   Future<WSTodayActivitySummary?> fetchTodayActivitySummary() =>
-      _runSessionValue((s) async => wsDemoTodaySummaryFromSnapshot(await s.today.queryToday()));
+      _runSessionValue((s) async =>
+          wsDemoTodaySummaryFromSnapshot(await s.today.queryToday()));
 
   Future<void> readDeviceInfo() =>
       _runSession((session) => session.readDeviceInfo());
 
   Future<int?> readBattery() => _runSessionValue((s) async {
         final value = await s.control.queryBatteryPercent();
-        _batteryPercent = value;
+        _batteryPercents[s] = value;
         _notifyUi();
         return value;
       });
@@ -346,11 +387,11 @@ class WSDemoController extends ChangeNotifier {
         await session.readDeviceFeatures();
         final raw = session.state.capabilities?.raw;
         if (raw != null && raw.length >= 8) {
-          _functionInfo = WSDeviceFunctionInfo.fromWire(
+          _functionInfos[session] = WSDeviceFunctionInfo.fromWire(
             Uint8List.sublistView(raw, 0, 8),
           );
         } else {
-          _functionInfo = null;
+          _functionInfos[session] = null;
         }
       });
 
@@ -368,10 +409,12 @@ class WSDemoController extends ChangeNotifier {
     return WSVerifiedSetting(previous: previous, value: value);
   }
 
-  Future<WSVerifiedSetting<WSHourSystem>> setHourSystem(WSHourSystem value) async =>
+  Future<WSVerifiedSetting<WSHourSystem>> setHourSystem(
+          WSHourSystem value) async =>
       WSVerifiedSetting(previous: WSHourSystem.h24, value: value);
 
-  Future<WSVerifiedSetting<WSUnitSystem>> setUnitSystem(WSUnitSystem value) async =>
+  Future<WSVerifiedSetting<WSUnitSystem>> setUnitSystem(
+          WSUnitSystem value) async =>
       WSVerifiedSetting(previous: WSUnitSystem.metric, value: value);
 
   Future<WSHeatStressReminder> readHeatStressReminder() =>
@@ -391,7 +434,14 @@ class WSDemoController extends ChangeNotifier {
   Future<WSVerifiedSetting<WSHeatStressReminder>> setHeatStressReminder(
           WSHeatStressReminder value) async =>
       _runSessionValue((s) async {
-        final previous = await readHeatStressReminder();
+        final schedule = await s.measure.readHeatStressAutoMeasure();
+        final previous = WSHeatStressReminder(
+            enabled: schedule.enabled,
+            schedule: WSTimeRange(
+                startHour: schedule.startHour,
+                startMinute: schedule.startMinute,
+                endHour: schedule.endHour,
+                endMinute: schedule.endMinute));
         await s.measure.setHeatStressAutoMeasure(
           WSAutoMeasureSchedule(
             enabled: value.enabled,
@@ -417,7 +467,9 @@ class WSDemoController extends ChangeNotifier {
   Future<WSVerifiedSetting<WSHighHeartRateReminder>> setHighHeartRateReminder(
           WSHighHeartRateReminder value) async =>
       _runSessionValue((s) async {
-        final previous = await readHighHeartRateReminder();
+        final alarm = await s.settings.readHeartRateHighAlarm();
+        final previous = WSHighHeartRateReminder(
+            enabled: alarm.enabled, thresholdBpm: alarm.thresholdBpm);
         await s.settings.setHeartRateHighAlarm(
           WSHeartRateHighAlarm(
             enabled: value.enabled,
@@ -438,15 +490,15 @@ class WSDemoController extends ChangeNotifier {
         await s.settings.setSpO2LowAlarm(
           WSSpO2LowAlarm(
             enabled: enabled,
-            thresholdPercent: previous.thresholdPercent == 0
-                ? 90
-                : previous.thresholdPercent,
+            thresholdPercent:
+                previous.thresholdPercent == 0 ? 90 : previous.thresholdPercent,
           ),
         );
       }).then((_) => const WSSettingSubmission('lowSpO2'));
 
   Future<WSSettingSubmission> syncTime() => _runSessionValue((s) async {
-        await s.settings.setTimeUnix(DateTime.now().millisecondsSinceEpoch ~/ 1000);
+        await s.settings
+            .setTimeUnix(DateTime.now().millisecondsSinceEpoch ~/ 1000);
         return const WSSettingSubmission('time');
       });
 
@@ -617,9 +669,11 @@ class WSDemoController extends ChangeNotifier {
   Future<WSDoNotDisturb> readDoNotDisturb() async =>
       const WSDoNotDisturb(enabled: false, schedule: _kDemoDayRange);
 
-  Future<WSVerifiedSetting<WSDoNotDisturb>> setDoNotDisturb(WSDoNotDisturb value) async =>
+  Future<WSVerifiedSetting<WSDoNotDisturb>> setDoNotDisturb(
+          WSDoNotDisturb value) async =>
       WSVerifiedSetting(
-        previous: const WSDoNotDisturb(enabled: false, schedule: _kDemoDayRange),
+        previous:
+            const WSDoNotDisturb(enabled: false, schedule: _kDemoDayRange),
         value: value,
       );
 
@@ -656,11 +710,19 @@ class WSDemoController extends ChangeNotifier {
       WSSettingSubmission('alarms');
 
   Future<void> disconnect() async {
-    final session = _session;
-    _session = null;
-    _functionInfo = null;
-    _state = const WSSessionState(phase: WSSessionPhase.disconnected);
-    await session?.dispose();
+    final id = _selectedDeviceId;
+    if (id != null) await disconnectDevice(id);
+  }
+
+  Future<void> disconnectDevice(String id) async {
+    await _watch.closeSession(id);
+    if (_selectedDeviceId == id) {
+      _selectedDeviceId = attachedSessions
+          .where((e) => !e.isClosing && !e.session.isDisposed)
+          .firstOrNull
+          ?.deviceId;
+    }
+    _refreshBusy();
     _notifyUi();
   }
 
@@ -676,7 +738,7 @@ class WSDemoController extends ChangeNotifier {
 
   /// Whether scan can start without showing a permission dialog (Android).
   Future<bool> scanPermissionsGranted() async {
-    if (!Platform.isAndroid) return true;
+    if (!_watch.usesBleScan || !Platform.isAndroid) return true;
     if (await Permission.bluetoothScan.isGranted &&
         await Permission.bluetoothConnect.isGranted) {
       return true;
@@ -686,11 +748,7 @@ class WSDemoController extends ChangeNotifier {
 
   /// Called when the connection page opens: scan only if permissions are already granted.
   Future<void> autoStartScanOnConnectionPage() async {
-    if (_disposed ||
-        !isInitialized ||
-        _state.isConnected ||
-        _connecting ||
-        isScanning) {
+    if (_disposed || !isInitialized || _connecting || isScanning) {
       return;
     }
     if (!await scanPermissionsGranted()) return;
@@ -699,14 +757,19 @@ class WSDemoController extends ChangeNotifier {
 
   void rememberUserId(String value) => _userId = value.trim();
 
-  void _sessionWorkStarted() {
-    sessionBusy.value++;
+  void _sessionWorkStarted(WSWatchSession session) {
+    _busy[session] = (_busy[session] ?? 0) + 1;
+    _refreshBusy();
   }
 
-  void _sessionWorkEnded() {
-    if (sessionBusy.value > 0) {
-      sessionBusy.value--;
+  void _sessionWorkEnded(WSWatchSession session) {
+    final count = (_busy[session] ?? 1) - 1;
+    if (count <= 0) {
+      _busy.remove(session);
+    } else {
+      _busy[session] = count;
     }
+    _refreshBusy();
   }
 
   /// Mirrors [WSWatchSession] state and tracks [sessionBusy]; failures **rethrow**.
@@ -718,17 +781,20 @@ class WSDemoController extends ChangeNotifier {
     if (session == null) {
       throw StateError('请先连接 WS 设备');
     }
-    _sessionWorkStarted();
+    _deviceErrors.remove(session);
+    _sessionWorkStarted(session);
     try {
       await operation(session);
-      _state = session.state;
       if (notifyUi) _notifyUi();
     } catch (error) {
-      _state = session.state;
+      if (!_disposed &&
+          identical(
+              _watch.sessionOf(session.connection.target.deviceId), session))
+        _deviceErrors[session] = error;
       if (notifyUi) _notifyUi();
       rethrow;
     } finally {
-      _sessionWorkEnded();
+      _sessionWorkEnded(session);
     }
   }
 
@@ -741,22 +807,26 @@ class WSDemoController extends ChangeNotifier {
     if (session == null) {
       throw StateError('WS device must be connected first');
     }
-    _sessionWorkStarted();
+    _deviceErrors.remove(session);
+    _sessionWorkStarted(session);
     try {
       final result = await operation(session);
-      _state = session.state;
       if (notifyUi) _notifyUi();
       return result;
     } catch (error) {
-      _state = session.state;
+      if (!_disposed &&
+          identical(
+              _watch.sessionOf(session.connection.target.deviceId), session))
+        _deviceErrors[session] = error;
       if (notifyUi) _notifyUi();
       rethrow;
     } finally {
-      _sessionWorkEnded();
+      _sessionWorkEnded(session);
     }
   }
 
-  void _recordState(WSSessionState state) {
+  void _recordState(String deviceId, WSSessionState state) {
+    final log = _logs.putIfAbsent(deviceId, () => []);
     final message = switch (state.phase) {
       WSSessionPhase.connecting => '正在连接设备',
       WSSessionPhase.connected => '设备已连接',
@@ -767,13 +837,14 @@ class WSDemoController extends ChangeNotifier {
       WSSessionPhase.failed => '会话失败：${state.error}',
       _ => null,
     };
-    if (message == null ||
-        (_sessionLog.isNotEmpty && _sessionLog.last == message)) {
+    if (message == null || (log.isNotEmpty && log.last == message)) {
       return;
     }
-    _sessionLog.add(message);
-    if (_sessionLog.length > 12) _sessionLog.removeAt(0);
+    log.add(message);
+    if (log.length > 12) log.removeAt(0);
   }
+
+  Future<void> shutdown() => _watch.dispose();
 
   @override
   void dispose() {
@@ -781,8 +852,12 @@ class WSDemoController extends ChangeNotifier {
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());
     }
-    unawaited(_session?.dispose());
-    unawaited(_watch.dispose());
+    unawaited(_watch.dispose().catchError((Object error) {
+      WsDemoLog.info("WS cleanup failed: $error");
+    }));
+    for (final sync in _syncs.values) {
+      sync.dispose();
+    }
     scanDevices.dispose();
     scanActive.dispose();
     sessionBusy.dispose();

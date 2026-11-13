@@ -6,6 +6,8 @@ import '../wire/ws_measure_command.dart' show WSSpotMeasureLane;
 
 /// Cross-connection simulator device state (W5.2).
 final class WsSimWatchState {
+  /// Stable sample timestamps keep repeated pulls idempotent.
+  final DateTime historyTimestamp = DateTime.now();
   String? boundUserId;
   int language = 1;
   int phoneSystem = 2;

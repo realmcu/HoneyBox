@@ -41,12 +41,17 @@ abstract final class JWWatchDebugLog {
     return '$h:$m:$s.$ms';
   }
 
-  static void wireFrame(WatchFrameEvent event, {int? awaitingAckSeq}) {
+  static void wireFrame(WatchFrameEvent event,
+      {int? awaitingAckSeq, String? context}) {
     if (!enabled) return;
 
+    final prefix = context == null ? '' : '$context ';
     if (event.direction == WatchFrameDirection.tx &&
-        (event.kind == WatchFrameKind.data ||
-            event.kind == WatchFrameKind.retry)) {
+        event.kind == WatchFrameKind.data) {
+      return;
+    }
+    if (event.kind == WatchFrameKind.retry) {
+      _log('${prefix}WIRE tx retry seq=${event.seq ?? "?"}');
       return;
     }
 
@@ -54,7 +59,8 @@ abstract final class JWWatchDebugLog {
       if (event.direction != WatchFrameDirection.tx) return;
       final raw = Uint8List.fromList(event.raw);
       if (raw.isEmpty || raw[0] != 0xab) {
-        _log('WIRE tx seq=${event.seq ?? '?'} len=${raw.length} ${_hex(raw)}');
+        _log(
+            '${prefix}WIRE tx seq=${event.seq ?? '?'} len=${raw.length} ${_hex(raw)}');
         return;
       }
       if (_isAckFrame(raw)) return;
@@ -62,6 +68,7 @@ abstract final class JWWatchDebugLog {
         direction: 'tx',
         raw: raw,
         awaitingAckSeq: awaitingAckSeq,
+        context: context,
       );
       return;
     }
@@ -69,7 +76,8 @@ abstract final class JWWatchDebugLog {
     if (event.raw.isEmpty) return;
     final raw = Uint8List.fromList(event.raw);
     if (raw[0] != 0xab || raw.length < 8) {
-      _log('WIRE ${event.direction.name} seq=${event.seq ?? '?'} ${_hex(raw)}');
+      _log(
+          '${prefix}WIRE ${event.direction.name} seq=${event.seq ?? '?'} ${_hex(raw)}');
       return;
     }
 
@@ -77,6 +85,7 @@ abstract final class JWWatchDebugLog {
       direction: event.direction.name,
       raw: raw,
       awaitingAckSeq: awaitingAckSeq,
+      context: context,
     );
   }
 
@@ -84,12 +93,14 @@ abstract final class JWWatchDebugLog {
     required String direction,
     required Uint8List raw,
     int? awaitingAckSeq,
+    String? context,
   }) {
     final flags = raw[1];
     final payloadLen = (raw[2] << 8) | raw[3];
     final seq = (raw[6] << 8) | raw[7];
     final isAck = (flags & 0x10) != 0;
-    final buf = StringBuffer('WIRE $direction seq=$seq');
+    final buf = StringBuffer(
+        '${context == null ? "" : "$context "}WIRE $direction seq=$seq');
 
     if (isAck) {
       buf.write(' ack=${(flags & 0x20) != 0 ? 0 : 1}');
@@ -122,10 +133,11 @@ abstract final class JWWatchDebugLog {
     return (raw[1] & 0x10) != 0 && ((raw[2] << 8) | raw[3]) == 0;
   }
 
-  static void l2DecodeFailed(Uint8List l2Bytes, Object error, {int? l1Seq}) {
+  static void l2DecodeFailed(Uint8List l2Bytes, Object error,
+      {int? l1Seq, String? context}) {
     if (!enabled) return;
     _log(
-      'WIRE decode FAILED l1Seq=${l1Seq ?? '?'} l2=${_hex(l2Bytes)} error=$error',
+      '${context == null ? "" : "$context "}WIRE decode FAILED l1Seq=${l1Seq ?? '?'} l2=${_hex(l2Bytes)} error=$error',
     );
   }
 
@@ -133,10 +145,11 @@ abstract final class JWWatchDebugLog {
     required JWProtocolRequest request,
     required JWProtocolMessage reply,
     int? outboundSeq,
+    String? context,
   }) {
     if (!enabled) return;
     _log(
-      'API← JWLink.request matched outboundSeq=${outboundSeq ?? '?'} '
+      '${context == null ? "" : "$context "}API← JWLink.request matched outboundSeq=${outboundSeq ?? '?'} '
       'sent=${describeRequest(request)} '
       'reply=${describeMessage(reply)}',
     );
@@ -180,7 +193,8 @@ abstract final class JWWatchDebugLog {
   static String formatBloodOxygen(List<JWBloodOxygen> batch) {
     if (batch.isEmpty) return '(empty)';
     return batch
-        .map((o) => 'JWBloodOxygen(${o.value}%, time=${o.time.toIso8601String()})')
+        .map((o) =>
+            'JWBloodOxygen(${o.value}%, time=${o.time.toIso8601String()})')
         .join(', ');
   }
 

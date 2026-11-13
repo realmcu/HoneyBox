@@ -243,4 +243,5 @@ SimWatchDevice（设备端 HoneyProtocol 行为，W5.2 扩全）
 - 本文：**实施排期与范围**。
 - [ws-watch-sdk-design.md](ws-watch-sdk-design.md)：**协议与模块细节**（门面章节 W5.1 后需改 `WSWatch` 描述）。
 - [ws-watch-migration-plan.md](ws-watch-migration-plan.md)：**T1–T3 + JW T4 + WS W5** 总线图。
+- [ws-watch-multi-device-session-hub.md](ws-watch-multi-device-session-hub.md)：**多设备连接 + Session Hub（SDK 代管）** 现状、问题与改造分期。
 - **W5.0 产出**：[ws-watch-api-coverage.md](ws-watch-api-coverage.md)、[ws-watch-public-api-freeze.md](ws-watch-public-api-freeze.md)。

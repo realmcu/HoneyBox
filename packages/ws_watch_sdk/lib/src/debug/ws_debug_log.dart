@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:typed_data';
 
@@ -41,7 +42,10 @@ abstract final class WSWatchDebugLog {
   }
 
   static void _log(String message) {
-    developer.log('${_timestamp()} $message', name: logName);
+    final context = Zone.current[#wsLogContext];
+    developer.log(
+        '${_timestamp()} ${context == null ? "" : "$context "}$message',
+        name: logName);
   }
 
   static String _timestamp() {

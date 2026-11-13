@@ -26,3 +26,7 @@ export 'src/settings/jw_address_book_models.dart';
 export 'src/settings/jw_settings_models.dart';
 export 'src/storage/jw_history_store.dart';
 export 'src/today/jw_today_activity_models.dart';
+
+export 'src/connection/jw_attached_session.dart';
+export 'src/simulation/jw_sim_device.dart'
+    show JWSimWatchState, jwSimWatchDevice;

@@ -22,18 +22,23 @@ final class _PendingRequest {
 /// SDK's command serialization and prevents a late same-key response from
 /// completing a newer request.
 final class JWLink {
-  JWLink(this.connection)
+  JWLink(this.connection, {WatchFrameConfig? config})
       : _channel = WatchFrameChannel(
           WatchFramePort.fromConnection(connection),
           profile: WatchFrameProfile.jw,
-          config: const WatchFrameConfig(
-            ackTimeout: Duration(seconds: 3),
-            maxRetries: 2,
-            maxPayloadLength: 236,
-          ),
+          config: config ??
+              const WatchFrameConfig(
+                ackTimeout: Duration(seconds: 3),
+                maxRetries: 2,
+                maxPayloadLength: 236,
+              ),
           mapError: _mapFrameError,
         );
 
+  static int _nextSessionId = 0;
+  final int _sessionId = ++_nextSessionId;
+  String get _logContext =>
+      'device=${connection.target.deviceId} session=$_sessionId';
   final WatchTransportConnection connection;
   final WatchFrameChannel _channel;
   final _events = StreamController<JWProtocolMessage>.broadcast(sync: true);
@@ -45,6 +50,10 @@ final class JWLink {
   JWException? _failure;
   bool _open = false;
   bool _disposed = false;
+  Future<void>? _disposing;
+
+  /// Completes only when the physical channel ends or its owner closes it.
+  Future<Object> get terminated => _channel.terminated;
 
   Stream<JWProtocolMessage> get events => _events.stream;
   Stream<JWException> get failures => _failures.stream;
@@ -98,7 +107,7 @@ final class JWLink {
       });
       try {
         await _execute(request, expectResponse: false);
-        return await completer.future.timeout(timeout);
+        return await _untilTerminated(completer.future, timeout);
       } on TimeoutException {
         throw const JWException(JWErrorCode.businessReplyTimeout,
             'JW unsolicited settings reply timed out');
@@ -130,7 +139,7 @@ final class JWLink {
       });
       try {
         await _execute(trigger, expectResponse: false);
-        await done.future.timeout(timeout);
+        await _untilTerminated(done.future, timeout);
       } on TimeoutException {
         if (messages.isEmpty) {
           throw const JWException(
@@ -141,6 +150,27 @@ final class JWLink {
       }
       return messages;
     });
+  }
+
+  Future<T> _untilTerminated<T>(Future<T> work, Duration timeout) async {
+    if (!isOpen) {
+      throw _failure ?? const JWException(JWErrorCode.disposed, 'Link closed');
+    }
+    final interrupted = Completer<T>();
+    final subscription = failures.listen((error) {
+      if (!interrupted.isCompleted) interrupted.completeError(error);
+    });
+    final timer = Timer(timeout, () {
+      if (!interrupted.isCompleted) {
+        interrupted.completeError(TimeoutException('JW reply timed out'));
+      }
+    });
+    try {
+      return await Future.any([work, interrupted.future]);
+    } finally {
+      timer.cancel();
+      await subscription.cancel();
+    }
   }
 
   Future<T> _enqueue<T>(Future<T> Function() operation) {
@@ -163,12 +193,16 @@ final class JWLink {
 
   Future<JWProtocolMessage> _execute(JWProtocolRequest request,
       {bool expectResponse = true}) async {
-    final pending = _PendingRequest(request);
-    _pending = pending;
-    if (expectResponse) {
-      JWWatchDebugLog.apiIn(
-          'JWLink.request', JWWatchDebugLog.describeRequest(request));
+    if (!isOpen) {
+      throw _failure ?? const JWException(JWErrorCode.disposed, 'Link closed');
     }
+    final pending = _PendingRequest(request);
+    // Link loss can arrive while awaiting the ACK, before awaiting the reply.
+    // Attach an error handler now; awaiting response below still gets the error.
+    pending.response.future.ignore();
+    _pending = pending;
+    JWWatchDebugLog.apiIn('JWLink.${expectResponse ? 'request' : 'send'}',
+        '$_logContext ${JWWatchDebugLog.describeRequest(request)}');
     try {
       final encoded = encodeJWRequest(request);
       pending.send = _channel.startSend(encoded);
@@ -181,18 +215,13 @@ final class JWLink {
     } on TimeoutException {
       const error = JWException(
           JWErrorCode.businessReplyTimeout, 'JW business reply timed out');
-      if (expectResponse) {
-        JWWatchDebugLog.apiOut(
-          'JWLink.request',
-          'timeout ${JWWatchDebugLog.describeRequest(request)}',
-        );
-      }
+      JWWatchDebugLog.apiOut('JWLink.request',
+          '$_logContext timeout ${JWWatchDebugLog.describeRequest(request)}');
       throw error;
     } catch (error) {
       final mapped = _mapFrameError(error);
-      if (expectResponse) {
-        JWWatchDebugLog.apiOut('JWLink.request', 'failed $mapped');
-      }
+      JWWatchDebugLog.apiOut('JWLink.${expectResponse ? 'request' : 'send'}',
+          '$_logContext failed $mapped');
       throw mapped;
     } finally {
       if (identical(_pending, pending)) _pending = null;
@@ -203,6 +232,7 @@ final class JWLink {
     JWWatchDebugLog.wireFrame(
       event,
       awaitingAckSeq: _pending?.send?.sequence,
+      context: _logContext,
     );
   }
 
@@ -211,7 +241,8 @@ final class JWLink {
     try {
       messages = decodeJWMessages(payload.bytes);
     } on FormatException catch (error) {
-      JWWatchDebugLog.l2DecodeFailed(payload.bytes, error, l1Seq: payload.seq);
+      JWWatchDebugLog.l2DecodeFailed(payload.bytes, error,
+          l1Seq: payload.seq, context: _logContext);
       return;
     }
     for (final message in messages) {
@@ -225,6 +256,7 @@ final class JWLink {
           request: pending.request,
           reply: message,
           outboundSeq: pending.send?.sequence,
+          context: _logContext,
         );
         if (pending.send != null) _channel.confirmReceived(pending.send!);
         pending.response.complete(message);
@@ -245,12 +277,23 @@ final class JWLink {
     if (!_failures.isClosed) _failures.add(error);
   }
 
-  Future<void> dispose() async {
-    if (_disposed) return;
+  Future<void> dispose() =>
+      _disposing ??= _dispose().catchError((Object error) {
+        _disposing = null;
+        throw error;
+      });
+
+  Future<void> _dispose() async {
     _disposed = true;
     _fail(const JWException(
         JWErrorCode.transportDisconnected, 'JW session disposed'));
     await _wireSubscription?.cancel();
+    await _payloadSubscription?.cancel();
+    await _channel
+        .close(const JWException(JWErrorCode.disposed, 'Link closed'));
+    // Frame cleanup preserves its termination cause. Explicit owner cleanup
+    // must also surface transport cleanup errors and permit retrying them.
+    await connection.dispose();
     await _events.close();
     await _failures.close();
   }
