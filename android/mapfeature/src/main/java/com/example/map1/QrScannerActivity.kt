@@ -22,6 +22,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
+import com.example.map1.i18n.DashboardI18n
+import com.example.map1.i18n.LanguagePreference
+import com.example.map1.i18n.LocalAppStrings
 import com.example.map1.ui.theme.Map1Theme
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.client.android.Intents
@@ -35,47 +38,60 @@ class QrScannerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LanguagePreference.ensureLoaded(this)
         setContent {
             Map1Theme {
-                BackHandler { finish() }
-                Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextButton(onClick = { finish() }) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
-                            Text("返回")
+                DashboardI18n {
+                    val strings = LocalAppStrings.current
+                    BackHandler { finish() }
+                    Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(onClick = { finish() }) {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.ArrowBack,
+                                    contentDescription = strings.back,
+                                )
+                                Text(strings.back)
+                            }
+                            Text(
+                                text = strings.scannerPageTitle,
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
                         }
-                        Text(
-                            text = "扫描接收端二维码",
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(start = 8.dp),
+                        AndroidView(
+                            factory = { context ->
+                                DecoratedBarcodeView(context).also { view ->
+                                    barcodeView = view
+                                    view.barcodeView.decoderFactory =
+                                        DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE))
+                                    view.setStatusText(strings.scannerFrameHint)
+                                    view.decodeContinuous { result ->
+                                        if (!resultDelivered && result.text != null) {
+                                            resultDelivered = true
+                                            setResult(
+                                                Activity.RESULT_OK,
+                                                Intent()
+                                                    .putExtra(Intents.Scan.RESULT, result.text)
+                                                    .putExtra(
+                                                        Intents.Scan.RESULT_FORMAT,
+                                                        BarcodeFormat.QR_CODE.toString(),
+                                                    ),
+                                            )
+                                            finish()
+                                        }
+                                    }
+                                    view.resume()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().weight(1f),
                         )
                     }
-                    AndroidView(
-                        factory = { context ->
-                            DecoratedBarcodeView(context).also { view ->
-                                barcodeView = view
-                                view.barcodeView.decoderFactory =
-                                    DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE))
-                                view.setStatusText("将二维码放入取景框内")
-                                view.decodeContinuous { result ->
-                                    if (!resultDelivered && result.text != null) {
-                                        resultDelivered = true
-                                        setResult(
-                                            Activity.RESULT_OK,
-                                            Intent().putExtra(Intents.Scan.RESULT, result.text)
-                                                .putExtra(Intents.Scan.RESULT_FORMAT, BarcodeFormat.QR_CODE.toString()),
-                                        )
-                                        finish()
-                                    }
-                                }
-                                view.resume()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                    )
                 }
             }
         }

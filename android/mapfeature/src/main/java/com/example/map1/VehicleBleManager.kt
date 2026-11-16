@@ -48,7 +48,7 @@ object VehicleBleManager {
         data class Connected(val config: VehicleQrProtocol.BleConfig) : State
         data class NaviReady(val config: VehicleQrProtocol.BleConfig) : State
         data class Disconnected(val config: VehicleQrProtocol.BleConfig) : State
-        data class Error(val message: String) : State
+        data class Error(val error: BleError) : State
     }
 
     private val mutableState = MutableStateFlow<State>(State.Idle)
@@ -102,17 +102,17 @@ object VehicleBleManager {
             .getSystemService(BluetoothManager::class.java)
             ?.adapter
         if (adapter == null) {
-            mutableState.value = State.Error("此设备不支持蓝牙")
+            mutableState.value = State.Error(BleError.NoBluetoothAdapter)
             return
         }
         if (!adapter.isEnabled) {
-            mutableState.value = State.Error("蓝牙未开启，请开启后重试")
+            mutableState.value = State.Error(BleError.BluetoothOff)
             return
         }
         val device = try {
             adapter.getRemoteDevice(config.address)
         } catch (_: IllegalArgumentException) {
-            mutableState.value = State.Error("二维码中的蓝牙地址无效")
+            mutableState.value = State.Error(BleError.InvalidAddress)
             return
         }
         val currentGeneration = ++generation
@@ -132,7 +132,7 @@ object VehicleBleManager {
                             requestHighThroughput(gatt)
                             if (!gatt.discoverServices()) {
                                 Log.e(TAG, "discoverServices() rejected")
-                                failAndClose("已连接，但无法发现 GATT 服务，已断开")
+                                failAndClose(BleError.ServiceDiscoveryRejected)
                             }
                         }
                         newState == BluetoothProfile.STATE_DISCONNECTED -> {
@@ -142,7 +142,7 @@ object VehicleBleManager {
                             mutableState.value = if (status == BluetoothGatt.GATT_SUCCESS)
                                 State.Disconnected(config)
                             else
-                                State.Error("BLE 连接失败，GATT 状态：$status")
+                                State.Error(BleError.ConnectFailed(status))
                         }
                     }
                 }
@@ -152,7 +152,7 @@ object VehicleBleManager {
             override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     Log.e(TAG, "service discovery failed status=$status")
-                    failAndClose("无法读取仪表服务，已断开（GATT $status）")
+                    failAndClose(BleError.ServiceDiscoveryFailed(status))
                     return
                 }
                 synchronized(this@VehicleBleManager) {
@@ -162,7 +162,7 @@ object VehicleBleManager {
                         // Connected, but this is not a HoneyProtocol meter: keeping the
                         // link would leave the UI at "connected" with no way to project.
                         Log.w(TAG, "HMIS chars missing; dropping the link")
-                        failAndClose("该设备未提供 HMIS 导航服务（0xFFC1/0xFFC2），已断开")
+                        failAndClose(BleError.HmisServiceMissing)
                         return
                     }
                     Log.i(TAG, "Navi chars found (FFD1-FFD4); starting MTU + CCCD setup")
@@ -190,7 +190,7 @@ object VehicleBleManager {
                             mutableState.value = State.NaviReady(config)
                         } else {
                             Log.e(TAG, "CCCD enable failed; navi projection unavailable")
-                            failAndClose("无法启用 BLE 通知，仪表不可用，已断开")
+                            failAndClose(BleError.NotifyEnableFailed)
                         }
                     }
                 }
@@ -283,11 +283,11 @@ object VehicleBleManager {
             } else {
                 device.connectGatt(context.applicationContext, false, callback)
             }
-            if (gatt == null) mutableState.value = State.Error("无法发起 BLE 连接")
+            if (gatt == null) mutableState.value = State.Error(BleError.CannotStart)
         } catch (_: SecurityException) {
-            mutableState.value = State.Error("缺少附近设备权限，无法连接 BLE 仪表")
+            mutableState.value = State.Error(BleError.MissingPermission)
         } catch (_: RuntimeException) {
-            mutableState.value = State.Error("Android 无法发起 BLE 连接")
+            mutableState.value = State.Error(BleError.PlatformRejected)
         }
 
         if (gatt != null) startHandshakeWatchdog(currentGeneration)
@@ -299,7 +299,7 @@ object VehicleBleManager {
      * [connect] resets it to Idle.
      */
     @Synchronized
-    private fun failAndClose(message: String) {
+    private fun failAndClose(error: BleError) {
         generation++  // invalidate every callback still queued for this session
         handshakeJob?.cancel()
         handshakeJob = null
@@ -312,7 +312,7 @@ object VehicleBleManager {
             try { oldGatt.disconnect() } catch (_: RuntimeException) {}
             try { oldGatt.close() } catch (_: RuntimeException) {}
         }
-        mutableState.value = State.Error(message)
+        mutableState.value = State.Error(error)
     }
 
     /** Fails the connection when it does not reach [State.NaviReady] in time. */
@@ -325,9 +325,7 @@ object VehicleBleManager {
                 val state = mutableState.value
                 if (state is State.NaviReady || state is State.Error) return@launch
                 Log.w(TAG, "handshake timeout after ${HANDSHAKE_TIMEOUT_MS}ms")
-                failAndClose(
-                    "仪表未在 ${HANDSHAKE_TIMEOUT_MS / 1000} 秒内完成握手，已断开",
-                )
+                failAndClose(BleError.HandshakeTimeout((HANDSHAKE_TIMEOUT_MS / 1000).toInt()))
             }
         }
     }

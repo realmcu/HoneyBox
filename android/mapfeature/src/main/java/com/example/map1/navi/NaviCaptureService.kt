@@ -35,6 +35,8 @@ import com.amap.api.navi.enums.NaviType
 import com.amap.api.navi.enums.PathPlanningStrategy
 import com.amap.api.navi.model.AMapCalcRouteResult
 import com.amap.api.navi.model.NaviLatLng
+import com.example.map1.i18n.AppStrings
+import com.example.map1.i18n.appStrings
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -53,6 +55,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * DisplayManager VirtualDisplay → Presentation。
  */
 class NaviCaptureService : Service() {
+
+    /** Resolved per use so the notification follows the selected language. */
+    private val strings: AppStrings get() = appStrings(this)
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val compressExecutor = Executors.newSingleThreadExecutor()
@@ -152,7 +157,7 @@ class NaviCaptureService : Service() {
                 host = host,
                 port = port,
                 networkProvider = { com.example.map1.VehicleWifiManager.selectedNetwork },
-                onStatus = { msg -> Log.i(TAG, "tcp: $msg") },
+                onStatus = { status -> Log.i(TAG, "tcp: $status") },
                 onFps = { fps, seq, bytesPerSecond ->
                     NaviPerfStats.onSendThroughput(bytesPerSecond)
                 },
@@ -377,7 +382,7 @@ class NaviCaptureService : Service() {
             val nm = getSystemService(NotificationManager::class.java)
             val channel = NotificationChannel(
                 channelId,
-                "导航投屏",
+                strings.naviChannelName,
                 NotificationManager.IMPORTANCE_LOW,
             )
             nm.createNotificationChannel(channel)
@@ -391,8 +396,8 @@ class NaviCaptureService : Service() {
             Notification.Builder(this)
         }
         val notification: Notification = builder
-            .setContentTitle("导航投屏运行中")
-            .setContentText("正在将 ${jpgWidth}×$jpgHeight 导航画面发送到设备")
+            .setContentTitle(strings.naviNotificationTitle)
+            .setContentText(strings.naviNotificationText(jpgWidth, jpgHeight))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .build()
@@ -602,8 +607,8 @@ class NaviCaptureService : Service() {
         const val DEFAULT_JPG_HEIGHT = 370
         private const val MIN_DIMENSION = 160
         private const val MAX_DIMENSION = 1920
-        // BLE 投屏默认质量：45（可通过 EXTRA_QUALITY 覆盖）
-        const val DEFAULT_JPG_QUALITY = 45
+        // BLE 投屏默认质量：60（可通过 EXTRA_QUALITY 覆盖；设备端 0x03 也建议 60）
+        const val DEFAULT_JPG_QUALITY = 60
         const val EXTRA_QUALITY = "extra_quality"
         // UI 缩放默认值（语义：渲染倍率 = 值/160）。160 = 1.0 倍，直接渲染 400×480，
         // 无需缩放，帧率最高（优化 1）。值越大渲染画布越大、UI 越小但帧率越低。

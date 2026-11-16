@@ -25,8 +25,21 @@ import java.util.zip.CRC32
  * uninterrupted burst. Loss is detected by the device's DATA sequence check
  * (XFER_ABORT) or by the CRC32 in END_REQ, and costs exactly one frame.
  */
+/** Values carried by 0x05 / 0x2B. Sizes in pixels/bytes, limits only. */
+data class DeviceInfo(
+    val width: Int,
+    val height: Int,
+    val jpegMaxBytes: Int,
+    /** JPEG quality the device recommends for its area (10..100). */
+    val quality: Int,
+    val features: Int,
+    val chunkMax: Int,
+    /** Sampling rate the device asks for; 0 when the device did not request one. */
+    val requestedFps: Int,
+)
+
 class NaviBleFrameSender(
-    private val onStatus: (String) -> Unit = {},
+    private val onStatus: (CastStatus) -> Unit = {},
     private val onState: (State) -> Unit = {},
 ) {
     enum class State { IDLE, OPENING, SENDING, ERROR }
@@ -44,6 +57,18 @@ class NaviBleFrameSender(
         private const val KEY_ABORT = 0x07
 
         private const val FILE_TYPE_IMAGE = 0x01
+
+        // HoneyProtocol 3.5 data command: device information (projection limits)
+        private const val CMD_DATA = 0x05
+        private const val KEY_INFO_REQ = 0x0B
+        private const val KEY_INFO_RSP = 0x2B
+        private const val INFO_ID_AREA = 0x01
+        private const val INFO_ID_JPEG_MAX = 0x02
+        private const val INFO_ID_QUALITY = 0x03
+        private const val INFO_ID_FEATURES = 0x04
+        private const val INFO_ID_CHUNK_MAX = 0x05
+        private const val INFO_ID_FPS_REQ = 0x06
+        private const val INFO_TIMEOUT_MS = 1200L
 
         // L1 header bits (2.3.2)
         private const val L1_SYNC = 0xAB
@@ -72,6 +97,10 @@ class NaviBleFrameSender(
     }
 
     @Volatile var state = State.IDLE
+        private set
+
+    /** Limits reported by 0x05 / 0x2B; null until the device answers. */
+    @Volatile var deviceInfo: DeviceInfo? = null
         private set
 
     private val running = AtomicBoolean(false)
@@ -120,6 +149,12 @@ class NaviBleFrameSender(
     private var height = 480
     private var quality = 45
 
+    /** Device-side DATA chunk ceiling; overwritten by 0x2B when it arrives. */
+    private var chunkCeiling = 241
+
+    /** Completed by the GATT thread when the 0x2B answer arrives. */
+    private var infoDeferred: CompletableDeferred<DeviceInfo?>? = null
+
     // ═══════════════════════════════════════════════════════════════
     // Public API
     // ═══════════════════════════════════════════════════════════════
@@ -134,10 +169,10 @@ class NaviBleFrameSender(
         agreedChunk = 0
         lastNaviSeq = -1
 
-        onStatus("BLE 投屏初始化中…")
+        onStatus(CastStatus.Initializing)
 
         if (VehicleBleManager.attPayload < DATA_OVERHEAD + 1) {
-            onStatus("BLE MTU 过小，无法启动投屏")
+            onStatus(CastStatus.MtuTooSmall)
             state = State.ERROR
             onState(state)
             running.set(false)
@@ -146,8 +181,12 @@ class NaviBleFrameSender(
 
         state = State.SENDING
         onState(state)
-        onStatus("BLE 投屏已启动 (0x10 流式)")
-        senderJob = scope.launch { frameLoop() }
+        onStatus(CastStatus.Initializing)
+        senderJob = scope.launch {
+            queryDeviceInfo()
+            onStatus(CastStatus.Started)
+            frameLoop()
+        }
     }
 
     fun stop() {
@@ -159,7 +198,7 @@ class NaviBleFrameSender(
         }
         state = State.IDLE
         onState(state)
-        onStatus("BLE 投屏已停止")
+        onStatus(CastStatus.Stopped)
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -176,7 +215,7 @@ class NaviBleFrameSender(
             // Link gone: say so instead of spinning on write failures forever.
             when (val link = VehicleBleManager.state.value) {
                 is VehicleBleManager.State.Disconnected, is VehicleBleManager.State.Error -> {
-                    onStatus("设备已断开，投屏中断")
+                    onStatus(CastStatus.DeviceDisconnected)
                     running.set(false)
                     state = State.IDLE
                     onState(state)
@@ -189,7 +228,7 @@ class NaviBleFrameSender(
             // notify was lost. Count it so the failure surfaces like any other.
             if (endPending && System.currentTimeMillis() - endSentMs > END_RSP_TIMEOUT_MS) {
                 endPending = false
-                noteFailure("设备未回确认")
+                noteFailure(FrameFailure.AckMissing)
             }
 
             val retry = retryJpeg
@@ -221,7 +260,7 @@ class NaviBleFrameSender(
 
         return sendMutex.withLock {
             val attMax = VehicleBleManager.attPayload
-            val chunkMax = (attMax - DATA_OVERHEAD).coerceAtMost(2048)
+            val chunkMax = (attMax - DATA_OVERHEAD).coerceAtMost(chunkCeiling)
             if (chunkMax <= 0) return@withLock false
 
             // Record the frame up front so any failure path below (BEGIN/DATA/END
@@ -234,13 +273,13 @@ class NaviBleFrameSender(
             val beginValue = ByteArray(8)
             beginValue[0] = FILE_TYPE_IMAGE.toByte()
             putU32(beginValue, 1, total.toLong())
-            putU16(beginValue, 5, CHUNK_REQUEST.coerceAtMost(chunkMax))
+            putU16(beginValue, 5, chunkMax)
             beginValue[7] = 0 // no filename
 
             beginRejected = false
             if (!writeL1Data(buildL2(KEY_BEGIN_REQ, beginValue))) {
                 Log.w(TAG, "BEGIN write failed total=$total")
-                noteFailure("BEGIN 写入失败")
+                noteFailure(FrameFailure.BeginWriteFailed)
                 return@withLock false
             }
             // The chunk size only depends on the negotiated MTU, so it is learned
@@ -250,13 +289,13 @@ class NaviBleFrameSender(
                 val beginRsp = awaitRsp(KEY_BEGIN_RSP, BEGIN_TIMEOUT_MS)
                 if (beginRsp == null || beginRsp.size < 3) {
                     Log.w(TAG, "BEGIN_RSP timeout/missing")
-                    onStatus("设备无响应（BEGIN）")
+                    onStatus(CastStatus.DeviceNoResponse)
                     return@withLock false
                 }
                 val status = beginRsp[0].toInt() and 0xFF
                 if (status != 0) {
                     Log.w(TAG, "BEGIN_RSP rejected status=$status")
-                    onStatus("设备拒绝投屏 status=$status")
+                    onStatus(CastStatus.DeviceRejected(status))
                     return@withLock false
                 }
                 agreedChunk = (((beginRsp[1].toInt() and 0xFF) shl 8) or
@@ -274,14 +313,14 @@ class NaviBleFrameSender(
             while (off < total) {
                 if (beginRejected) {
                     Log.w(TAG, "BEGIN_RSP rejected mid-frame, dropping frame $lastNaviSeq")
-                    noteFailure("BEGIN 被拒绝")
+                    noteFailure(FrameFailure.BeginRejected)
                     clearRsp()
                     return@withLock false
                 }
                 if (!awaitWindowRoom()) {
                     if (abortReason >= 0) {
                         Log.w(TAG, "device ABORT reason=$abortReason at chunk=$seq")
-                        onStatus("设备中止传输 reason=$abortReason")
+                        onStatus(CastStatus.DeviceAborted(abortReason))
                         clearRsp()
                         return@withLock false
                     }
@@ -297,14 +336,14 @@ class NaviBleFrameSender(
                 val wantAck = (end == total)
                 if (!writeL1Data(buildDataFrame(seq, jpeg, off, end), requestAck = wantAck)) {
                     Log.w(TAG, "DATA write failed seq=$seq off=$off/$total")
-                    noteFailure("DATA 写入失败")
+                    noteFailure(FrameFailure.DataWriteFailed)
                     clearRsp()
                     sendAbort(0x01)
                     return@withLock false
                 }
                 if (abortReason >= 0) {
                     Log.w(TAG, "device ABORT reason=$abortReason at chunk=$seq")
-                    onStatus("设备中止传输 reason=$abortReason")
+                    onStatus(CastStatus.DeviceAborted(abortReason))
                     clearRsp()
                     return@withLock false
                 }
@@ -322,7 +361,7 @@ class NaviBleFrameSender(
             endSentMs = System.currentTimeMillis()
             if (!writeL1Data(buildL2(KEY_END_REQ, endValue))) {
                 Log.w(TAG, "END write failed")
-                noteFailure("END 写入失败")
+                noteFailure(FrameFailure.EndWriteFailed)
                 return@withLock false
             }
             // END_RSP is collected asynchronously (see parseL2): the next frame's
@@ -337,7 +376,7 @@ class NaviBleFrameSender(
      * Log.w, which looked exactly like "projection is running" while the device
      * stayed on the QR page) and schedule a single resend of the same frame.
      */
-    private fun noteFailure(why: String) {
+    private fun noteFailure(why: FrameFailure) {
         failStreak++
         Log.w(TAG, "frame not committed: $why (streak=$failStreak seq=$frameIdx)")
         val idx = frameIdx
@@ -346,7 +385,7 @@ class NaviBleFrameSender(
             retryJpeg = frameJpeg
         }
         if (failStreak == FAIL_VISIBLE_AFTER) {
-            onStatus("投屏异常：连续 $failStreak 帧未送达（$why），正在重试")
+            onStatus(CastStatus.FramesDropped(failStreak, why))
             if (state != State.ERROR) {
                 state = State.ERROR
                 onState(state)
@@ -358,7 +397,7 @@ class NaviBleFrameSender(
         if (failStreak >= FAIL_VISIBLE_AFTER && state == State.ERROR) {
             state = State.SENDING
             onState(state)
-            onStatus("投屏已恢复")
+            onStatus(CastStatus.Recovered)
         }
         failStreak = 0
     }
@@ -405,11 +444,21 @@ class NaviBleFrameSender(
 
     private fun parseL2(payload: ByteArray) {
         if (payload.size < 5) return
-        if ((payload[0].toInt() and 0xFF) != CMD_XFER) return
+        val cmd = payload[0].toInt() and 0xFF
         val key = payload[2].toInt() and 0xFF
         val vLen = ((payload[3].toInt() and 0xFF) shl 8) or (payload[4].toInt() and 0xFF)
         if (5 + vLen > payload.size) return
         val v = payload.copyOfRange(5, 5 + vLen)
+
+        if (cmd == CMD_DATA) {
+            if (key == KEY_INFO_RSP) {
+                val info = parseDeviceInfo(v)
+                if (info == null) Log.w(TAG, "← 0x2B malformed, keeping defaults")
+                infoDeferred?.complete(info)
+            }
+            return
+        }
+        if (cmd != CMD_XFER) return
 
         if (key == KEY_ABORT) {
             abortReason = if (v.isNotEmpty()) v[0].toInt() and 0xFF else 0
@@ -440,12 +489,91 @@ class NaviBleFrameSender(
                     } else {
                         val err = if (v.size > 1) v[1].toInt() and 0xFF else 0
                         Log.w(TAG, "END_RSP failed status=$status err=$err")
-                        noteFailure("设备未接受（status=$status/$err）")
+                        noteFailure(FrameFailure.Rejected(status, err))
                     }
                 }
             }
             else -> Log.d(TAG, "← 0x10 key=0x${Integer.toHexString(key)} ignored")
         }
+    }
+
+    /**
+     * 0x05 / 0x0B: ask the device for its projection area and limits. A device
+     * running older firmware simply does not answer; the defaults stay in place.
+     */
+    private suspend fun queryDeviceInfo(): DeviceInfo? {
+        deviceInfo?.let { return it }
+        val deferred = CompletableDeferred<DeviceInfo?>()
+        infoDeferred = deferred
+        if (!writeL1Data(buildL2(CMD_DATA, 1, KEY_INFO_REQ, ByteArray(0)))) {
+            infoDeferred = null
+            Log.w(TAG, "device info request write failed")
+            return null
+        }
+        val info = withTimeoutOrNull(INFO_TIMEOUT_MS) { deferred.await() }
+        infoDeferred = null
+        if (info == null) {
+            Log.i(TAG, "device info: no answer, keeping ${width}x$height @${fps}fps q$quality")
+            return null
+        }
+        deviceInfo = info
+        applyDeviceInfo(info)
+        return info
+    }
+
+    /**
+     * Asks the device for its projection limits without starting the stream, so
+     * the caller can size the capture surface before the first frame exists.
+     */
+    suspend fun probeDeviceInfo(): DeviceInfo? = queryDeviceInfo()
+
+    private fun applyDeviceInfo(i: DeviceInfo) {
+        if (i.width > 0 && i.height > 0 && (i.width != width || i.height != height)) {
+            Log.i(TAG, "device area ${i.width}x${i.height} replaces ${width}x$height")
+            width = i.width
+            height = i.height
+        }
+        // The device states the sampling rate it wants; there is no range any more,
+        // so accept it as long as it is a sane frame rate.
+        if (i.requestedFps in 1..60) {
+            fps = i.requestedFps
+            Log.i(TAG, "device requests ${i.requestedFps}fps")
+        }
+        // A single recommended quality replaced the old min/max pair.
+        if (i.quality in 10..100) quality = i.quality
+        if (i.chunkMax > 0) chunkCeiling = i.chunkMax
+        // 连接阶段也会调用一次（预握手），此时还没开始投屏，不必弹状态条。
+        if (running.get()) onStatus(CastStatus.DeviceArea(width, height))
+    }
+
+    /** TLV list: id(1) + length(2, BE) + value. Unknown ids are ignored. */
+    private fun parseDeviceInfo(v: ByteArray): DeviceInfo? {
+        var i = 0
+        var w = 0
+        var h = 0
+        var jpegMax = 0
+        var quality = 0
+        var feats = 0
+        var chunk = 241
+        var fpsReq = 0
+
+        while (i + 3 <= v.size) {
+            val id = v[i].toInt() and 0xFF
+            val len = u16(v, i + 1)
+            i += 3
+            if (len < 0 || i + len > v.size) break
+            when (id) {
+                INFO_ID_AREA -> if (len >= 4) { w = u16(v, i); h = u16(v, i + 2) }
+                INFO_ID_JPEG_MAX -> if (len >= 4) jpegMax = u32(v, i)
+                INFO_ID_QUALITY -> if (len >= 1) quality = v[i].toInt() and 0xFF
+                INFO_ID_FEATURES -> if (len >= 4) feats = u32(v, i)
+                INFO_ID_CHUNK_MAX -> if (len >= 2) chunk = u16(v, i)
+                INFO_ID_FPS_REQ -> if (len >= 1) fpsReq = v[i].toInt() and 0xFF
+            }
+            i += len
+        }
+        if (w <= 0 || h <= 0) return null
+        return DeviceInfo(w, h, jpegMax, quality, feats, chunk, fpsReq)
     }
 
     private fun clearRsp() {
@@ -516,10 +644,13 @@ class NaviBleFrameSender(
         return out
     }
 
-    private fun buildL2(key: Int, value: ByteArray): ByteArray {
+    private fun buildL2(key: Int, value: ByteArray): ByteArray =
+        buildL2(CMD_XFER, 0, key, value)
+
+    private fun buildL2(cmd: Int, version: Int, key: Int, value: ByteArray): ByteArray {
         val out = ByteArray(5 + value.size)
-        out[0] = CMD_XFER.toByte()
-        out[1] = 0
+        out[0] = cmd.toByte()
+        out[1] = ((version shl 4) and 0xF0).toByte()
         out[2] = key.toByte()
         putU16(out, 3, value.size)
         System.arraycopy(value, 0, out, 5, value.size)
@@ -549,6 +680,13 @@ class NaviBleFrameSender(
         }
         return crc and 0xFFFF
     }
+
+    private fun u16(buf: ByteArray, at: Int): Int =
+        ((buf[at].toInt() and 0xFF) shl 8) or (buf[at + 1].toInt() and 0xFF)
+
+    private fun u32(buf: ByteArray, at: Int): Int =
+        ((buf[at].toInt() and 0xFF) shl 24) or ((buf[at + 1].toInt() and 0xFF) shl 16) or
+            ((buf[at + 2].toInt() and 0xFF) shl 8) or (buf[at + 3].toInt() and 0xFF)
 
     private fun putU16(buf: ByteArray, at: Int, v: Int) {
         buf[at] = ((v shr 8) and 0xFF).toByte()

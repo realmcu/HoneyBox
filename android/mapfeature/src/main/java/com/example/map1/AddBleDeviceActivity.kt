@@ -68,6 +68,12 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.map1.i18n.AppStrings
+import com.example.map1.i18n.DashboardI18n
+import com.example.map1.i18n.LanguageMenuButton
+import com.example.map1.i18n.LanguagePreference
+import com.example.map1.i18n.LocalAppStrings
+import com.example.map1.i18n.appStrings
 import com.example.map1.ui.theme.Map1Theme
 
 /**
@@ -84,18 +90,21 @@ class AddBleDeviceActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LanguagePreference.ensureLoaded(this)
         scanner = VehicleDeviceScanner(applicationContext)
         enableEdgeToEdge()
         setContent {
             Map1Theme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    AddDeviceScreen(
-                        scanner = scanner,
-                        onClose = { finish() },
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .consumeWindowInsets(innerPadding),
-                    )
+                DashboardI18n {
+                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                        AddDeviceScreen(
+                            scanner = scanner,
+                            onClose = { finish() },
+                            modifier = Modifier
+                                .padding(innerPadding)
+                                .consumeWindowInsets(innerPadding),
+                        )
+                    }
                 }
             }
         }
@@ -178,7 +187,8 @@ internal class VehicleDeviceScanner(context: Context) {
             override fun onScanFailed(errorCode: Int) {
                 handler.post {
                     setScanning(false)
-                    onError?.invoke("扫描启动失败（错误码 $errorCode），请关闭蓝牙后重试。")
+                    // Resolved at event time so the message follows the current language.
+                    onError?.invoke(appStrings(appContext).scanStartFailed(errorCode))
                 }
             }
         }
@@ -283,6 +293,7 @@ private fun AddDeviceScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val strings = LocalAppStrings.current
     var devices by remember { mutableStateOf<List<AdvDevice>>(emptyList()) }
     var scanning by remember { mutableStateOf(false) }
     var showAll by remember { mutableStateOf(false) }
@@ -306,7 +317,7 @@ private fun AddDeviceScreen(
         error = null
         connecting = null
         if (!scanner.start(showAll)) {
-            error = "无法开始扫描。请确认蓝牙已开启，且已授予「附近的设备」权限。"
+            error = strings.cannotStartScan
         }
     }
 
@@ -332,7 +343,7 @@ private fun AddDeviceScreen(
             context.applicationContext,
             VehicleQrProtocol.BleConfig(
                 modelId = device.name.ifBlank {
-                    device.info?.modelName ?: "HMIS 仪表"
+                    device.info?.modelName ?: strings.fallbackHmisMeter
                 },
                 serialNumber = "",
                 address = device.address,
@@ -350,14 +361,14 @@ private fun AddDeviceScreen(
                     IconButton(onClick = onClose) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回",
+                            contentDescription = strings.back,
                         )
                     }
                 },
-                title = { Text("添加设备") },
+                title = { Text(strings.addDeviceTitle) },
                 actions = {
                     Text(
-                        text = "显示全部",
+                        text = strings.showAllLabel,
                         style = MaterialTheme.typography.labelMedium,
                     )
                     Switch(
@@ -369,8 +380,9 @@ private fun AddDeviceScreen(
                         onClick = { scanNonce++ },
                         enabled = connecting == null,
                     ) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "重新扫描")
+                        Icon(Icons.Outlined.Refresh, contentDescription = strings.rescan)
                     }
+                    LanguageMenuButton()
                 },
             )
         },
@@ -415,12 +427,9 @@ private fun AddDeviceScreen(
 @Composable
 private fun RuleHint(showAll: Boolean) {
     val colorScheme = MaterialTheme.colorScheme
+    val strings = LocalAppStrings.current
     Text(
-        text = if (showAll) {
-            "已显示全部广播设备。仅用于排查：不符合过滤规则的设备也会出现在列表里。"
-        } else {
-            "仅显示广播中含 HMIS 服务（484D4953…）或 Realtek 厂商 ID（0x005D）的设备。"
-        },
+        text = if (showAll) strings.ruleHintShowAll else strings.ruleHintFiltered,
         style = MaterialTheme.typography.bodySmall,
         color = if (showAll) colorScheme.error else colorScheme.outline,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -435,11 +444,12 @@ private fun DeviceRow(
     onClick: () -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val strings = LocalAppStrings.current
     // The name comes from SCAN_RSP, so it lands on the second callback. Until
     // then (and on passive scanners) fall back to the payload model + MAC tail.
     val hasName = device.name.isNotBlank()
-    val title = if (hasName) device.name else fallbackTitle(device)
-    val detail = payloadDetail(device, includeModel = hasName)
+    val title = if (hasName) device.name else fallbackTitle(device, strings)
+    val detail = payloadDetail(device, includeModel = hasName, strings = strings)
 
     Card(
         modifier = Modifier
@@ -509,38 +519,39 @@ private fun DeviceRow(
                     strokeWidth = 2.dp,
                 )
             } else {
-                Button(onClick = onClick) { Text("连接") }
+                Button(onClick = onClick) { Text(strings.connect) }
             }
         }
     }
 }
 
 /** "RTL8773G · 8A2F" — readable stand-in until SCAN_RSP delivers the real name. */
-private fun fallbackTitle(device: AdvDevice): String {
+private fun fallbackTitle(device: AdvDevice, strings: AppStrings): String {
     val model = device.info?.modelName
-        ?: if (device.match != null) "HMIS 仪表" else "未命名设备"
+        ?: if (device.match != null) strings.fallbackHmisMeter else strings.fallbackUnnamedDevice
     val tail = device.address.replace(":", "").takeLast(4).uppercase()
     return "$model · $tail"
 }
 
 /** Human-readable payload line; null when the device carries no decodable payload. */
-private fun payloadDetail(device: AdvDevice, includeModel: Boolean): String? {
+private fun payloadDetail(device: AdvDevice, includeModel: Boolean, strings: AppStrings): String? {
     val info = device.info ?: return null
     val parts = mutableListOf<String>()
     if (includeModel) info.modelName?.let { parts += it }
-    info.batteryPercent?.let { parts += "电量 $it%" }
-    if (info.charging) parts += "充电中"
-    if (info.naviReady) parts += "可投屏"
-    if (info.bound) parts += "已绑定"
+    info.batteryPercent?.let { parts += strings.batteryLabel(it) }
+    if (info.charging) parts += strings.charging
+    if (info.naviReady) parts += strings.castReadyLabel
+    if (info.bound) parts += strings.boundLabel
     return parts.joinToString(" · ").ifBlank { null }
 }
 
 @Composable
 private fun MatchBadge(match: VehicleAdvFilter.Match?) {
     val colorScheme = MaterialTheme.colorScheme
+    val strings = LocalAppStrings.current
     val color: Color = if (match != null) colorScheme.primary else colorScheme.outline
     Text(
-        text = match?.let { "匹配：${it.label}" } ?: "未匹配过滤规则",
+        text = match?.let { strings.matchedBadge(matchLabel(it, strings)) } ?: strings.unmatchedBadge,
         style = MaterialTheme.typography.labelSmall,
         color = color,
         modifier = Modifier
@@ -555,6 +566,7 @@ private fun MatchBadge(match: VehicleAdvFilter.Match?) {
 @Composable
 private fun EmptyState(scanning: Boolean, showAll: Boolean) {
     val colorScheme = MaterialTheme.colorScheme
+    val strings = LocalAppStrings.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -565,18 +577,18 @@ private fun EmptyState(scanning: Boolean, showAll: Boolean) {
         if (scanning) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(20.dp))
-            Text("正在搜索附近的仪表…", style = MaterialTheme.typography.bodyLarge)
+            Text(strings.scanningNearbyDevices, style = MaterialTheme.typography.bodyLarge)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = if (showAll) "可打开「显示全部」核对广播内容" else "请让仪表上电并靠近手机",
+                text = if (showAll) strings.scanningHintShowAll else strings.scanningHintDefault,
                 style = MaterialTheme.typography.bodySmall,
                 color = colorScheme.outline,
             )
         } else {
-            Text("未在扫描", style = MaterialTheme.typography.titleMedium)
+            Text(strings.notScanning, style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "点右上角刷新重新开始扫描",
+                text = strings.notScanningHint,
                 style = MaterialTheme.typography.bodySmall,
                 color = colorScheme.outline,
             )
@@ -600,6 +612,13 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(20.dp))
-        TextButton(onClick = onRetry) { Text("重新扫描") }
+        TextButton(onClick = onRetry) { Text(LocalAppStrings.current.rescan) }
     }
+}
+
+/** Localized label for the advertisement rule that admitted [match]. */
+private fun matchLabel(match: VehicleAdvFilter.Match, strings: AppStrings): String = when (match) {
+    VehicleAdvFilter.Match.HmisService -> strings.matchHmisServiceUuid
+    VehicleAdvFilter.Match.HmisServiceData -> strings.matchHmisServiceData
+    VehicleAdvFilter.Match.RealtekManufacturer -> strings.matchRealtekVendor
 }
