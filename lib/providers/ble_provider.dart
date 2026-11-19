@@ -106,6 +106,10 @@ class BleNotifier extends StateNotifier<BleState> {
     // 断开必然对应 provider 里是真实设备。据此过滤,避免误清假连接。
     _managerStateSub = _bleManager.onStateChanged.listen((next) {
       if (next != manager.BleState.disconnected) return;
+      // stopScan() emits a delayed disconnected event. If the manager has
+      // already moved on to connecting/connected, that event is stale and must
+      // not clear the freshly published device.
+      if (_bleManager.state != manager.BleState.disconnected) return;
       final info = _ref.read(connectedDeviceProvider);
       if (info == null) {
         // A delayed stop event may arrive after a new scan has started.
