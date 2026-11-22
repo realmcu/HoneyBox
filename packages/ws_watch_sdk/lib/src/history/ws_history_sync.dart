@@ -8,7 +8,7 @@ import 'ws_heart_rate_codec.dart';
 
 abstract final class WSHistorySync {
   /// Single-type heart rate pull (`0x05` sync key `0x03`).
-  static Future<List<WSHeartRate>> syncHeartRate(WSLink link) async {
+  static Future<List<WSHeartRate>> receiveHeartRate(WSLink link) async {
     final collected = <WSHeartRate>[];
     final done = Completer<void>();
     late final StreamSubscription<WSL2Message> sub;
@@ -24,9 +24,9 @@ abstract final class WSHistorySync {
       }
     });
     try {
-      await link.send(WSDataCommand.syncRequest(WSDataCommand.keySyncHeartRate));
+      await link
+          .send(WSDataCommand.syncRequest(WSDataCommand.keySyncHeartRate));
       await done.future.timeout(const Duration(seconds: 10));
-      await link.send(WSDataCommand.syncConfirm());
       return collected;
     } finally {
       await sub.cancel();

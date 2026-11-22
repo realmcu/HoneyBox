@@ -45,7 +45,8 @@ abstract final class WSHealthCodecs {
   static List<WSHeartRate> decodeHeartRateDataFrame(WSL2Message frame) =>
       _decodeFrame(frame, WSDataCommand.keyDataHeartRate, 5, _decodeHeartRate);
 
-  static List<WSBloodPressure> decodeBloodPressureDataFrame(WSL2Message frame) =>
+  static List<WSBloodPressure> decodeBloodPressureDataFrame(
+          WSL2Message frame) =>
       _decodeFrame(
         frame,
         WSDataCommand.keyDataBloodPressure,
@@ -101,8 +102,8 @@ abstract final class WSHealthCodecs {
     if (value.isEmpty) {
       return const [];
     }
-    if (value[0] != expectedRecordLen) {
-      throw FormatException('record length mismatch');
+    if (value[0] < expectedRecordLen) {
+      throw FormatException('record length shorter than required layout');
     }
     final records = WSDataFrame.splitValueFrames(value);
     return records.map(decodeRecord).toList();
@@ -111,9 +112,8 @@ abstract final class WSHealthCodecs {
   static DateTime _wallTime(int epochSeconds) =>
       DateTime.fromMillisecondsSinceEpoch(epochSeconds * 1000);
 
-  /// Wall-clock epoch seconds on the wire are little-endian (MCU layout).
-  static int _epochSecondsLe(ByteData data, int offset) =>
-      data.getUint32(offset, Endian.little);
+  /// HoneyProtocol encodes every multi-byte field in big-endian order.
+  static int _epochSeconds(ByteData data, int offset) => data.getUint32(offset);
 
   static WSActivity _decodeActivity(Uint8List r) {
     final data = ByteData.sublistView(r);
@@ -121,7 +121,7 @@ abstract final class WSHealthCodecs {
     final calories = data.getUint16(8);
     final bucket = r[11];
     return WSActivity(
-      time: _wallTime(_epochSecondsLe(data, 0)),
+      time: _wallTime(_epochSeconds(data, 0)),
       steps: data.getUint16(4),
       distance: data.getUint16(6),
       energy: calories,
@@ -138,7 +138,7 @@ abstract final class WSHealthCodecs {
   static WSSleep _decodeSleep(Uint8List r) {
     final flags = r[5];
     return WSSleep(
-      time: _wallTime(_epochSecondsLe(ByteData.sublistView(r), 0)),
+      time: _wallTime(_epochSeconds(ByteData.sublistView(r), 0)),
       mode: r[4],
       flags: flags,
       timeRewind: (flags & 0x01) != 0,
@@ -147,14 +147,14 @@ abstract final class WSHealthCodecs {
 
   static WSHeartRate _decodeHeartRate(Uint8List r) {
     return WSHeartRate(
-      time: _epochSecondsLe(ByteData.sublistView(r), 0),
+      time: _epochSeconds(ByteData.sublistView(r), 0),
       bpm: r[4],
     );
   }
 
   static WSBloodPressure _decodeBloodPressure(Uint8List r) {
     return WSBloodPressure(
-      time: _wallTime(_epochSecondsLe(ByteData.sublistView(r), 0)),
+      time: _wallTime(_epochSeconds(ByteData.sublistView(r), 0)),
       systolic: r[4],
       diastolic: r[5],
     );
@@ -164,7 +164,7 @@ abstract final class WSHealthCodecs {
 
   static WSBloodOxygen _decodeBloodOxygen(Uint8List r) {
     return WSBloodOxygen(
-      time: _wallTime(_epochSecondsLe(ByteData.sublistView(r), 0)),
+      time: _wallTime(_epochSeconds(ByteData.sublistView(r), 0)),
       value: r[4],
       high: _optionalByte(r[5]),
       low: _optionalByte(r[6]),
@@ -173,14 +173,14 @@ abstract final class WSHealthCodecs {
 
   static WSHrv _decodeHrv(Uint8List r) {
     return WSHrv(
-      time: _wallTime(_epochSecondsLe(ByteData.sublistView(r), 0)),
+      time: _wallTime(_epochSeconds(ByteData.sublistView(r), 0)),
       sdnn: ByteData.sublistView(r).getUint16(4),
     );
   }
 
   static WSPressure _decodePressure(Uint8List r) {
     return WSPressure(
-      time: _wallTime(_epochSecondsLe(ByteData.sublistView(r), 0)),
+      time: _wallTime(_epochSeconds(ByteData.sublistView(r), 0)),
       value: r[4],
     );
   }
@@ -194,7 +194,7 @@ abstract final class WSHealthCodecs {
     final body = bodyRaw == 0x8000 ? null : bodyRaw;
     final skin = skinRaw == 0xFFFF ? null : skinRaw;
     return WSTemperature(
-      time: _wallTime(_epochSecondsLe(data, 0)),
+      time: _wallTime(_epochSeconds(data, 0)),
       skinTemperature: skin == null ? 0 : skin / 100,
       heatStress: heat == 0xFF ? 0 : heat,
       worn: (flags & 0x01) != 0,
@@ -208,7 +208,7 @@ abstract final class WSHealthCodecs {
 
   static WSBloodGlucose _decodeBloodGlucose(Uint8List r) {
     return WSBloodGlucose(
-      time: _wallTime(_epochSecondsLe(ByteData.sublistView(r), 0)),
+      time: _wallTime(_epochSeconds(ByteData.sublistView(r), 0)),
       value: ByteData.sublistView(r).getUint16(4),
     );
   }
@@ -216,7 +216,7 @@ abstract final class WSHealthCodecs {
   static WSSport _decodeSport(Uint8List r) {
     final data = ByteData.sublistView(r);
     final detailFlags = r[30];
-    final start = _epochSecondsLe(data, 4);
+    final start = _epochSeconds(data, 4);
     final totalDuration = data.getUint16(15);
     final calories = data.getUint32(25);
     final avgHr = r[29];
@@ -232,7 +232,7 @@ abstract final class WSHealthCodecs {
       heartRateAverage: avgHr,
       sportId: data.getUint32(0),
       startTime: start,
-      endTime: _epochSecondsLe(data, 8),
+      endTime: _epochSeconds(data, 8),
       effectiveDurationSec: data.getUint16(13),
       totalDurationSec: totalDuration,
       detailFlags: detailFlags,

@@ -18,6 +18,7 @@ abstract final class WSDataCommand {
   static const int keySyncTemperature = 0x08;
   static const int keySyncBloodGlucose = 0x09;
   static const int keySyncSport = 0x0A;
+  static const int keyDeviceCapabilitiesQuery = 0x0B;
 
   static const int keyDataActivity = 0x21;
   static const int keyDataSleep = 0x22;
@@ -29,9 +30,16 @@ abstract final class WSDataCommand {
   static const int keyDataTemperature = 0x28;
   static const int keyDataBloodGlucose = 0x29;
   static const int keyDataSport = 0x2A;
+  static const int keyDeviceCapabilities = 0x2B;
   static const int keySyncStart = 0x40;
   static const int keySyncEnd = 0x41;
   static const int keySyncConfirm = 0x42;
+  static const int keyTodayQuery = 0x60;
+  static const int keyToday = 0x61;
+  static const int keyTodayConfig = 0x62;
+  static const int keyTodayConfigReply = 0x63;
+  static const int keySportDetailRequest = 0x80;
+  static const int keySportDetail = 0x81;
 
   static WSL2Message syncRequest(int syncKey) => WSL2Message(
         command: command,
@@ -46,6 +54,19 @@ abstract final class WSDataCommand {
         key: keySyncConfirm,
         value: Uint8List(0),
       );
+
+  static WSL2Message queryDeviceCapabilities() =>
+      syncRequest(keyDeviceCapabilitiesQuery);
+
+  static WSL2Message sportDetailRequest(int sportId) {
+    final data = ByteData(4)..setUint32(0, sportId);
+    return WSL2Message(
+      command: command,
+      version: version,
+      key: keySportDetailRequest,
+      value: data.buffer.asUint8List(),
+    );
+  }
 
   static bool isDataKey(int key) => key >= 0x21 && key <= 0x2a;
 }

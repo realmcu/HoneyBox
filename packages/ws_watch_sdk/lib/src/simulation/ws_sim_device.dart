@@ -88,6 +88,15 @@ void _handleBind(
       _ignoreDetached(channel.send(_bindReply(WSBindCommand.keyBindReply, 0)));
     case WSBindCommand.keyUnbind:
       state.boundUserId = null;
+    case WSBindCommand.keySuperBindRequest:
+      if (message.value.length == 64) {
+        state.boundUserId = WSBindCommand.decodeUserIdWire(
+          Uint8List.sublistView(message.value, 0, 32),
+        );
+        _ignoreDetached(
+          channel.send(_bindReply(WSBindCommand.keySuperBindReply, 0)),
+        );
+      }
   }
 }
 
@@ -98,6 +107,10 @@ void _handleSettings(
 ) {
   if (message.value.isEmpty) return;
   final opcode = message.value[0];
+  if (state.settingLists.containsKey(message.key)) {
+    _handleListSetting(channel, state, message);
+    return;
+  }
   switch (message.key) {
     case WSSettingsCommand.keyPhoneSystem:
       if (opcode == WSSettingsCommand.opcodeSet && message.value.length >= 2) {
@@ -113,6 +126,7 @@ void _handleSettings(
     case WSSettingsCommand.keyTime:
       break;
     case WSHealthMonitorCodec.keyHeartRateAuto:
+    case WSSettingsCommand.keyHrvAuto:
     case WSHealthMonitorCodec.keyBloodPressureAuto:
     case WSHealthMonitorCodec.keyBloodSugarAuto:
     case WSHealthMonitorCodec.keySpO2Auto:
@@ -154,7 +168,57 @@ void _handleSettings(
       if (opcode == WSSettingsCommand.opcodeRead) {
         _ignoreDetached(channel.send(_capabilitiesReply()));
       }
+    default:
+      if (opcode == WSSettingsCommand.opcodeSet && message.value.length > 1) {
+        state.settingBodies[message.key] =
+            Uint8List.fromList(message.value.sublist(1));
+      } else if (opcode == WSSettingsCommand.opcodeRead) {
+        final body = state.settingBodies[message.key];
+        if (body != null) {
+          _ignoreDetached(_sendSettingsRead(channel, message.key, body));
+        }
+      } else if (opcode == WSSettingsCommand.opcodeReset) {
+        state.settingBodies.remove(message.key);
+      }
   }
+}
+
+void _handleListSetting(
+  WatchFrameChannel channel,
+  WsSimWatchState state,
+  WSL2Message message,
+) {
+  final opcode = message.value[0];
+  final list = state.settingLists[message.key]!;
+  if (opcode == WSSettingsCommand.opcodeReset) {
+    list.clear();
+    return;
+  }
+  if (opcode == WSSettingsCommand.opcodeAdd ||
+      opcode == WSSettingsCommand.opcodeModify ||
+      opcode == WSSettingsCommand.opcodeDelete) {
+    if (message.value.length < 2) return;
+    final record = Uint8List.fromList(message.value.sublist(1));
+    final slot = record[0];
+    list.removeWhere((item) => item.isNotEmpty && item[0] == slot);
+    if (opcode != WSSettingsCommand.opcodeDelete) list.add(record);
+    return;
+  }
+  if (opcode != WSSettingsCommand.opcodeRead) return;
+  final capacity = message.key == WSSettingsCommand.keyContacts
+      ? 50
+      : message.key == WSSettingsCommand.keySosContacts
+          ? 5
+          : 10;
+  final body = <int>[capacity];
+  if (message.key == WSSettingsCommand.keyContacts) body.add(capacity);
+  body.add(list.length);
+  for (final item in list) {
+    body.add(item.length);
+    body.addAll(item);
+  }
+  _ignoreDetached(
+      _sendSettingsRead(channel, message.key, Uint8List.fromList(body)));
 }
 
 void _handleAutoMonitorSetting(
@@ -216,6 +280,67 @@ void _handleMeasure(
     return;
   }
 
+  if (message.key == WSMeasureCommand.keySportStart &&
+      message.value.length == 1) {
+    final mode = message.value[0];
+    final busy = state.spotBusy || state.activeSportMode != null;
+    if (!busy) {
+      state.activeSportMode = mode;
+      state.sportStartedAtUnix = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      state.sportPaused = false;
+      state.sportSubscribed = true;
+      _ignoreDetached(_runSportSimulation(channel, state));
+    }
+    _ignoreDetached(channel.send(_measureMessage(
+      WSMeasureCommand.keySportStartReply,
+      Uint8List.fromList([mode, busy ? 1 : 0]),
+    )));
+    return;
+  }
+  if (message.key == WSMeasureCommand.keySportControl &&
+      message.value.length == 1) {
+    switch (message.value[0]) {
+      case 0:
+        if (state.activeSportMode != null) {
+          state.activeSportMode = null;
+          _ignoreDetached(channel.send(_measureMessage(
+            WSMeasureCommand.keySportEnd,
+            Uint8List.fromList([0, 0]),
+          )));
+        }
+      case 1:
+        state.sportPaused = true;
+      case 2:
+        state.sportPaused = false;
+    }
+    return;
+  }
+  if (message.key == WSMeasureCommand.keySportModesQuery) {
+    _ignoreDetached(channel.send(_measureMessage(
+      WSMeasureCommand.keySportModesReply,
+      Uint8List.fromList([3, 1, 2, 3]),
+    )));
+    return;
+  }
+  if (message.key == WSMeasureCommand.keySportStateQuery) {
+    final snapshot = state.activeSportMode == null
+        ? Uint8List.fromList([0])
+        : Uint8List.fromList([1, ..._sportSnapshot(state)]);
+    _ignoreDetached(channel.send(_measureMessage(
+      WSMeasureCommand.keySportStateReply,
+      snapshot,
+    )));
+    return;
+  }
+  if (message.key == WSMeasureCommand.keySportSubscribe) {
+    state.sportSubscribed = true;
+    return;
+  }
+  if (message.key == WSMeasureCommand.keySportUnsubscribe) {
+    state.sportSubscribed = false;
+    return;
+  }
+
   final lane = WSSpotMeasureLanes.laneForKey(message.key);
   if (lane == null) return;
 
@@ -246,6 +371,39 @@ void _handleMeasure(
   }
 }
 
+Future<void> _runSportSimulation(
+  WatchFrameChannel channel,
+  WsSimWatchState state,
+) async {
+  for (var i = 0; i < 3; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (state.activeSportMode == null) return;
+    if (state.sportSubscribed) {
+      await channel.send(_measureMessage(
+        WSMeasureCommand.keySportRealtime,
+        _sportSnapshot(state),
+      ));
+    }
+  }
+}
+
+Uint8List _sportSnapshot(WsSimWatchState state) {
+  final out = ByteData(23);
+  final duration = state.activeSportMode == null
+      ? 0
+      : DateTime.now().millisecondsSinceEpoch ~/ 1000 -
+          state.sportStartedAtUnix;
+  out.setUint8(0, state.activeSportMode ?? 0);
+  out.setUint8(1, state.sportPaused ? 2 : 1);
+  out.setUint32(2, state.sportStartedAtUnix);
+  out.setUint32(6, duration);
+  out.setUint8(10, 120);
+  out.setUint32(11, duration * 2);
+  out.setUint32(15, duration * 3);
+  out.setUint32(19, duration);
+  return out.buffer.asUint8List();
+}
+
 Future<void> _runSpotSimulation(
   WatchFrameChannel channel,
   WsSimWatchState state,
@@ -266,6 +424,7 @@ Future<void> _runSpotSimulation(
 Uint8List _spotRealtimePayload(WSSpotMeasureLane lane, int tick) {
   return switch (lane) {
     WSSpotMeasureLanes.heartRate => Uint8List.fromList([0x48 + tick]),
+    WSSpotMeasureLanes.continuousHeartRate => Uint8List.fromList([0x48 + tick]),
     WSSpotMeasureLanes.bloodPressure => Uint8List.fromList([0x4B + tick]),
     WSSpotMeasureLanes.bloodOxygen => Uint8List.fromList([0x62 + tick]),
     WSSpotMeasureLanes.hrv => Uint8List.fromList([0x00, 0x2D + tick]),
@@ -292,6 +451,7 @@ Uint8List _spotResultPayload(WSSpotMeasureLane lane, WsSimWatchState state) {
       Uint8List.fromList([0x00, ...stamp, 0x0E, 0x44, 0x0C, 0xEE, 0x00, 0x03]),
     WSSpotMeasureLanes.bloodGlucose =>
       Uint8List.fromList([0x00, ...stamp, 0x00, 0x48]),
+    WSSpotMeasureLanes.continuousHeartRate => Uint8List.fromList([0x00]),
     _ => Uint8List.fromList([0x00]),
   };
 }
@@ -338,6 +498,88 @@ Future<void> _handleData(
     await channel.send(_dataMessage(
       WSTodayCodec.keyTodayPayload,
       WsSimFixtures.buildTodayPayload(),
+    ));
+    return;
+  }
+
+  if (message.key == WSDataCommand.keyDeviceCapabilitiesQuery) {
+    await channel.send(_dataMessage(
+      WSDataCommand.keyDeviceCapabilities,
+      Uint8List.fromList([
+        0x01,
+        0x00,
+        0x04,
+        0x01,
+        0x9A,
+        0x01,
+        0x72,
+        0x02,
+        0x00,
+        0x04,
+        0x00,
+        0x00,
+        0xA0,
+        0x00,
+        0x03,
+        0x00,
+        0x01,
+        0x3C,
+        0x04,
+        0x00,
+        0x04,
+        0x00,
+        0x00,
+        0x00,
+        0x07,
+        0x05,
+        0x00,
+        0x02,
+        0x00,
+        0xF1,
+        0x06,
+        0x00,
+        0x01,
+        0x03,
+      ]),
+    ));
+    return;
+  }
+
+  if (message.key == WSDataCommand.keyTodayConfig) {
+    var result = 0;
+    if (message.value.isNotEmpty) {
+      if (message.value.length == 7) {
+        state.todayNotificationConfig = Uint8List.fromList(message.value);
+      } else {
+        result = 1;
+      }
+    }
+    await channel.send(_dataMessage(
+      WSDataCommand.keyTodayConfigReply,
+      Uint8List.fromList([result, ...state.todayNotificationConfig]),
+    ));
+    return;
+  }
+
+  if (message.key == WSDataCommand.keySportDetailRequest &&
+      message.value.length == 4) {
+    final sportId = ByteData.sublistView(message.value).getUint32(0);
+    final value = ByteData(8 + 25);
+    value.setUint32(0, sportId);
+    value.setUint8(4, 0);
+    value.setUint8(5, 25);
+    value.setUint16(6, 1);
+    value.setUint16(8, 30);
+    value.setUint8(10, 120);
+    value.setUint32(11, 100);
+    value.setUint32(15, 80);
+    value.setUint32(19, 25);
+    value.setInt32(23, 0x7fffffff);
+    value.setInt32(27, 0x7fffffff);
+    value.setInt16(31, -0x8000);
+    await channel.send(_dataMessage(
+      WSDataCommand.keySportDetail,
+      value.buffer.asUint8List(),
     ));
     return;
   }
@@ -504,7 +746,7 @@ Uint8List _deviceInfoReply() {
     WSSettingsCommand.opcodeReadReply,
     0x00,
     0x01,
-    ...List<int>.filled(13, 0),
+    ...List<int>.filled(14, 0),
     serial.length,
     ...serial.codeUnits,
   ];

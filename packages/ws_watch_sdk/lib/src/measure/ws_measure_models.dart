@@ -16,8 +16,7 @@ final class WSAutoMeasureSchedule {
   final int endMinute;
   final int intervalMinutes;
 
-  bool get isAllDay =>
-      startHour == endHour && startMinute == endMinute;
+  bool get isAllDay => startHour == endHour && startMinute == endMinute;
 
   /// Demo 简化模型：全天 + 间隔。
   factory WSAutoMeasureSchedule.fromSimple({
@@ -61,8 +60,7 @@ final class WSAutoMeasureConfig {
   final bool enabled;
   final int intervalMinutes;
 
-  WSAutoMeasureSchedule toSchedule() =>
-      WSAutoMeasureSchedule.fromSimple(
+  WSAutoMeasureSchedule toSchedule() => WSAutoMeasureSchedule.fromSimple(
         enabled: enabled,
         intervalMinutes: intervalMinutes,
       );
@@ -83,8 +81,7 @@ final class WSBloodSugarAutoMeasureConfig {
   final bool enabled;
   final int intervalMinutes;
 
-  WSAutoMeasureSchedule toSchedule() =>
-      WSAutoMeasureSchedule.fromSimple(
+  WSAutoMeasureSchedule toSchedule() => WSAutoMeasureSchedule.fromSimple(
         enabled: enabled,
         intervalMinutes: intervalMinutes,
       );

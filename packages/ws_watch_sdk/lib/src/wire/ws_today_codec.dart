@@ -25,13 +25,13 @@ abstract final class WSTodayCodec {
     }
     final data = ByteData.sublistView(value);
     return WSTodaySnapshot(
-      dataTime: data.getUint32(0, Endian.little),
-      steps: data.getUint32(4, Endian.little),
-      distanceMeters: data.getUint32(8, Endian.little),
-      caloriesTenthKcal: data.getUint32(12, Endian.little),
-      activeMinutes: data.getUint16(16, Endian.little),
+      dataTime: data.getUint32(0),
+      steps: data.getUint32(4),
+      distanceMeters: data.getUint32(8),
+      caloriesTenthKcal: data.getUint32(12),
+      activeMinutes: data.getUint16(16),
       recentHeartRateBpm: value[18],
-      recentHeartRateTime: data.getUint32(19, Endian.little),
+      recentHeartRateTime: data.getUint32(19),
     );
   }
 }

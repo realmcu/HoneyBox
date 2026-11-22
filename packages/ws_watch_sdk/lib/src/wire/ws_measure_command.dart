@@ -16,6 +16,22 @@ abstract final class WSMeasureCommand {
   static const int dataTypeHeartRate = 0x03;
   static const int dataTypeBloodPressure = 0x04;
   static const int dataTypeSpO2 = 0x05;
+  static const int dataTypeHrv = 0x06;
+  static const int dataTypePressure = 0x07;
+  static const int dataTypeTemperature = 0x08;
+  static const int dataTypeBloodGlucose = 0x09;
+
+  static const int keySportStart = 0x60;
+  static const int keySportStartReply = 0x61;
+  static const int keySportControl = 0x62;
+  static const int keySportRealtime = 0x63;
+  static const int keySportEnd = 0x64;
+  static const int keySportModesQuery = 0x65;
+  static const int keySportModesReply = 0x66;
+  static const int keySportStateQuery = 0x67;
+  static const int keySportStateReply = 0x68;
+  static const int keySportSubscribe = 0x69;
+  static const int keySportUnsubscribe = 0x6A;
 
   static WSL2Message querySpotStatus() => WSL2Message(
         command: command,
@@ -26,6 +42,22 @@ abstract final class WSMeasureCommand {
 
   static bool isStatusReply(WSL2Message message) =>
       message.command == command && message.key == keyStatusReply;
+
+  static WSL2Message _message(int key, [List<int> value = const []]) =>
+      WSL2Message(
+        command: command,
+        version: version,
+        key: key,
+        value: Uint8List.fromList(value),
+      );
+
+  static WSL2Message sportStart(int mode) => _message(keySportStart, [mode]);
+  static WSL2Message sportControl(int action) =>
+      _message(keySportControl, [action]);
+  static WSL2Message sportModesQuery() => _message(keySportModesQuery);
+  static WSL2Message sportStateQuery() => _message(keySportStateQuery);
+  static WSL2Message sportSubscribe() => _message(keySportSubscribe);
+  static WSL2Message sportUnsubscribe() => _message(keySportUnsubscribe);
 }
 
 /// 点测五连：开始 / 开始回应 / 停止 / 实时 / 结果。
@@ -133,6 +165,15 @@ abstract final class WSSpotMeasureLanes {
     dataTypeCode: 0x09,
   );
 
+  static const continuousHeartRate = WSSpotMeasureLane(
+    start: 0x26,
+    startReply: 0x27,
+    stop: 0x28,
+    realtime: 0x29,
+    result: 0x2A,
+    dataTypeCode: 0x03,
+  );
+
   static const all = [
     heartRate,
     bloodPressure,
@@ -141,6 +182,7 @@ abstract final class WSSpotMeasureLanes {
     pressure,
     temperature,
     bloodGlucose,
+    continuousHeartRate,
   ];
 
   static WSSpotMeasureLane? laneForKey(int key) {

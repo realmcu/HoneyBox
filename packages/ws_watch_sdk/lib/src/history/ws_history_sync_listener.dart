@@ -1,6 +1,6 @@
 import '../model/ws_error.dart';
 
-const kWSHistorySyncIdleTimeout = Duration(seconds: 30);
+const kWSHistorySyncIdleTimeout = Duration(seconds: 10);
 
 enum WSHistorySyncCategory {
   activity,

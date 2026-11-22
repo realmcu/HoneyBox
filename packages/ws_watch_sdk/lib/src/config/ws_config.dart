@@ -2,6 +2,7 @@ final class WSLinkConfig {
   const WSLinkConfig({
     /// Per-attempt wait for an L1 success ACK after the full frame is written.
     this.ackTimeout = const Duration(seconds: 5),
+
     /// Extra L1 resends with the same seq after timeout or ERR ACK.
     this.maxRetries = 3,
     this.chunkWriteTimeout = const Duration(seconds: 3),
@@ -22,11 +23,13 @@ final class WSLinkConfig {
 
 final class WSSessionConfig {
   const WSSessionConfig({
-    this.replyTimeout = const Duration(seconds: 8),
+    this.replyTimeout = const Duration(seconds: 5),
+    this.bindReplyTimeout = const Duration(seconds: 65),
     this.phoneSystem = 2,
   });
 
   final Duration replyTimeout;
+  final Duration bindReplyTimeout;
 
   /// WS `0x02` phone system: `1` iOS, `2` Android.
   final int phoneSystem;

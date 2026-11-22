@@ -13,6 +13,8 @@ abstract final class WSBindCommand {
   static const int keyLoginRequest = 0x03;
   static const int keyLoginReply = 0x04;
   static const int keyUnbind = 0x05;
+  static const int keySuperBindRequest = 0x06;
+  static const int keySuperBindReply = 0x07;
 
   /// 32-byte user id: ASCII, NUL-padded (spec allows 32 hex digit string from SDK).
   static Uint8List encodeUserIdWire(String userId) {
@@ -59,6 +61,17 @@ abstract final class WSBindCommand {
         version: version,
         key: keyUnbind,
         value: Uint8List.fromList([0]),
+      );
+
+  static WSL2Message superBindRequest(String userId, String superKey) =>
+      WSL2Message(
+        command: command,
+        version: version,
+        key: keySuperBindRequest,
+        value: Uint8List.fromList([
+          ...encodeUserIdWire(userId),
+          ...encodeUserIdWire(superKey),
+        ]),
       );
 
   /// Result byte: `00` success, `01` timeout / id mismatch, `02` user rejected (bind).

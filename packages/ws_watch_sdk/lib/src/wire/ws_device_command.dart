@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'ws_l2_message.dart';
@@ -47,11 +48,14 @@ abstract final class WSDeviceCommand {
     }
     final modelId = (reply.value[1] << 8) | reply.value[2];
     var serial = '';
-    if (reply.value.length > 17) {
-      final len = reply.value[16];
-      final start = 17;
-      final end = (start + len).clamp(start, reply.value.length);
-      serial = String.fromCharCodes(reply.value.sublist(start, end));
+    if (reply.value.length >= 18) {
+      final len = reply.value[17];
+      final start = 18;
+      final end = start + len;
+      if (end > reply.value.length) {
+        throw const FormatException('truncated device serial number');
+      }
+      serial = ascii.decode(reply.value.sublist(start, end));
     }
     return (modelId: modelId, serialNumber: serial);
   }

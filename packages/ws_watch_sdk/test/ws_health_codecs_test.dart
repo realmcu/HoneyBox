@@ -21,10 +21,10 @@ WSL2Message _l2(int key, String hex) {
 }
 
 void main() {
-  test('decodes live sim epoch little-endian', () {
+  test('decodes live sim epoch big-endian', () {
     final frame = _l2(
       WSDataCommand.keyDataHeartRate,
-      '05 00 02 4B CF F3 6A 48 53 D6 F3 6A 4B',
+      '05 00 02 6A F3 CF 4B 48 6A F3 D6 53 4B',
     );
     final rows = WSHealthCodecs.decodeHeartRateDataFrame(frame);
     expect(rows[0].time, 0x6AF3CF4B);
@@ -39,7 +39,7 @@ void main() {
     );
     final rows = WSHealthCodecs.decodeActivityDataFrame(frame);
     expect(rows.length, 2);
-    expect(rows[0].time.millisecondsSinceEpoch, 0x889ACC6A * 1000);
+    expect(rows[0].time.millisecondsSinceEpoch, 0x6ACC9A88 * 1000);
     expect(rows[0].steps, 0x04B0);
     expect(rows[0].distanceMeters, 0x0352);
     expect(rows[0].caloriesTenthKcal, 0x01C8);
@@ -70,7 +70,7 @@ void main() {
     expect(rows.length, 2);
     expect(rows[0].bpm, 0x48);
     expect(rows[1].bpm, 0x4B);
-    expect(rows[0].time, 0x889ACC6A);
+    expect(rows[0].time, 0x6ACC9A88);
   });
 
   test('decodes spec example blood pressure frame 0x24', () {
@@ -159,8 +159,8 @@ void main() {
     final rows = WSHealthCodecs.decodeSportDataFrame(frame);
     expect(rows.length, 1);
     expect(rows[0].sportId, 0x2A);
-    expect(rows[0].startTime, 0x889ACC6A);
-    expect(rows[0].endTime, 0x90A1CC6A);
+    expect(rows[0].startTime, 0x6ACC9A88);
+    expect(rows[0].endTime, 0x6ACCA190);
     expect(rows[0].steps, 0x1194);
     expect(rows[0].distanceMeters, 0x1450);
     expect(rows[0].caloriesTenthKcal, 0x0C80);

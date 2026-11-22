@@ -4,15 +4,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ws_watch_sdk/src/wire/ws_today_codec.dart';
 
 void main() {
-  test('decodePayload uses little-endian for step/distance fields', () {
+  test('decodePayload uses protocol big-endian fields', () {
     final payload = Uint8List.fromList([
-      0x80, 0x3f, 0xf3, 0x6a, // dataTime
-      0x6e, 0x14, 0x00, 0x00, // steps = 5230
-      0x42, 0x0e, 0x00, 0x00, // distance = 3650
-      0xc2, 0x08, 0x00, 0x00, // calories tenth-kcal
-      0x48, 0x00, // active minutes
+      0x6a, 0xf3, 0x3f, 0x80, // dataTime
+      0x00, 0x00, 0x14, 0x6e, // steps = 5230
+      0x00, 0x00, 0x0e, 0x42, // distance = 3650
+      0x00, 0x00, 0x08, 0xc2, // calories tenth-kcal
+      0x00, 0x48, // active minutes
       0x48, // recent HR
-      0x19, 0xd5, 0xf3, 0x6a, // recent HR time
+      0x6a, 0xf3, 0xd5, 0x19, // recent HR time
     ]);
     final snap = WSTodayCodec.decodePayload(payload);
     expect(snap.steps, 5230);

@@ -60,6 +60,14 @@ final class WSHealthHistorySync {
     if (_done != null) {
       throw StateError('WS health sync is already active');
     }
+    if (_syncKey < WSDataCommand.keySyncAll ||
+        _syncKey > WSDataCommand.keySyncSport) {
+      throw ArgumentError.value(
+        _syncKey,
+        'syncKey',
+        'expected a history sync key from 0x00 through 0x0A',
+      );
+    }
     _done = Completer<void>();
     _done!.future.ignore();
     _failures = _link.failures.listen(_fail);
@@ -178,6 +186,7 @@ final class WSHealthHistorySync {
     if (bytes.length != 5) {
       throw const FormatException('Invalid sync end');
     }
+    if (!_sawStart) throw const FormatException('sync end before sync start');
     final result = bytes[0];
     if (result == 0x02) {
       _failSync(const WSHistorySyncFailure(
@@ -202,6 +211,12 @@ final class WSHealthHistorySync {
           );
         }
       }
+    }
+    final actual = ByteData.sublistView(bytes).getUint32(1);
+    final received = _received.values.fold(0, (a, b) => a + b);
+    if (actual != received) {
+      throw FormatException(
+          'sync end actual count mismatch: $actual/$received');
     }
     await _persist();
     WSWatchDebugLog.apiOut(

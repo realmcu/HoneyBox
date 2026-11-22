@@ -11,10 +11,12 @@ import '../capability/ws_capabilities.dart';
 import '../debug/ws_debug_log.dart';
 import '../wire/ws_bind_command.dart';
 import '../wire/ws_device_command.dart';
+import '../wire/ws_data_command.dart';
 import '../model/ws_device_info.dart';
 import '../model/ws_error.dart';
 import '../model/ws_identity.dart';
 import '../model/ws_session_state.dart';
+import '../notification/ws_notifications.dart';
 import '../control/ws_control.dart';
 import '../measure/ws_measure.dart';
 import '../measure/ws_measure_coordinator.dart';
@@ -55,6 +57,7 @@ final class WSWatchSession {
   WSMeasure? _measure;
   WSMeasureCoordinator? _measureCoordinator;
   WSControl? _control;
+  WSNotifications? _notifications;
 
   bool get isHealthSyncActive => _healthSync != null;
 
@@ -81,6 +84,7 @@ final class WSWatchSession {
     link: _link,
     store: _historyStore,
     scope: () => historyScope,
+    isSessionSyncActive: () => isHealthSyncActive,
   );
 
   WSToday get today => _today ??= WSToday(
@@ -101,6 +105,12 @@ final class WSWatchSession {
       );
 
   WSControl get control => _control ??= WSControl(
+        link: _link,
+        isConnected: () => !_disposed && _state.isConnected,
+        replyTimeout: _config.replyTimeout,
+      );
+
+  WSNotifications get notifications => _notifications ??= WSNotifications(
         link: _link,
         isConnected: () => !_disposed && _state.isConnected,
         replyTimeout: _config.replyTimeout,
@@ -240,7 +250,7 @@ final class WSWatchSession {
     }
     await _link.send(WSBindCommand.unbindRequest());
     _authenticatedUserId = null;
-    _publish(_state.copyWith(phase: WSSessionPhase.connected));
+    await dispose();
   }
 
   Future<void> login(String userId) async {
@@ -275,6 +285,58 @@ final class WSWatchSession {
     }
   }
 
+  /// Protocol-prescribed login-first flow. Returns `true` once ready.
+  Future<bool> authenticate(
+    String userId, {
+    bool bindIfNeeded = true,
+    bool bindConfirmed = false,
+  }) async {
+    await login(userId);
+    if (_state.isReady) return true;
+    if (!bindIfNeeded || _state.phase != WSSessionPhase.loginRejected)
+      return false;
+    await bindFirstTime(userId, confirmed: bindConfirmed);
+    return _state.isReady;
+  }
+
+  Future<void> superBind(
+    String userId,
+    String superKey, {
+    required bool confirmed,
+  }) async {
+    final identity = WSIdentity(userId);
+    if (!confirmed)
+      throw StateError('WS super bind requires explicit confirmation');
+    _requireConnected();
+    _publish(
+        _state.copyWith(phase: WSSessionPhase.loggingIn, clearError: true));
+    try {
+      final reply = await _link.request(
+        WSBindCommand.superBindRequest(identity.value, superKey),
+        replyKey: WSBindCommand.keySuperBindReply,
+        timeout: _config.bindReplyTimeout,
+      );
+      final code = WSBindCommand.decodeResultByte(reply.value);
+      if (code != 0) {
+        _authenticatedUserId = null;
+        _publish(_state.copyWith(phase: WSSessionPhase.loginRejected));
+        return;
+      }
+      _authenticatedUserId = identity.value;
+      await _applyPhoneDefaults();
+      _publish(_state.copyWith(phase: WSSessionPhase.ready));
+    } catch (error) {
+      _authenticatedUserId = null;
+      if (!_disposed) {
+        _publish(_state.copyWith(
+          phase: _state.isConnected ? WSSessionPhase.connected : _state.phase,
+          error: error,
+        ));
+      }
+      rethrow;
+    }
+  }
+
   Future<void> bindFirstTime(String userId, {required bool confirmed}) async {
     final identity = WSIdentity(userId);
     if (!confirmed) {
@@ -287,7 +349,7 @@ final class WSWatchSession {
       final reply = await _link.request(
         WSBindCommand.bindRequest(identity.value),
         replyKey: WSBindCommand.keyBindReply,
-        timeout: _config.replyTimeout,
+        timeout: _config.bindReplyTimeout,
       );
       final code = WSBindCommand.decodeResultByte(reply.value);
       if (!WSBindCommand.isBindSuccess(code)) {
@@ -315,11 +377,15 @@ final class WSWatchSession {
     await settings.setTimeUnix(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
     );
+    await readDeviceFeatures();
+    await readDeviceInfo();
+    await notifications.queryBattery();
   }
 
   /// Full WS `0x05` sync (`0x00` all types) into [historyStore].
   Future<void> syncHealthData(
     WSHistorySyncListener listener, {
+    int syncKey = WSDataCommand.keySyncAll,
     void Function(WSHistorySyncFrame frame)? onHistoryFrame,
   }) {
     _requireConnected();
@@ -337,6 +403,7 @@ final class WSWatchSession {
       store: _historyStore,
       scope: scope,
       listener: listener,
+      syncKey: syncKey,
       onHistoryFrame: onHistoryFrame,
     );
     _healthSync = engine.run().whenComplete(() => _healthSync = null);
@@ -354,6 +421,11 @@ final class WSWatchSession {
     _authenticatedUserId = null;
     _measureCoordinator?.dispose();
     _measureCoordinator = null;
+    await _measure?.dispose();
+    _measure = null;
+    await _notifications?.dispose();
+    _notifications = null;
+    await settings.dispose();
     await _linkFailures?.cancel();
     await _link.close();
     try {

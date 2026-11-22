@@ -31,6 +31,6 @@ void main() {
     expect(rows.length, 2);
     expect(rows[0].bpm, 0x48);
     expect(rows[1].bpm, 0x4B);
-    expect(rows[0].time, 0x889ACC6A);
+    expect(rows[0].time, 0x6ACC9A88);
   });
 }

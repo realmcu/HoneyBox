@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import '../measure/ws_measure_models.dart';
+import 'ws_binary.dart';
 import 'ws_l2_message.dart';
 import 'ws_settings_command.dart';
 
@@ -11,16 +12,30 @@ abstract final class WSHealthMonitorCodec {
 
   static const int keyHeartRateAuto = 0x40;
   static const int keyHeartRateAlarm = 0x41;
+  static const int keyHrvAuto = 0x44;
+  static const int keyHrvAlarm = 0x45;
   static const int keyBloodPressureAuto = 0x48;
+  static const int keyBloodPressureAlarm = 0x49;
+  static const int keyBloodPressureUnit = 0x4A;
   static const int keyBloodSugarAuto = 0x4C;
+  static const int keyBloodSugarAlarm = 0x4D;
+  static const int keyBloodSugarUnit = 0x4E;
   static const int keySpO2Auto = 0x50;
   static const int keySpO2Alarm = 0x51;
   static const int keyPressureAuto = 0x54;
+  static const int keyPressureAlarm = 0x55;
   static const int keyTemperatureAuto = 0x58;
+  static const int keyTemperatureAlarm = 0x59;
   static const int keyTemperatureUnit = 0x5A;
   static const int keyHeatStressAuto = 0x5C;
 
   static Uint8List encodeAutoMonitorBody(WSAutoMeasureSchedule schedule) {
+    WSBinary.requireRange(schedule.startHour, 0, 23, 'startHour');
+    WSBinary.requireRange(schedule.startMinute, 0, 59, 'startMinute');
+    WSBinary.requireRange(schedule.endHour, 0, 23, 'endHour');
+    WSBinary.requireRange(schedule.endMinute, 0, 59, 'endMinute');
+    WSBinary.requireRange(
+        schedule.intervalMinutes, 1, 0xffff, 'intervalMinutes');
     final data = ByteData(autoMonitorBodyLength);
     data.setUint8(0, schedule.enabled ? 0x01 : 0x00);
     data.setUint8(1, schedule.startHour);
@@ -36,6 +51,13 @@ abstract final class WSHealthMonitorCodec {
       throw const FormatException('WS auto monitor payload too short');
     }
     final data = ByteData.sublistView(bytes, 0, autoMonitorBodyLength);
+    if (bytes[1] > 23 ||
+        bytes[2] > 59 ||
+        bytes[3] > 23 ||
+        bytes[4] > 59 ||
+        data.getUint16(5) == 0) {
+      throw const FormatException('invalid WS auto monitor payload');
+    }
     return WSAutoMeasureSchedule(
       enabled: bytes[0] == 0x01,
       startHour: bytes[1],
