@@ -406,7 +406,9 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           }
           if (hasProgress) _progress = session.progress;
           if (done) _running = false;
-          if (event['ready'] == true) _ready = true;
+          if (event['ready'] == true) {
+            _ready = _advanceToAwaitingConfirmation(session);
+          }
           if (done) _ready = false;
           if (done) {
             _pendingVerification = outcome == OtaOutcome.pendingVerification;
@@ -613,6 +615,28 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
     }
   }
 
+  bool _advanceToAwaitingConfirmation(OtaSession session) {
+    if (session.outcome != null) return false;
+    if (session.phase == OtaPhase.preparing) {
+      if (!session.apply(
+        OtaEvent(sessionId: session.id, phase: OtaPhase.checking),
+      )) {
+        return false;
+      }
+      _phaseHistory.add(OtaPhaseEntry(OtaPhase.checking, DateTime.now()));
+    }
+    if (session.phase == OtaPhase.checking) {
+      if (!session.apply(
+        OtaEvent(sessionId: session.id, phase: OtaPhase.awaitingConfirmation),
+      )) {
+        return false;
+      }
+      _phaseHistory
+          .add(OtaPhaseEntry(OtaPhase.awaitingConfirmation, DateTime.now()));
+    }
+    return session.phase == OtaPhase.awaitingConfirmation;
+  }
+
   Future<void> _start() async {
     if (_path == null ||
         _running ||
@@ -665,6 +689,11 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           : null;
       final size = await File(path).length().catchError((Object _) => 0);
       if (!mounted) return;
+      if (!_advanceToAwaitingConfirmation(session!)) {
+        setState(() => _running = false);
+        ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+        return;
+      }
       final confirmed = await showOtaConfirmation(
           context,
           OtaConfirmationData(
@@ -715,11 +744,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
             permission != true) {
           throw StateError('设备连接、权限或蓝牙占用状态已改变');
         }
-        for (final phase in [
-          OtaPhase.checking,
-          OtaPhase.awaitingConfirmation,
-          OtaPhase.connecting
-        ]) {
+        for (final phase in [OtaPhase.connecting]) {
           if (!session!.apply(OtaEvent(sessionId: session.id, phase: phase))) {
             throw StateError('OTA 会话阶段无效');
           }
