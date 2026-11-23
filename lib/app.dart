@@ -18,6 +18,7 @@ import 'pages/ota/ota_page.dart';
 import 'pages/watch/pages/watch_face_page.dart';
 import 'pages/watch/pages/watch_notification_page.dart';
 import 'pages/watch/pages/watch_health_page.dart';
+import 'pages/watch/pages/watch_factory_page.dart';
 import 'pages/ota/ota_chip_page.dart';
 
 class HoneyBoxApp extends StatelessWidget {
@@ -107,6 +108,12 @@ class HoneyBoxApp extends StatelessWidget {
             break;
           case '/watch-health':
             page = WatchHealthPage(
+              deviceName: args?['deviceName'] ?? 'Watch',
+              deviceId: args?['deviceId'] ?? '',
+            );
+            break;
+          case '/watch-factory':
+            page = WatchFactoryPage(
               deviceName: args?['deviceName'] ?? 'Watch',
               deviceId: args?['deviceId'] ?? '',
             );

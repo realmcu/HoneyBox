@@ -38,6 +38,7 @@ class BleCmd {
   static const int watchBind = 0x03; // command
   static const int watchNotification = 0x04; // command
   static const int watchHealth = 0x05; // command
+  static const int watchFactory = 0x06; // command
   static const int wifiProv = 0x0D; // command
   static const int stream = 0x0E; // stream (!!)
   static const int remoteControl = 0x0F; // command

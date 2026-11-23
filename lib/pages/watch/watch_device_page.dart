@@ -8,7 +8,7 @@ import '../shared/app_drawer.dart';
 import '../device/widgets/action_card.dart';
 
 /// Watch 应用连接设备后的主页 —— 结构对齐 eBadge 的 [DevicePage]：
-/// 顶部已连接状态条 + Watch 状态摘要卡 + 2×2 功能网格。
+/// 顶部已连接状态条 + Watch 状态摘要卡 + 功能入口。
 ///
 /// 四张功能卡（表盘推送 / 通知转发 / 运动·健康 / 固件 OTA）当前都指向各自的
 /// 占位子页。摘要卡里的电量 / 固件版本 / 当前表盘需要通过 BLE 从设备回读，
@@ -127,6 +127,12 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
         icon: Icons.system_update_alt, title: '固件 OTA 升级', route: '/watch-ota'),
   ];
 
+  static const _factoryAction = _ActionItem(
+    icon: Icons.precision_manufacturing_outlined,
+    title: '工厂测试',
+    route: '/watch-factory',
+  );
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -241,21 +247,38 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
               ),
               const SizedBox(height: 16),
               Expanded(
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.25,
+                child: ListView(
                   physics: const BouncingScrollPhysics(),
-                  children: _actions
-                      .map((a) => ActionCard(
-                            icon: a.icon,
-                            title: a.title,
-                            enabled: bound,
-                            disabledMessage: '请先完成设备绑定',
-                            onTap: bound ? () => _open(a.route) : null,
-                          ))
-                      .toList(),
+                  children: [
+                    GridView.count(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: 1.25,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: _actions
+                          .map((a) => ActionCard(
+                                icon: a.icon,
+                                title: a.title,
+                                enabled: bound,
+                                disabledMessage: '请先完成设备绑定',
+                                onTap: bound ? () => _open(a.route) : null,
+                              ))
+                          .toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 116,
+                      child: ActionCard(
+                        icon: _factoryAction.icon,
+                        title: _factoryAction.title,
+                        enabled: bound,
+                        disabledMessage: '请先完成设备绑定',
+                        onTap: bound ? () => _open(_factoryAction.route) : null,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
