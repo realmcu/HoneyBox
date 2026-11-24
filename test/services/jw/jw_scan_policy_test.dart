@@ -53,6 +53,21 @@ void main() {
             query: 'Watch', isDefaultWatchFilter: false, device: d),
         isFalse);
   });
+  test('Watch text filter does not admit named FEC5 non-watch devices', () {
+    final hbox = ScanDevice(
+        deviceId: 'A6:10:C6:17:AA:5C',
+        name: 'HBox-AA5C',
+        rssi: -59,
+        jwCandidate: true);
+    expect(
+        JwScanPolicy.matches(
+            query: 'Watch', isDefaultWatchFilter: true, device: hbox),
+        isFalse);
+    expect(
+        JwScanPolicy.matches(
+            query: 'hbox', isDefaultWatchFilter: true, device: hbox),
+        isTrue);
+  });
   test(
       'late name merges by ID and later empty advertising cannot erase identity or hint',
       () {

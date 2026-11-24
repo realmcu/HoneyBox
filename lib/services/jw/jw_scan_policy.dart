@@ -22,10 +22,9 @@ abstract final class JwScanPolicy {
       bool onlyNamed = false,
       bool onlyConnectable = false}) {
     final name = device.name.trim().toLowerCase();
+    final unnamed = name.isEmpty || name == 'n/a' || name == '未知设备';
     if (onlyConnectable && !device.connectable) return false;
-    if (onlyNamed && (name.isEmpty || name == 'n/a' || name == '未知设备')) {
-      return false;
-    }
+    if (onlyNamed && unnamed) return false;
     final q = query.trim().toLowerCase();
     final hexQuery = q.replaceAll(RegExp(r'[:\-\s]'), '');
     final isFullHexSequence = RegExp(r'^[0-9a-f]{12}$').hasMatch(hexQuery);
@@ -44,8 +43,11 @@ abstract final class JwScanPolicy {
               hexQuery;
     }
     return q.isEmpty ||
-        (isDefaultWatchFilter && device.jwCandidate) ||
         device.name.toLowerCase().contains(q) ||
-        device.deviceId.toLowerCase().contains(q);
+        device.deviceId.toLowerCase().contains(q) ||
+        // Manufacturer-only JW adverts are intentionally shown in the default
+        // Watch view, but only while they have no usable name. Named HBox and
+        // other Realtek FEC5 devices must still obey the text filter.
+        (isDefaultWatchFilter && unnamed && device.jwCandidate);
   }
 }
