@@ -12,7 +12,7 @@ void main() {
         candidate({}, {
           0xfec5: [1, 2, 3, 4, 5, 6]
         }),
-        isTrue);
+        isFalse);
     expect(
         candidate({}, {
           0x07d0: [1, 2, 3, 4, 5, 6]
@@ -53,12 +53,19 @@ void main() {
             query: 'Watch', isDefaultWatchFilter: false, device: d),
         isFalse);
   });
-  test('Watch text filter does not admit named FEC5 non-watch devices', () {
+  test('Realtek FEC5-only advertisement is not shown as a Watch candidate', () {
+    const manufacturerData = {
+      0xfec5: [0xa6, 0x10, 0xc6, 0x17, 0xaa, 0x5c]
+    };
+    final candidate = JwScanPolicy.isCandidate(
+        serviceUuids: const {}, manufacturerData: manufacturerData);
     final hbox = ScanDevice(
         deviceId: 'A6:10:C6:17:AA:5C',
         name: 'HBox-AA5C',
         rssi: -59,
-        jwCandidate: true);
+        manufacturerData: manufacturerData,
+        jwCandidate: candidate);
+    expect(candidate, isFalse);
     expect(
         JwScanPolicy.matches(
             query: 'Watch', isDefaultWatchFilter: true, device: hbox),

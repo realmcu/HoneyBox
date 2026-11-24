@@ -48,8 +48,7 @@ void main() {
 
     test('flags a device that did not reconnect', () {
       expect(
-        watchOtaResultMessage(OtaOutcome.verified, '已核验',
-            reconnected: false),
+        watchOtaResultMessage(OtaOutcome.verified, '已核验', reconnected: false),
         'Watch 固件升级成功（设备未自动重连，请重新扫描连接）',
       );
     });

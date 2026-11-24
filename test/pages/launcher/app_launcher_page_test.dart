@@ -106,8 +106,7 @@ void main() {
     expect(find.text('选择应用'), findsOneWidget);
   });
 
-  testWidgets('returning from an app clears current app state',
-      (tester) async {
+  testWidgets('returning from an app clears current app state', (tester) async {
     // Watch with no connection lands on ScanPage, so the scan surface needs a
     // fake manager and explicit pumps (ScanPage keeps a periodic timer alive).
     await tester.pumpWidget(ProviderScope(

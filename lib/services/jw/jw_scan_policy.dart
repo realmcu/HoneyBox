@@ -11,8 +11,9 @@ abstract final class JwScanPolicy {
       return true;
     }
     // flutter_blue_plus separates the little-endian company ID from its data.
-    return manufacturerData.entries.any(
-        (e) => (e.key == 0x07d0 || e.key == 0xfec5) && e.value.length >= 6);
+    // 0xFEC5 is a shared Realtek company ID and does not identify JW devices.
+    return manufacturerData.entries
+        .any((e) => e.key == 0x07d0 && e.value.length >= 6);
   }
 
   static bool matches(
@@ -43,11 +44,8 @@ abstract final class JwScanPolicy {
               hexQuery;
     }
     return q.isEmpty ||
+        (isDefaultWatchFilter && device.jwCandidate) ||
         device.name.toLowerCase().contains(q) ||
-        device.deviceId.toLowerCase().contains(q) ||
-        // Manufacturer-only JW adverts are intentionally shown in the default
-        // Watch view, but only while they have no usable name. Named HBox and
-        // other Realtek FEC5 devices must still obey the text filter.
-        (isDefaultWatchFilter && unnamed && device.jwCandidate);
+        device.deviceId.toLowerCase().contains(q);
   }
 }
