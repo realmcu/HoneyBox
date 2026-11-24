@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:honeybox/i18n/app_strings.dart';
 import 'package:honeybox/pages/device/device_features.dart';
 import 'package:honeybox/services/device_type_store.dart';
 
@@ -57,8 +58,12 @@ void main() {
     });
 
     test('每张卡都有标题和图标', () {
+      // 标题来自 AppStrings(中英各一份),这里只保证每个 id 都翻得出非空文案。
       for (final f in kDeviceFeatures) {
-        expect(f.title, isNotEmpty, reason: f.route);
+        expect(const ZhStrings().featureTitle(f.id), isNotEmpty,
+            reason: f.route);
+        expect(const EnStrings().featureTitle(f.id), isNotEmpty,
+            reason: f.route);
         expect(f.types, isNotEmpty, reason: f.route);
       }
     });

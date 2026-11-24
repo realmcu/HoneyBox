@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../i18n/app_strings.dart';
 import '../app_catalog.dart';
 
 /// 应用启动器里的一张卡片：图标 + 标题 + 副标题；
@@ -19,6 +20,7 @@ class AppCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
+    final strings = AppStrings.of(context);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -48,7 +50,7 @@ class AppCard extends StatelessWidget {
                       runSpacing: 4,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Text(entry.title, style: tt.titleMedium),
+                        Text(strings.appTitle(entry.id), style: tt.titleMedium),
                         if (!entry.implemented)
                           _PreviewBadge(color: cs.outline),
                         if (connectedDeviceName != null)
@@ -60,7 +62,7 @@ class AppCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      entry.subtitle,
+                      strings.appSubtitle(entry.id),
                       style: tt.bodySmall?.copyWith(color: cs.outline),
                     ),
                   ],

@@ -11,6 +11,8 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
 import com.example.map1.MapFeature
+import com.example.map1.i18n.AppLanguage
+import com.example.map1.i18n.LanguagePreference
 import com.example.map1.navi.NaviCaptureService
 import com.example.map1.navi.NaviFramePreview
 import io.flutter.embedding.android.FlutterActivity
@@ -319,6 +321,14 @@ class MainActivity : FlutterActivity() {
                             }
                         },
                     )
+                }
+                // The Flutter launcher owns the language switch now; mirror its
+                // choice into the dashboard's preference store so both sides agree.
+                "setLanguage" -> {
+                    val tag = call.argument<String>("tag")
+                    LanguagePreference.ensureLoaded(this)
+                    LanguagePreference.select(this, AppLanguage.fromTag(tag))
+                    result.success(null)
                 }
                 else -> result.notImplemented()
             }

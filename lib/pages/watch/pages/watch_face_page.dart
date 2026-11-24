@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../i18n/app_strings.dart';
 import '../widgets/watch_feature_placeholder.dart';
 
 /// 表盘推送 — 选择 / 自定义表盘并设为手表当前表盘。
@@ -7,10 +8,11 @@ class WatchFacePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const WatchFeaturePlaceholder(
-      title: '表盘推送',
+    final watch = AppStrings.of(context).watch;
+    return WatchFeaturePlaceholder(
+      title: watch.cardFace,
       icon: Icons.palette_outlined,
-      description: '选择或自定义表盘，并推送设为手表当前表盘',
+      description: watch.faceDescription,
     );
   }
 }

@@ -18,8 +18,7 @@ class _FactoryItem {
     this.title,
     this.icon, [
     this.requestValue = const [],
-  ]
-  );
+  ]);
 
   final int requestKey;
   final int responseKey;

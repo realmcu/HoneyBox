@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../i18n/app_language.dart';
+import '../../i18n/app_strings.dart';
 import '../../providers/ble_provider.dart';
+import '../../providers/language_provider.dart';
+import '../../services/app_settings.dart';
 import '../../providers/current_app_provider.dart';
 import '../ebadge/ebadge_app_root.dart';
 import '../shared/update_flow.dart';
@@ -25,24 +29,48 @@ class AppLauncherPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connected = ref.watch(connectedDeviceProvider);
+    final strings = AppStrings.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('选择应用'),
+        title: Text(strings.launcherTitle),
         actions: [
+          // Language lives here rather than inside the dashboard: it now drives
+          // both this app and the native dashboard, so it belongs one level up.
+          PopupMenuButton<AppLanguage>(
+            icon: const Icon(Icons.language),
+            tooltip: strings.languageTooltip,
+            onSelected: (language) => setAppLanguage(ref, language),
+            itemBuilder: (context) => [
+              for (final language in AppLanguage.values)
+                CheckedPopupMenuItem<AppLanguage>(
+                  value: language,
+                  checked: ref.watch(appSettingsProvider).language == language,
+                  child: Text(switch (language) {
+                    AppLanguage.system => strings.languageFollowSystem,
+                    AppLanguage.zhHans => strings.languageChinese,
+                    AppLanguage.en => strings.languageEnglish,
+                  }),
+                ),
+            ],
+          ),
           PopupMenuButton<String>(
             onSelected: (v) {
-              // '检查更新' runs in place; every other entry is a route name.
+              // The update entry runs in place; every other entry is a route.
               if (v == _kUpdateAction) {
                 runUpdateCheck(context);
                 return;
               }
               Navigator.pushNamed(context, v);
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: '/qiniu-files', child: Text('七牛云文件')),
-              PopupMenuItem(value: '/qiniu-config', child: Text('七牛云配置')),
-              PopupMenuItem(value: '/chip-config', child: Text('芯片配置')),
-              PopupMenuItem(value: _kUpdateAction, child: Text('检查更新')),
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                  value: '/qiniu-files', child: Text(strings.menuQiniuFiles)),
+              PopupMenuItem(
+                  value: '/qiniu-config', child: Text(strings.menuQiniuConfig)),
+              PopupMenuItem(
+                  value: '/chip-config', child: Text(strings.menuChipConfig)),
+              PopupMenuItem(
+                  value: _kUpdateAction, child: Text(strings.menuCheckUpdate)),
             ],
           ),
         ],
@@ -75,19 +103,25 @@ class AppLauncherPage extends ConsumerWidget {
       } on PlatformException catch (error) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(error.message ?? '无法打开地图功能')),
+            SnackBar(
+              content: Text(
+                error.message ?? AppStrings.of(context).openMapFailed,
+              ),
+            ),
           );
         }
       } on MissingPluginException {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('当前平台不支持地图功能')),
+            SnackBar(content: Text(AppStrings.of(context).mapUnsupported)),
           );
         }
       } catch (error) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('无法打开地图功能：$error')),
+            SnackBar(
+              content: Text(AppStrings.of(context).openMapFailedWith('$error')),
+            ),
           );
         }
       }
@@ -103,7 +137,7 @@ class AppLauncherPage extends ConsumerWidget {
       final switchApp = await _confirmSwitchConnectedApp(
         context,
         connectedName: existing.name,
-        targetName: entry.title,
+        targetName: AppStrings.of(context).appTitle(entry.id),
       );
       if (!switchApp || !context.mounted) return;
       await ref.read(bleNotifierProvider.notifier).disconnect();
@@ -129,19 +163,20 @@ class AppLauncherPage extends ConsumerWidget {
     required String connectedName,
     required String targetName,
   }) async {
+    final strings = AppStrings.of(context);
     return await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('切换应用'),
-            content: Text('当前已连接 $connectedName。打开 $targetName 前会先断开当前设备。'),
+            title: Text(strings.switchAppTitle),
+            content: Text(strings.switchAppBody(connectedName, targetName)),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('取消'),
+                child: Text(strings.cancel),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('断开并打开'),
+                child: Text(strings.disconnectAndOpen),
               ),
             ],
           ),

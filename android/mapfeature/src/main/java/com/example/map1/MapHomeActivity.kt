@@ -67,7 +67,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.map1.i18n.DashboardI18n
-import com.example.map1.i18n.LanguageMenuButton
 import com.example.map1.i18n.LanguagePreference
 import com.example.map1.i18n.LocalAppStrings
 import com.example.map1.i18n.appStrings
@@ -786,16 +785,13 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             connText = strings.noConnection
             connColor = MaterialTheme.colorScheme.outline
         }
-        // 状态行右侧放语言入口：标题栏已经排满「连接 / 扫一扫」，再塞图标会把标题挤断。
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = connText,
-                style = MaterialTheme.typography.bodySmall,
-                color = connColor,
-                modifier = Modifier.weight(1f),
-            )
-            LanguageMenuButton()
-        }
+        // Language is chosen in the Flutter launcher and pushed over the
+        // honeybox/map channel, so the dashboard only renders it.
+        Text(
+            text = connText,
+            style = MaterialTheme.typography.bodySmall,
+            color = connColor,
+        )
 
         // 起点 / 终点放同一行节省纵向空间
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

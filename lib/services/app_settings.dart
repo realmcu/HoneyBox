@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../i18n/app_language.dart';
+
 /// App-wide user preferences (persisted to a small JSON file in the app support
 /// directory). Currently: local-cache size cap and the eBadge debug-mode
 /// switch. More knobs can be added alongside these without touching the
@@ -17,19 +19,30 @@ class AppSettings {
   /// 见 docs/superpowers/specs/2026-07-29-debug-mode-fake-device-design.md
   final bool debugMode;
 
+  /// UI language: `system` follows the device locale.
+  final AppLanguage language;
+
   const AppSettings({
     this.cacheLimitMB = kDefaultCacheLimitMB,
     this.debugMode = false,
+    this.language = AppLanguage.system,
   });
 
-  AppSettings copyWith({int? cacheLimitMB, bool? debugMode}) => AppSettings(
+  AppSettings copyWith({
+    int? cacheLimitMB,
+    bool? debugMode,
+    AppLanguage? language,
+  }) =>
+      AppSettings(
         cacheLimitMB: cacheLimitMB ?? this.cacheLimitMB,
         debugMode: debugMode ?? this.debugMode,
+        language: language ?? this.language,
       );
 
   Map<String, dynamic> toJson() => {
         'cacheLimitMB': cacheLimitMB,
         'debugMode': debugMode,
+        'language': language.tag,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
@@ -37,6 +50,7 @@ class AppSettings {
             ((json['cacheLimitMB'] as num?)?.toInt() ?? kDefaultCacheLimitMB)
                 .clamp(kMinCacheLimitMB, kMaxCacheLimitMB),
         debugMode: json['debugMode'] as bool? ?? false,
+        language: appLanguageFromTag(json['language'] as String?),
       );
 }
 
@@ -84,6 +98,15 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
     final clamped = mb.clamp(kMinCacheLimitMB, kMaxCacheLimitMB);
     if (clamped == state.cacheLimitMB) return;
     state = state.copyWith(cacheLimitMB: clamped);
+    _save();
+  }
+
+  /// Switch the UI language and persist it. Pushing it to the native dashboard
+  /// is the caller's job (see `languageProviders`), because that needs the
+  /// platform channel and a `WidgetRef`.
+  void setLanguage(AppLanguage value) {
+    if (value == state.language) return;
+    state = state.copyWith(language: value);
     _save();
   }
 

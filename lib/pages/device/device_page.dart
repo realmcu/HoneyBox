@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
 import '../../services/device_type_store.dart';
+import '../../i18n/app_strings.dart';
 import '../../theme/app_theme.dart';
 import '../shared/app_drawer.dart';
 import '../shared/disconnect_dialog.dart';
@@ -135,7 +136,7 @@ class _DevicePageState extends ConsumerState<DevicePage>
             onPressed: _onDisconnectTap,
             // Red icon flags the destructive action; the label stays white.
             icon: Icon(Icons.link_off, size: 18, color: cs.error),
-            label: const Text('断开'),
+            label: Text(AppStrings.of(context).disconnect),
             style: TextButton.styleFrom(foregroundColor: cs.onPrimary),
           ),
         ],
@@ -218,7 +219,7 @@ class _DevicePageState extends ConsumerState<DevicePage>
                   OutlinedButton.icon(
                     onPressed: () => _open('/wifi'),
                     icon: const Icon(Icons.wifi_tethering, size: 18),
-                    label: const Text('WiFi 配网'),
+                    label: Text(AppStrings.of(context).deviceWifiSetup),
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                     ),
@@ -248,7 +249,9 @@ class _DevicePageState extends ConsumerState<DevicePage>
                               crossAxisSpacing: 12,
                               mainAxisExtent: _kCardHeight,
                             ),
-                            children: features.map(_buildCard).toList(),
+                            children: features
+                                .map((f) => _buildCard(context, f))
+                                .toList(),
                           )
                         : GridView.count(
                             crossAxisCount: 2,
@@ -256,7 +259,9 @@ class _DevicePageState extends ConsumerState<DevicePage>
                             crossAxisSpacing: 12,
                             childAspectRatio: 1.25,
                             physics: const BouncingScrollPhysics(),
-                            children: features.map(_buildCard).toList(),
+                            children: features
+                                .map((f) => _buildCard(context, f))
+                                .toList(),
                           ),
               ),
             ),
@@ -266,9 +271,9 @@ class _DevicePageState extends ConsumerState<DevicePage>
     );
   }
 
-  Widget _buildCard(DeviceFeature feature) => ActionCard(
+  Widget _buildCard(BuildContext context, DeviceFeature feature) => ActionCard(
         icon: feature.icon,
-        title: feature.title,
+        title: AppStrings.of(context).featureTitle(feature.id),
         onTap: () => _open(feature.route),
       );
 }
@@ -292,7 +297,7 @@ class _NoFeatureHint extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     return Center(
       child: Text(
-        '该设备类型暂无可用功能',
+        AppStrings.of(context).deviceNoFeatures,
         style: tt.bodyMedium?.copyWith(color: AppTheme.textSecondary),
       ),
     );
@@ -316,7 +321,7 @@ class _DeviceTypeSheet extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: Text(
-              '设备类型',
+              AppStrings.of(context).deviceTypeLabel,
               textAlign: TextAlign.center,
               style: tt.titleMedium,
             ),
@@ -333,7 +338,7 @@ class _DeviceTypeSheet extends StatelessWidget {
               ),
               title: Text(type.label, style: tt.bodyLarge),
               subtitle: Text(
-                _describe(type),
+                _describe(type, AppStrings.of(context)),
                 style: tt.bodySmall?.copyWith(color: AppTheme.textSecondary),
               ),
               onTap: () => Navigator.of(context).pop(type),
@@ -345,8 +350,10 @@ class _DeviceTypeSheet extends StatelessWidget {
   }
 
   /// 类型的一句话说明 —— 直接说「会列出什么」,而不是产品线代号。
-  static String _describe(DeviceType type) {
-    final titles = deviceFeaturesFor(type).map((f) => f.title).join(' · ');
-    return titles.isEmpty ? '暂无功能' : titles;
+  static String _describe(DeviceType type, AppStrings strings) {
+    final titles = deviceFeaturesFor(type)
+        .map((f) => strings.featureTitle(f.id))
+        .join(' · ');
+    return titles.isEmpty ? strings.deviceNoFeatureShort : titles;
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../app_info.dart';
+import '../../i18n/app_strings.dart';
 import '../../theme/app_theme.dart';
 
 /// App-wide navigation drawer (nRF-Connect style): a Realtek wordmark pinned to
@@ -21,6 +22,7 @@ class AppDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final strings = AppStrings.of(context);
     final topInset = MediaQuery.paddingOf(context).top;
 
     return Drawer(
@@ -42,12 +44,12 @@ class AppDrawer extends StatelessWidget {
               children: [
                 _DrawerItem(
                   icon: Icons.memory,
-                  label: '芯片配置',
+                  label: strings.drawerChipConfig,
                   onTap: () => _go(context, '/chip-config'),
                 ),
                 _DrawerItem(
                   icon: Icons.settings_outlined,
-                  label: '设置',
+                  label: strings.drawerSettings,
                   onTap: () => _go(context, '/settings'),
                 ),
               ],

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../i18n/app_strings.dart';
 import '../../providers/ble_provider.dart';
 import '../../providers/current_app_provider.dart';
 import '../../services/jw/jw_scan_policy.dart';
@@ -199,7 +200,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
       if (!success) {
         setState(() => _connectingId = null);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('连接失败，请重试')),
+          SnackBar(content: Text(AppStrings.of(context).scanConnectFailed)),
         );
       }
     });
@@ -250,30 +251,53 @@ class _ScanPageState extends ConsumerState<ScanPage>
           showBack ? 0 : MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
         leading: canPop ? const BackButton() : null,
-        title: Text('${widget.appTitle} · 扫描设备',
-            style: tt.titleLarge?.copyWith(color: cs.onPrimary)),
+        // 两行标题:应用名 + 页面用途。单行 'Watch · Scan devices' 在英文下会被
+        // 右侧三个操作按钮挤成 'Wat…'。
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(widget.appTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tt.titleMedium?.copyWith(color: cs.onPrimary)),
+            Text(AppStrings.of(context).scanSubtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tt.labelSmall
+                    ?.copyWith(color: cs.onPrimary.withValues(alpha: 0.85))),
+          ],
+        ),
         backgroundColor: cs.primary,
         foregroundColor: cs.onPrimary,
         systemOverlayStyle: SystemUiOverlayStyle.light,
         actions: [
+          // 「已保存历史」收进溢出菜单:它是低频操作,而写成文字按钮时会把标题挤成
+          // 'Wat…'(英文下尤其明显)。
           if (widget.onBrowseSavedHistory != null)
-            TextButton.icon(
-                onPressed: widget.onBrowseSavedHistory,
-                icon: const Icon(Icons.history),
-                label: const Text('已保存历史'),
-                style: TextButton.styleFrom(foregroundColor: cs.onPrimary)),
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, color: cs.onPrimary),
+              tooltip: AppStrings.of(context).scanSavedHistory,
+              onSelected: (_) => widget.onBrowseSavedHistory!(),
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'history',
+                  child: Text(AppStrings.of(context).scanSavedHistory),
+                ),
+              ],
+            ),
           if (scanning)
             TextButton.icon(
               onPressed: _bleNotifier.stopScan,
               icon: const Icon(Icons.stop_circle_outlined, size: 18),
-              label: const Text('停止'),
+              label: Text(AppStrings.of(context).stop),
               style: TextButton.styleFrom(foregroundColor: cs.onPrimary),
             )
           else
             TextButton.icon(
               onPressed: _startScan,
               icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('扫描'),
+              label: Text(AppStrings.of(context).scanScan),
               style: TextButton.styleFrom(foregroundColor: cs.onPrimary),
             ),
           const SizedBox(width: 4),
@@ -303,8 +327,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
                           rssi: device.rssi,
                           connectable: device.connectable,
                           debug: device.debug,
-                          actionLabel:
-                              widget.onDeviceSelected == null ? '连接' : '选择',
+                          actionLabel: widget.onDeviceSelected == null
+                              ? AppStrings.of(context).scanConnect
+                              : AppStrings.of(context).scanSelect,
                           isConnecting: _connectingId == device.deviceId,
                           onConnect: _connectingId == null
                               ? () => _onConnect(device)
@@ -345,7 +370,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
                   fillColor: Colors.white,
                   prefixIcon: Icon(Icons.filter_alt_outlined,
                       size: 20, color: cs.onSurfaceVariant),
-                  hintText: '按名称或地址过滤',
+                  hintText: AppStrings.of(context).scanFilterHint,
                   suffixIcon: _filter.isEmpty
                       ? null
                       : IconButton(
@@ -421,21 +446,21 @@ class _ScanPageState extends ConsumerState<ScanPage>
               ),
             _filterChip(
               cs,
-              label: '仅可连接',
+              label: AppStrings.of(context).scanOnlyConnectable,
               selected: _onlyConnectable,
               onSelected: (sel) => setState(() => _onlyConnectable = sel),
             ),
             if (widget.defaultOnlyNamed)
               _filterChip(
                 cs,
-                label: '仅有名称',
+                label: AppStrings.of(context).scanOnlyNamed,
                 selected: _onlyNamed,
                 onSelected: (sel) => setState(() => _onlyNamed = sel),
               ),
             if (widget.defaultSortBySignal)
               _filterChip(
                 cs,
-                label: '信号强度排序',
+                label: AppStrings.of(context).scanSortBySignal,
                 selected: _sortBySignal,
                 onSelected: (sel) => setState(() => _sortBySignal = sel),
               ),
@@ -499,7 +524,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        '定位未开启',
+                        AppStrings.of(context).scanLocationOff,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: tt.bodyMedium?.copyWith(color: cs.onError),
@@ -509,8 +534,10 @@ class _ScanPageState extends ConsumerState<ScanPage>
                 ),
               ),
             ),
-            _bannerAction(cs, '打开', SystemSettings.openLocationSettings),
-            _bannerAction(cs, '说明', _showLocationInfo),
+            _bannerAction(cs, AppStrings.of(context).open,
+                SystemSettings.openLocationSettings),
+            _bannerAction(
+                cs, AppStrings.of(context).scanWhy, _showLocationInfo),
           ],
         ),
       ),
@@ -534,12 +561,9 @@ class _ScanPageState extends ConsumerState<ScanPage>
     return showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('为什么需要定位？', textAlign: TextAlign.center),
-        content: const Text(
-          'Android 系统将扫描蓝牙(BLE)设备视为可能推断位置的行为，'
-          '因此必须开启系统「定位」服务，App 才能搜索到附近的设备。\n\n'
-          '本 App 仅用它来完成蓝牙扫描，不会收集或上传你的地理位置。',
-        ),
+        title:
+            Text(AppStrings.of(ctx).scanWhyTitle, textAlign: TextAlign.center),
+        content: Text(AppStrings.of(ctx).scanWhyBody),
         actions: [
           SizedBox(
             width: double.infinity,
@@ -548,7 +572,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
                 Navigator.pop(ctx);
                 SystemSettings.openLocationSettings();
               },
-              child: const Text('去开启'),
+              child: Text(AppStrings.of(ctx).scanTurnOn),
             ),
           ),
         ],
@@ -579,21 +603,25 @@ class _ScanPageState extends ConsumerState<ScanPage>
                               size: 36, color: cs.primary),
                         ),
                         const SizedBox(height: 24),
-                        Text('正在搜索附近的 ${widget.appTitle} 设备…',
+                        Text(
+                            AppStrings.of(context)
+                                .scanSearching(widget.appTitle),
                             style: tt.bodyLarge),
                         const SizedBox(height: 12),
-                        Text('下拉可重新扫描', style: tt.bodySmall),
+                        Text(AppStrings.of(context).scanPullToRescan,
+                            style: tt.bodySmall),
                       ]
                     : [
                         Icon(Icons.bluetooth_disabled,
                             size: 64, color: cs.outline),
                         const SizedBox(height: 16),
-                        Text('未发现设备', style: tt.titleMedium),
+                        Text(AppStrings.of(context).scanNoDevices,
+                            style: tt.titleMedium),
                         const SizedBox(height: 8),
                         Text(
                           _filter.trim().isEmpty
-                              ? '请确保设备已开启并靠近手机'
-                              : '没有匹配「$_filter」的设备，可清除过滤条件',
+                              ? AppStrings.of(context).scanEnsureOn
+                              : AppStrings.of(context).scanNoMatch(_filter),
                           style: tt.bodyMedium,
                           textAlign: TextAlign.center,
                         ),
@@ -601,7 +629,7 @@ class _ScanPageState extends ConsumerState<ScanPage>
                         FilledButton.icon(
                           onPressed: _startScan,
                           icon: const Icon(Icons.refresh),
-                          label: const Text('重新扫描'),
+                          label: Text(AppStrings.of(context).scanRescan),
                         ),
                       ],
               ),

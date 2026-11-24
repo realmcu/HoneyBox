@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../i18n/app_strings.dart';
 import '../../providers/ble_provider.dart';
 import '../../providers/current_app_provider.dart';
 import '../../services/app_settings.dart';
@@ -42,15 +43,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final cs = theme.colorScheme;
     final settings = ref.watch(appSettingsProvider);
     final currentApp = ref.watch(currentAppProvider);
+    final strings = AppStrings.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
+      appBar: AppBar(title: Text(strings.settingsTitle)),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         children: [
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 8),
-            child: Text('存储',
+            child: Text(strings.settingsSectionStorage,
                 style: theme.textTheme.titleSmall?.copyWith(color: cs.primary)),
           ),
           _cacheLimitCard(theme, cs, settings),
@@ -62,7 +64,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             const SizedBox(height: 20),
             Padding(
               padding: const EdgeInsets.only(left: 4, bottom: 8),
-              child: Text('蓝牙',
+              child: Text(strings.settingsSectionBluetooth,
                   style:
                       theme.textTheme.titleSmall?.copyWith(color: cs.primary)),
             ),
@@ -70,7 +72,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             const SizedBox(height: 20),
             Padding(
               padding: const EdgeInsets.only(left: 4, bottom: 8),
-              child: Text('调试',
+              child: Text(strings.settingsSectionDebug,
                   style:
                       theme.textTheme.titleSmall?.copyWith(color: cs.primary)),
             ),
@@ -96,7 +98,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     size: 20, color: cs.onSurfaceVariant),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text('本地缓存上限', style: theme.textTheme.titleMedium),
+                  child: Text(AppStrings.of(context).settingsCacheLimit,
+                      style: theme.textTheme.titleMedium),
                 ),
                 Text('${settings.cacheLimitMB} MB',
                     style: theme.textTheme.titleMedium?.copyWith(
@@ -139,7 +142,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
             ),
             const SizedBox(height: 6),
-            Text('已用 ${formatFileSize(used)} / $limitMB MB',
+            Text(
+                AppStrings.of(context)
+                    .settingsUsedOf(formatFileSize(used), limitMB),
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: cs.onSurfaceVariant)),
           ],
@@ -153,11 +158,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       margin: EdgeInsets.zero,
       child: ListTile(
         leading: const Icon(Icons.folder_outlined),
-        title: const Text('管理本地缓存'),
+        title: Text(AppStrings.of(context).settingsManageCache),
         subtitle: FutureBuilder<int>(
           future: _usage,
           builder: (context, snap) => Text(
-            snap.hasData ? '当前已用 ${formatFileSize(snap.data!)}' : '查看并删除已缓存的文件',
+            snap.hasData
+                ? AppStrings.of(context)
+                    .settingsManageCacheUsed(formatFileSize(snap.data!))
+                : AppStrings.of(context).settingsManageCacheHint,
             style:
                 theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
           ),
@@ -188,12 +196,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       margin: EdgeInsets.zero,
       child: ListTile(
         leading: const Icon(Icons.bluetooth_searching),
-        title: const Text('清除服务缓存'),
+        title: Text(AppStrings.of(context).settingsGattClear),
         subtitle: Text(
           connected == null
-              ? '需先连接设备。用于设备升级固件后 App 仍识别不到新功能的情况。'
-              : '设备升级固件后若 App 仍提示不支持某功能(如投屏),点此重新读取'
-                  '${connected.name} 的服务表。不一定成功 —— 部分机型会忽略该操作。',
+              ? AppStrings.of(context).settingsGattClearNoDevice
+              : AppStrings.of(context).settingsGattClearWith(connected.name),
           style:
               theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
         ),
@@ -212,24 +219,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   /// 清缓存 + 重新发现服务。先确认,因为它会短暂打断与设备的通信。
   Future<void> _onPurgeGattCache() async {
+    final strings = AppStrings.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清除服务缓存？', textAlign: TextAlign.center),
-        content: const Text(
-          'App 将丢弃 Android 为这台设备缓存的服务表，并重新读取一次。\n\n'
-          '期间与设备的通信会短暂中断，请勿在传输文件或投屏时操作。\n\n'
-          '注意：部分机型不支持该操作，清除可能不生效。若清除后仍识别不到新功能，'
-          '可到系统设置里清除「蓝牙」应用的数据，或先取消配对再重新连接。',
-        ),
+        title: Text(strings.settingsGattClearDialogTitle,
+            textAlign: TextAlign.center),
+        content: Text(strings.settingsGattClearDialogBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(strings.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('清除'),
+            child: Text(strings.clear),
           ),
         ],
       ),
@@ -241,10 +245,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     if (!mounted) return;
     setState(() => _purging = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok
-          ? '已重新读取服务表。若功能仍不可用，请断开后重新连接，'
-              '或在系统设置里清除「蓝牙」应用数据'
-          : '操作失败：设备可能已断开，或该机型不支持清除缓存'),
+      content: Text(
+          ok ? strings.settingsGattClearDone : strings.settingsGattClearFailed),
     ));
   }
 
@@ -255,10 +257,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       margin: EdgeInsets.zero,
       child: SwitchListTile(
         secondary: const Icon(Icons.bug_report_outlined),
-        title: const Text('调试模式'),
+        title: Text(AppStrings.of(context).settingsDebugMode),
         subtitle: Text(
-          '扫描列表首行会出现虚拟设备 eBadge-debug,用于无实物调试 UI 及交互。'
-          '虚拟连接不会发送任何真实数据。',
+          AppStrings.of(context).settingsDebugModeBody,
           style:
               theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
         ),

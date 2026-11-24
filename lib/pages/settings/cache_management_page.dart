@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/app_settings.dart';
+import '../../i18n/app_strings.dart';
 import '../../services/file_cache.dart';
 import '../shared/cache_ui.dart';
 import '../shared/file_send_layout.dart';
@@ -24,19 +25,29 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
   // Filter categories. Carousels are stored in the 视频 pool tagged
   // src=slideshow, so they're split out from plain 视频 by inspecting that
   // param rather than by CacheKind alone.
-  final List<({String label, bool Function(CacheEntry) test})> _filters = [
-    (label: '全部', test: (_) => true),
-    (label: CacheKind.image.label, test: (e) => e.kind == CacheKind.image),
-    (label: CacheKind.danmaku.label, test: (e) => e.kind == CacheKind.danmaku),
-    (
-      label: CacheKind.video.label,
-      test: (e) => e.kind == CacheKind.video && e.params['src'] != 'slideshow',
-    ),
-    (
-      label: '多图轮播',
-      test: (e) => e.kind == CacheKind.video && e.params['src'] == 'slideshow',
-    ),
-  ];
+  List<({String label, bool Function(CacheEntry) test})> _filters(
+          AppStrings strings) =>
+      [
+        (label: strings.cacheLabelAll, test: (_) => true),
+        (
+          label: strings.cacheKindLabel(CacheKind.image),
+          test: (e) => e.kind == CacheKind.image,
+        ),
+        (
+          label: strings.cacheKindLabel(CacheKind.danmaku),
+          test: (e) => e.kind == CacheKind.danmaku,
+        ),
+        (
+          label: strings.cacheKindLabel(CacheKind.video),
+          test: (e) =>
+              e.kind == CacheKind.video && e.params['src'] != 'slideshow',
+        ),
+        (
+          label: strings.cacheLabelCarousel,
+          test: (e) =>
+              e.kind == CacheKind.video && e.params['src'] == 'slideshow',
+        ),
+      ];
 
   @override
   void initState() {
@@ -65,15 +76,15 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清空缓存'),
-        content: const Text('将删除全部本地缓存文件，此操作不可恢复。'),
+        title: Text(AppStrings.of(context).cacheClearAll),
+        content: Text(AppStrings.of(context).cacheClearAllBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+              child: Text(AppStrings.of(context).cancel)),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('清空')),
+              child: Text(AppStrings.of(context).clear)),
         ],
       ),
     );
@@ -90,12 +101,12 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('本地缓存'),
+        title: Text(AppStrings.of(context).cacheTitle),
         actions: [
           IconButton(
             onPressed: _clearAll,
             icon: const Icon(Icons.delete_sweep_outlined),
-            tooltip: '清空',
+            tooltip: AppStrings.of(context).clear,
           ),
         ],
       ),
@@ -107,7 +118,8 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
           }
           final all = snap.data!;
           final used = all.fold<int>(0, (sum, e) => sum + e.size);
-          final shown = all.where(_filters[_filterIdx].test).toList();
+          final filters = _filters(AppStrings.of(context));
+          final shown = all.where(filters[_filterIdx].test).toList();
 
           return Column(
             children: [
@@ -117,7 +129,7 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
               Expanded(
                 child: shown.isEmpty
                     ? Center(
-                        child: Text('暂无缓存',
+                        child: Text(AppStrings.of(context).cacheEmpty,
                             style: theme.textTheme.bodyMedium
                                 ?.copyWith(color: cs.onSurfaceVariant)),
                       )
@@ -145,11 +157,13 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
         children: [
           Row(
             children: [
-              Text('共 $count 项',
+              Text(AppStrings.of(context).cacheCount(count),
                   style: theme.textTheme.bodyMedium
                       ?.copyWith(color: cs.onSurfaceVariant)),
               const Spacer(),
-              Text('已用 ${formatFileSize(used)} / $limitMB MB',
+              Text(
+                  AppStrings.of(context)
+                      .settingsUsedOf(formatFileSize(used), limitMB),
                   style: theme.textTheme.bodyMedium?.copyWith(
                       color: cs.primary, fontWeight: FontWeight.w600)),
             ],
@@ -170,16 +184,17 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
 
   Widget _filterRow() {
     final cs = Theme.of(context).colorScheme;
+    final filters = _filters(AppStrings.of(context));
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
-          for (int i = 0; i < _filters.length; i++)
+          for (int i = 0; i < filters.length; i++)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
-                label: Text(_filters[i].label),
+                label: Text(filters[i].label),
                 labelStyle: const TextStyle(fontSize: 12),
                 selected: _filterIdx == i,
                 onSelected: (_) => setState(() => _filterIdx = i),
@@ -204,14 +219,17 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
     return ListTile(
       onTap: () => _openPreview(e),
       leading: CacheThumb(entry: e),
-      title: Text('${e.kind.label} · ${cacheParamSummary(e)}',
-          maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Text(
+          '${AppStrings.of(context).cacheKindLabel(e.kind)} · '
+          '${cacheParamSummary(e, AppStrings.of(context))}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis),
       subtitle: Text('${cacheTimeLabel(e.time)} · ${formatFileSize(e.size)}',
           style:
               theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
       trailing: IconButton(
         icon: Icon(Icons.delete_outline, color: cs.error),
-        tooltip: '删除',
+        tooltip: AppStrings.of(context).delete,
         onPressed: () => _delete(e),
       ),
     );

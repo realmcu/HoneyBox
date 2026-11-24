@@ -11,17 +11,22 @@ import 'package:flutter/material.dart';
 
 import '../../services/device_type_store.dart';
 
+/// Stable identifier for a feature card; the label comes from `AppStrings`.
+enum DeviceFeatureId { image, danmaku, video, slideshow, stream, ota, debug }
+
 /// 一张功能卡片:图标 + 标题 + 路由,以及它对该类设备是否可见。
 class DeviceFeature {
   const DeviceFeature({
     required this.icon,
-    required this.title,
+    required this.id,
     required this.route,
     required this.types,
   });
 
   final IconData icon;
-  final String title;
+
+  /// Which label to render (`AppStrings.featureTitle`).
+  final DeviceFeatureId id;
 
   /// 命名路由,参数统一是 `{deviceName, deviceId}`(见 `app.dart`)。
   final String route;
@@ -39,39 +44,39 @@ class DeviceFeature {
 const List<DeviceFeature> kDeviceFeatures = [
   DeviceFeature(
     icon: Icons.image_outlined,
-    title: '图片',
+    id: DeviceFeatureId.image,
     route: '/image',
     types: {DeviceType.demo},
   ),
   DeviceFeature(
     icon: Icons.chat_bubble_outline,
-    title: '弹幕',
+    id: DeviceFeatureId.danmaku,
     route: '/danmaku',
     types: {DeviceType.demo},
   ),
   DeviceFeature(
     icon: Icons.movie_creation_outlined,
-    title: '视频 / GIF',
+    id: DeviceFeatureId.video,
     route: '/video',
     types: {DeviceType.demo},
   ),
   DeviceFeature(
     icon: Icons.burst_mode_outlined,
-    title: '多图轮播',
+    id: DeviceFeatureId.slideshow,
     route: '/slideshow',
     types: {DeviceType.demo},
   ),
   // 拍照投屏 — Apple-style AirPlay/screen-mirroring glyph.
   DeviceFeature(
     icon: Icons.airplay,
-    title: '拍照投屏',
+    id: DeviceFeatureId.stream,
     route: '/stream',
     types: {DeviceType.demo},
   ),
   // OTA 升级 — reserved; the internal page is intentionally empty for now.
   DeviceFeature(
     icon: Icons.system_update_alt,
-    title: 'OTA 升级',
+    id: DeviceFeatureId.ota,
     route: '/ota',
     types: {DeviceType.demo},
   ),
@@ -82,7 +87,7 @@ const List<DeviceFeature> kDeviceFeatures = [
   // 点进一个这台机器不认的页面。
   DeviceFeature(
     icon: Icons.terminal,
-    title: '协议调试',
+    id: DeviceFeatureId.debug,
     route: '/ebadge-debug',
     types: {DeviceType.mi},
   ),

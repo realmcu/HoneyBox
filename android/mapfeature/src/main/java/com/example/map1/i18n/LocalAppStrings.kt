@@ -2,6 +2,7 @@ package com.example.map1.i18n
 
 import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
@@ -37,4 +38,17 @@ fun appStrings(context: Context): AppStrings {
         EN -> EnglishStrings
         AppLanguage.SYSTEM -> ZhHansStrings // resolveLanguage never returns this
     }
+}
+
+/**
+ * Wraps page content with the copy for the currently selected language.
+ *
+ * Put this around an activity's `setContent` body; the language itself is
+ * chosen in the Flutter launcher and mirrored into [LanguagePreference], so
+ * changing it recreates/rebinds these pages with the new strings.
+ */
+@Composable
+fun DashboardI18n(content: @Composable () -> Unit) {
+    val strings = rememberAppStrings()
+    CompositionLocalProvider(LocalAppStrings provides strings, content = content)
 }

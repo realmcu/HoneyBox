@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../i18n/app_strings.dart';
 
 /// Watch 各功能子页当前的统一占位样式。业务逻辑接入后，各子页会用真正的
 /// 内容替换掉本组件；在那之前四个入口（表盘 / 通知 / 健康 / OTA）共用它，
@@ -30,7 +31,7 @@ class WatchFeaturePlaceholder extends StatelessWidget {
               Icon(icon, size: 64, color: cs.primary),
               const SizedBox(height: 20),
               Text(
-                '$title 功能开发中',
+                AppStrings.of(context).featureInProgress(title),
                 style: theme.textTheme.titleMedium,
               ),
               const SizedBox(height: 8),

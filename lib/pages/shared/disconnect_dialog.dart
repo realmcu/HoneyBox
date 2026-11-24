@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../i18n/app_strings.dart';
+
 /// 「确认断开设备连接」对话框。两个全宽垂直排列的按钮:红色「断开」在上,
 /// 中性「取消」在下。
 ///
@@ -13,8 +15,9 @@ Future<bool> showDisconnectConfirmDialog(BuildContext context) async {
   final result = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('断开连接', textAlign: TextAlign.center),
-      content: const Text('确认断开设备连接?'),
+      title: Text(AppStrings.of(context).disconnectTitle,
+          textAlign: TextAlign.center),
+      content: Text(AppStrings.of(context).disconnectBody),
       actionsOverflowDirection: VerticalDirection.down,
       actions: [
         Column(
@@ -29,7 +32,7 @@ Future<bool> showDisconnectConfirmDialog(BuildContext context) async {
                   backgroundColor: cs.error,
                   foregroundColor: cs.onError,
                 ),
-                child: const Text('断开'),
+                child: Text(AppStrings.of(context).disconnect),
               ),
             ),
             const SizedBox(height: 8),
@@ -42,7 +45,7 @@ Future<bool> showDisconnectConfirmDialog(BuildContext context) async {
                   backgroundColor: cs.surfaceContainerHighest,
                   foregroundColor: cs.onSurface,
                 ),
-                child: const Text('取消'),
+                child: Text(AppStrings.of(context).cancel),
               ),
             ),
           ],

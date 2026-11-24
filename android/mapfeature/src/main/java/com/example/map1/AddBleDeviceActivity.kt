@@ -70,7 +70,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.map1.i18n.AppStrings
 import com.example.map1.i18n.DashboardI18n
-import com.example.map1.i18n.LanguageMenuButton
 import com.example.map1.i18n.LanguagePreference
 import com.example.map1.i18n.LocalAppStrings
 import com.example.map1.i18n.appStrings
@@ -382,7 +381,6 @@ private fun AddDeviceScreen(
                     ) {
                         Icon(Icons.Outlined.Refresh, contentDescription = strings.rescan)
                     }
-                    LanguageMenuButton()
                 },
             )
         },

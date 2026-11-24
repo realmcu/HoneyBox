@@ -7,6 +7,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../app_info.dart';
+import '../../i18n/app_strings.dart';
 import '../../services/update_service.dart';
 
 /// Runs the full "检查更新" flow off [context]: pick a mirror → query it →
@@ -14,16 +15,17 @@ import '../../services/update_service.dart';
 /// then hand the APK to the system installer. Manages its own dialogs and
 /// snackbars, so the caller only needs to supply a live [context].
 Future<void> runUpdateCheck(BuildContext context) async {
+  final strings = AppStrings.of(context);
   if (defaultTargetPlatform == TargetPlatform.iOS) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('iOS 版本请通过原安装渠道更新')),
+      SnackBar(content: Text(strings.updateIosOnly)),
     );
     return;
   }
 
   if (defaultTargetPlatform == TargetPlatform.macOS) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('macOS 版本请通过原安装渠道更新')),
+      SnackBar(content: Text(strings.updateMacOnly)),
     );
     return;
   }
@@ -66,12 +68,12 @@ Future<void> runUpdateCheck(BuildContext context) async {
   navigator.pop(); // dismiss the spinner
 
   if (error != null) {
-    snack('检查更新失败：$error');
+    snack(strings.updateCheckFailed(error));
     return;
   }
   final result = info!;
   if (!result.hasUpdate) {
-    snack('当前已是最新版本（v${result.currentVersion}）');
+    snack(strings.updateUpToDate(result.currentVersion));
     return;
   }
 
@@ -81,11 +83,11 @@ Future<void> runUpdateCheck(BuildContext context) async {
     builder: (dctx) {
       final cs = Theme.of(dctx).colorScheme;
       return AlertDialog(
-        title: Text('发现新版本 v${result.latestVersion}'),
+        title: Text(strings.updateFoundTitle(result.latestVersion)),
         content: SingleChildScrollView(
           child: Text(
             result.releaseNotes.isEmpty
-                ? '当前版本 v${result.currentVersion}，是否下载并安装最新版本？'
+                ? strings.updateConfirmBody(result.currentVersion)
                 : result.releaseNotes,
           ),
         ),
@@ -103,7 +105,7 @@ Future<void> runUpdateCheck(BuildContext context) async {
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(48),
                   ),
-                  child: const Text('下载并安装'),
+                  child: Text(strings.updateDownloadInstall),
                 ),
               ),
               const SizedBox(height: 8),
@@ -116,7 +118,7 @@ Future<void> runUpdateCheck(BuildContext context) async {
                     backgroundColor: cs.surfaceContainerHighest,
                     foregroundColor: cs.onSurface,
                   ),
-                  child: const Text('以后再说'),
+                  child: Text(strings.updateLater),
                 ),
               ),
             ],
@@ -140,8 +142,8 @@ Future<void> runUpdateCheck(BuildContext context) async {
       builder: (dctx) {
         final cs = Theme.of(dctx).colorScheme;
         return AlertDialog(
-          title: Text('已下载 v${result.latestVersion}'),
-          content: const Text('检测到本地已有校验通过的安装包，可直接安装，无需重新下载。'),
+          title: Text(strings.updateAlreadyTitle(result.latestVersion)),
+          content: Text(strings.updateAlreadyBody),
           actionsOverflowDirection: VerticalDirection.down,
           actions: [
             Column(
@@ -154,7 +156,7 @@ Future<void> runUpdateCheck(BuildContext context) async {
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(48),
                     ),
-                    child: const Text('继续安装'),
+                    child: Text(strings.updateContinueInstall),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -167,7 +169,7 @@ Future<void> runUpdateCheck(BuildContext context) async {
                       backgroundColor: cs.surfaceContainerHighest,
                       foregroundColor: cs.onSurface,
                     ),
-                    child: const Text('重新下载'),
+                    child: Text(strings.updateRedownload),
                   ),
                 ),
               ],
@@ -214,7 +216,8 @@ Future<void> runUpdateCheck(BuildContext context) async {
     progress.dispose();
 
     if (downloadError != null || apk == null) {
-      snack('下载失败：${downloadError ?? '未知错误'}');
+      snack(strings
+          .updateDownloadFailed(downloadError ?? strings.updateUnknownError));
       return;
     }
   }
@@ -224,14 +227,14 @@ Future<void> runUpdateCheck(BuildContext context) async {
     final status = await Permission.requestInstallPackages.request();
     if (!context.mounted) return;
     if (!status.isGranted) {
-      snack('需要“安装未知应用”权限才能完成更新');
+      snack(strings.updateNeedInstallPermission);
       return;
     }
   }
   final opened = await OpenFilex.open(apk.path);
   if (!context.mounted) return;
   if (opened.type != ResultType.done) {
-    snack('无法启动安装程序：${opened.message}');
+    snack(strings.updateCannotOpenInstaller(opened.message));
   }
 }
 
@@ -243,9 +246,10 @@ Future<UpdateSource?> _pickSource(BuildContext context) {
     context: context,
     builder: (dctx) {
       final cs = Theme.of(dctx).colorScheme;
+      final strings = AppStrings.of(dctx);
       return AlertDialog(
-        title: const Text('检查更新'),
-        content: const Text('请选择更新来源。GitHub 通常最新；GitHub 无法访问时可改用 Gitee。'),
+        title: Text(strings.updatePickTitle),
+        content: Text(strings.updatePickBody),
         actionsOverflowDirection: VerticalDirection.down,
         actions: [
           Column(
@@ -258,7 +262,7 @@ Future<UpdateSource?> _pickSource(BuildContext context) {
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(48),
                   ),
-                  child: const Text('从 GitHub 更新'),
+                  child: Text(strings.updateFromGithub),
                 ),
               ),
               const SizedBox(height: 8),
@@ -271,7 +275,7 @@ Future<UpdateSource?> _pickSource(BuildContext context) {
                     backgroundColor: cs.surfaceContainerHighest,
                     foregroundColor: cs.onSurface,
                   ),
-                  child: const Text('从 Gitee 更新'),
+                  child: Text(strings.updateFromGitee),
                 ),
               ),
             ],
@@ -288,16 +292,16 @@ class _CheckingDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const AlertDialog(
+    return AlertDialog(
       content: Row(
         children: [
-          SizedBox(
+          const SizedBox(
             width: 22,
             height: 22,
             child: CircularProgressIndicator(strokeWidth: 2.5),
           ),
-          SizedBox(width: 20),
-          Text('正在检查更新…'),
+          const SizedBox(width: 20),
+          Text(AppStrings.of(context).updateChecking),
         ],
       ),
     );
@@ -313,7 +317,7 @@ class _DownloadDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('正在下载更新'),
+      title: Text(AppStrings.of(context).updateDownloadingTitle),
       content: ValueListenableBuilder<double?>(
         valueListenable: progress,
         builder: (context, value, _) {
@@ -327,7 +331,9 @@ class _DownloadDialog extends StatelessWidget {
               LinearProgressIndicator(value: value),
               const SizedBox(height: 12),
               Text(
-                pct == null ? '下载中…' : '$pct%',
+                pct == null
+                    ? AppStrings.of(context).updateDownloading
+                    : '$pct%',
                 textAlign: TextAlign.center,
               ),
             ],

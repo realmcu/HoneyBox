@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../i18n/app_strings.dart';
 
 /// nRF-Connect-style scan result row: signal strength on the left, device
 /// name + address + tags in the middle, and an explicit connect action on the
@@ -11,7 +12,7 @@ class DeviceTile extends StatelessWidget {
   final Map<int, List<int>> manufacturerData;
   final bool isConnecting;
   final VoidCallback? onConnect;
-  final String actionLabel;
+  final String? actionLabel;
 
   /// 虚拟调试设备:在标签行额外显示一枚橙色"调试"徽标以示区分。
   final bool debug;
@@ -25,7 +26,7 @@ class DeviceTile extends StatelessWidget {
     this.manufacturerData = const {},
     this.isConnecting = false,
     this.onConnect,
-    this.actionLabel = '连接',
+    this.actionLabel,
     this.debug = false,
   });
 
@@ -33,7 +34,10 @@ class DeviceTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final hasName = name.isNotEmpty && name != '未知设备';
+    final strings = AppStrings.of(context);
+    // `未知设备` 是数据层的哨兵值(ble_provider 在设备无名时填入),这里翻译它。
+    final hasName =
+        name.isNotEmpty && name != '未知设备' && name != strings.unknownDevice;
     final canTap = !isConnecting && connectable && onConnect != null;
 
     return Card(
@@ -70,8 +74,19 @@ class DeviceTile extends StatelessWidget {
                     if (manufacturerData.isNotEmpty)
                       Text(
                           manufacturerData.entries
-                              .map((e) =>
-                                  "厂商 ${e.key.toRadixString(16).padLeft(4, '0').toUpperCase()}: ${e.value.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(':')}")
+                              .map(
+                                  (e) => AppStrings.of(context).manufacturerTag(
+                                        e.key
+                                            .toRadixString(16)
+                                            .padLeft(4, '0')
+                                            .toUpperCase(),
+                                        e.value
+                                            .map((b) => b
+                                                .toRadixString(16)
+                                                .padLeft(2, '0')
+                                                .toUpperCase())
+                                            .join(':'),
+                                      ))
                               .join('\n'),
                           style: tt.bodySmall),
                     const SizedBox(height: 7),
@@ -84,13 +99,15 @@ class DeviceTile extends StatelessWidget {
                           Text('$rssi dBm', style: tt.labelMedium),
                         ],
                         _Tag(
-                          label: connectable ? '可连接' : '不可连接',
+                          label: connectable
+                              ? AppStrings.of(context).tagConnectable
+                              : AppStrings.of(context).tagNotConnectable,
                           color: connectable ? cs.secondary : cs.outline,
                         ),
                         if (debug) ...[
-                          const _Tag(
-                            label: '调试',
-                            color: Color(0xFFF57C00), // Colors.orange[700]
+                          _Tag(
+                            label: AppStrings.of(context).tagDebug,
+                            color: const Color(0xFFF57C00), // orange[700]
                           ),
                         ],
                       ],
@@ -120,7 +137,7 @@ class DeviceTile extends StatelessWidget {
                           ),
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
-                        child: Text(actionLabel),
+                        child: Text(actionLabel ?? strings.scanConnect),
                       ),
               ),
             ],
