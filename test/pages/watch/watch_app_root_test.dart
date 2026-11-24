@@ -88,7 +88,10 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await refreshed;
     expect(manager.scanFilters, [null, null]);
-    expect(find.text('已保存历史'), findsOneWidget);
+    // The history entry now lives in the app bar's overflow menu (a text button
+    // squeezed the scan title to an ellipsis in English), so assert the entry
+    // rather than a visible label.
+    expect(find.byTooltip('已保存历史'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
   });
@@ -100,7 +103,10 @@ void main() {
       connectedDeviceProvider.overrideWith((ref) => null),
     ], child: const MaterialApp(home: WatchAppRoot())));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('已保存历史'), findsOneWidget);
+    // The history entry now lives in the app bar's overflow menu (a text button
+    // squeezed the scan title to an ellipsis in English), so assert the entry
+    // rather than a visible label.
+    expect(find.byTooltip('已保存历史'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 1));
   });
