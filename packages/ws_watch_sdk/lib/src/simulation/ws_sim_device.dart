@@ -11,6 +11,7 @@ import '../wire/ws_device_command.dart';
 import '../wire/ws_l2_message.dart';
 import '../wire/ws_health_monitor_codec.dart';
 import '../wire/ws_measure_command.dart';
+import '../wire/ws_notification_command.dart';
 import '../wire/ws_settings_command.dart';
 import '../wire/ws_today_codec.dart';
 import 'ws_sim_constants.dart';
@@ -483,6 +484,44 @@ void _handleControl(
       WSControlCommand.keyBatteryReply,
       Uint8List.fromList([state.batteryPercent, state.batteryCharging]),
     )));
+    return;
+  }
+
+  // Deterministic device-side actions let the Demo Lab exercise the public
+  // notification event stream without exposing a wire-level test hook.
+  switch (message.key) {
+    case WSNotificationCommand.keyIncomingCall:
+      _ignoreDetached(channel.send(_notificationMessage(
+        WSNotificationCommand.keyCallAction,
+        Uint8List.fromList([2]),
+      )));
+    case WSNotificationCommand.keyMusicState:
+      _ignoreDetached(channel.send(_notificationMessage(
+        WSNotificationCommand.keyMusicStateRequest,
+        Uint8List(0),
+      )));
+      _ignoreDetached(channel.send(_notificationMessage(
+        WSNotificationCommand.keyMusicControl,
+        Uint8List.fromList([1]),
+      )));
+    case WSNotificationCommand.keyFindWatch:
+      if (message.value.isNotEmpty && message.value[0] == 1) {
+        _ignoreDetached(channel.send(_notificationMessage(
+          WSNotificationCommand.keyFindWatchEnded,
+          Uint8List.fromList([0]),
+        )));
+        _ignoreDetached(channel.send(_notificationMessage(
+          WSNotificationCommand.keyFindPhone,
+          Uint8List.fromList([1]),
+        )));
+      }
+    case WSNotificationCommand.keyCameraState:
+      if (message.value.isNotEmpty && message.value[0] == 1) {
+        _ignoreDetached(channel.send(_notificationMessage(
+          WSNotificationCommand.keyCameraShutter,
+          Uint8List(0),
+        )));
+      }
   }
 }
 
@@ -735,6 +774,13 @@ Uint8List _measureMessage(int key, Uint8List value) => WSL2Message(
 Uint8List _controlMessage(int key, Uint8List value) => WSL2Message(
       command: WSControlCommand.command,
       version: WSControlCommand.version,
+      key: key,
+      value: value,
+    ).encode();
+
+Uint8List _notificationMessage(int key, Uint8List value) => WSL2Message(
+      command: WSNotificationCommand.command,
+      version: WSNotificationCommand.version,
       key: key,
       value: value,
     ).encode();

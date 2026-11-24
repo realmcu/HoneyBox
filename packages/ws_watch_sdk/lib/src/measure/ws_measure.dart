@@ -1,5 +1,8 @@
 import 'dart:async';
 
+export '../wire/ws_measure_command.dart'
+    show WSSpotMeasureLane, WSSpotMeasureLanes;
+
 import '../connection/ws_link.dart';
 import '../debug/ws_debug_log.dart';
 import '../wire/ws_health_monitor_codec.dart';

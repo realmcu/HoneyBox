@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:ws_watch_sdk/ws_watch_sdk.dart';
 
 import 'ws_demo_content_sheet.dart';
 import 'ws_demo_controller.dart';

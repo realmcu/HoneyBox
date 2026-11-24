@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:ws_watch_sdk/ws_watch_sdk.dart';
+import 'package:ws_watch_sdk/ws_watch_sdk.dart' hide WSUserProfile;
 import 'package:permission_handler/permission_handler.dart';
 
 import 'compat/ws_demo_compat.dart';
