@@ -10,7 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/ble_provider.dart';
-import '../../providers/rtl8762_ota_provider.dart';
+import '../../providers/ota_in_progress_provider.dart';
 import '../../services/ota/ota_platform.dart';
 import '../../services/ota/android_realtek_ota_platform.dart';
 import '../../services/ota/android_realtek_firmware_parser.dart';
@@ -87,13 +87,36 @@ class _UnknownParser implements FirmwareParser {
       ]);
 }
 
+/// Reports the terminal result of a run. Only used by embedded callers such as
+/// the Watch one-stop OTA entry; the generic flow leaves it null.
+typedef OtaFinishedCallback = FutureOr<void> Function(
+    OtaOutcome outcome, String message);
+
 class RealtekOtaPage extends ConsumerStatefulWidget {
   final ScanDevice device;
   final OtaTarget target;
+  final String? initialFirmwarePath;
+  final String? initialFirmwareName;
+  final bool fixedFirmware;
+
+  /// Runs the version postcheck automatically once the SDK finishes, so the
+  /// caller receives `verified` instead of `pendingVerification`.
+  final bool autoVerify;
+
+  /// Invoked once when the run reaches a terminal state. When set, the caller
+  /// owns the BLE hand-back, so the OTA-in-progress flag stays raised until it
+  /// says otherwise.
+  final OtaFinishedCallback? onFinished;
+
   const RealtekOtaPage({
     super.key,
     required this.device,
     this.target = OtaTarget.rtl8762d,
+    this.initialFirmwarePath,
+    this.initialFirmwareName,
+    this.fixedFirmware = false,
+    this.autoVerify = false,
+    this.onFinished,
   });
 
   @override
@@ -135,6 +158,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
   int _retryCount = 0;
   final List<OtaPhaseEntry> _phaseHistory = [];
   Future<void> _saveQueue = Future.value();
+  bool _finishedReported = false;
 
   Future<void> _loadHistory() async {
     try {
@@ -255,6 +279,43 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
     }
   }
 
+  /// Embedded callers keep the flag raised until they have reconnected the
+  /// device in normal mode; otherwise the Watch root would flash a scan page.
+  void _clearOtaInProgress() {
+    if (widget.onFinished != null) return;
+    ref.read(otaInProgressProvider.notifier).state = false;
+  }
+
+  /// Closes the OTA transport, then reports the run once. Cancelled runs also
+  /// hand the radio back so the caller can restore the normal connection.
+  Future<void> _finishRun(OtaOutcome outcome) async {
+    if (_finishedReported || !mounted) return;
+    _finishedReported = true;
+    final callback = widget.onFinished;
+    if (callback == null) return;
+    var finalOutcome = outcome;
+    if (widget.autoVerify && outcome == OtaOutcome.pendingVerification) {
+      setState(() => _status = '正在核验设备固件版本');
+      await _verify();
+      if (!mounted) return;
+      final postcheck = _postcheck;
+      if (postcheck != null) {
+        finalOutcome = switch (postcheck.status) {
+          PostcheckStatus.verified => OtaOutcome.verified,
+          PostcheckStatus.mismatch => OtaOutcome.failed,
+          PostcheckStatus.unavailable => OtaOutcome.pendingVerification,
+        };
+      }
+    }
+    if (!mounted) return;
+    // Release the radio before the caller reconnects in normal mode.
+    try {
+      await _platform.close();
+    } catch (_) {}
+    if (!mounted) return;
+    await callback(finalOutcome, _status);
+  }
+
   String _batteryFailureHint() {
     final caps = _capabilities;
     final profiles = ref.read(otaProfileRegistryProvider).profiles;
@@ -280,7 +341,12 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
     _platform = widget.target == OtaTarget.rtl87x3g
         ? ref.read(rtl87x3gOtaPlatformProvider)
         : ref.read(otaPlatformProvider);
-    if (widget.target == OtaTarget.rtl87x3g) {
+    if (widget.initialFirmwarePath != null) {
+      _path = widget.initialFirmwarePath;
+      _name = widget.initialFirmwareName ??
+          widget.initialFirmwarePath!.split('/').last;
+      _status = '已加载内置固件';
+    } else if (widget.target == OtaTarget.rtl87x3g) {
       _status = '请选择 app_MP-*.bin 固件包';
     }
     unawaited(Future.microtask(_loadHistory));
@@ -316,7 +382,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           });
           if (session.outcome != null) {
             _releaseOwnership();
-            ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+            _clearOtaInProgress();
+            unawaited(_finishRun(session.outcome!));
           }
           return;
         }
@@ -408,6 +475,9 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           if (done) _running = false;
           if (event['ready'] == true) {
             _ready = _advanceToAwaitingConfirmation(session);
+            if (_ready && widget.fixedFirmware) {
+              _status = '设备已连接，内置固件已就绪';
+            }
           }
           if (done) _ready = false;
           if (done) {
@@ -416,7 +486,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         });
         if (done) {
           _releaseOwnership();
-          ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+          _clearOtaInProgress();
+          unawaited(_finishRun(session.outcome!));
         }
       }, onError: (Object error) {
         if (!mounted) return;
@@ -438,7 +509,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
               : '连接状态通信失败：$error';
         });
         _releaseOwnership();
-        ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+        _clearOtaInProgress();
+        unawaited(_finishRun(OtaOutcome.failed));
       });
     }
   }
@@ -543,7 +615,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           _ready = false;
         });
         _releaseOwnership();
-        ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+        _clearOtaInProgress();
+        unawaited(_finishRun(OtaOutcome.failed));
       });
       _session = session;
       session.apply(OtaEvent(sessionId: session.id, phase: OtaPhase.preparing));
@@ -652,7 +725,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
       _progress = null;
       _status = '正在连接设备';
     });
-    ref.read(rtl8762OtaInProgressProvider.notifier).state = true;
+    ref.read(otaInProgressProvider.notifier).state = true;
     try {
       final path = _path!;
       final session = _session;
@@ -668,7 +741,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
       _firmwareSha256 = inspection.sha256 ?? '';
       if (session != _session || session?.outcome != null || !_ready) {
         setState(() => _running = false);
-        ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+        _clearOtaInProgress();
         return;
       }
       final report = addEnvironmentChecks(
@@ -691,7 +764,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
       if (!mounted) return;
       if (!_advanceToAwaitingConfirmation(session!)) {
         setState(() => _running = false);
-        ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+        _clearOtaInProgress();
         return;
       }
       final confirmed = await showOtaConfirmation(
@@ -719,15 +792,16 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
                   .join('；');
           _ready = false;
         });
-        if (session != null && session.outcome == null) {
+        if (session.outcome == null) {
           session.apply(OtaEvent(
               sessionId: session.id,
               phase: OtaPhase.finished,
               outcome: OtaOutcome.cancelled));
         }
-        _saveTerminal(session?.phase ?? OtaPhase.idle);
+        _saveTerminal(session.phase);
         _releaseOwnership();
-        ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+        _clearOtaInProgress();
+        unawaited(_finishRun(OtaOutcome.cancelled));
         return;
       }
       _targetVersion = target;
@@ -737,7 +811,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         final permission = await ref.read(otaBlePermissionProvider)();
         if (!mounted ||
             session != _session ||
-            session?.outcome != null ||
+            session.outcome != null ||
             !_ready ||
             _ownership.owner != OtaOwner.ota ||
             ref.read(connectedDeviceProvider) != null ||
@@ -745,7 +819,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           throw StateError('设备连接、权限或蓝牙占用状态已改变');
         }
         for (final phase in [OtaPhase.connecting]) {
-          if (!session!.apply(OtaEvent(sessionId: session.id, phase: phase))) {
+          if (!session.apply(OtaEvent(sessionId: session.id, phase: phase))) {
             throw StateError('OTA 会话阶段无效');
           }
           _phaseHistory.add(OtaPhaseEntry(phase, DateTime.now()));
@@ -753,7 +827,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         final now = DateTime.now();
         await (await ref.read(otaRepositoryProvider.future)).saveActive(
             OtaSessionRecord(
-                sessionId: session!.id,
+                sessionId: session.id,
                 startedAt: _startedAt ?? now,
                 updatedAt: now,
                 phase: null,
@@ -773,21 +847,21 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         await _platform.start(path);
       });
       if (!started && mounted) {
-        if (session != null && session.outcome == null) {
+        if (session.outcome == null) {
           session.apply(OtaEvent(
               sessionId: session.id,
               phase: OtaPhase.finished,
               outcome: OtaOutcome.failed));
         }
-        _saveTerminal(session?.phase ?? OtaPhase.idle,
-            message: '固件检查后发生变化或无法读取');
+        _saveTerminal(session.phase, message: '固件检查后发生变化或无法读取');
         _releaseOwnership();
         _ready = false;
         setState(() {
           _running = false;
           _status = '固件检查后发生变化或无法读取，请重新选择固件';
         });
-        ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+        _clearOtaInProgress();
+        unawaited(_finishRun(OtaOutcome.failed));
       }
     } catch (error) {
       _releaseOwnership();
@@ -809,7 +883,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
               '启动失败：$error${connectionFailure ? _batteryFailureHint() : ''}';
         });
       }
-      ref.read(rtl8762OtaInProgressProvider.notifier).state = false;
+      _clearOtaInProgress();
+      unawaited(_finishRun(OtaOutcome.failed));
     }
   }
 
@@ -980,15 +1055,16 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
                         '上次升级记录：${_lastRecord!.outcome?.name} ${_lastRecord!.updatedAt}'),
                   const SizedBox(height: 12),
                   Text(_name ?? '尚未选择固件'),
-                  OutlinedButton(
-                      onPressed: _running ||
-                              _verifying ||
-                              _loadingRecovery ||
-                              _recoveryLocked ||
-                              _pendingVerification
-                          ? null
-                          : _choose,
-                      child: const Text('选择固件')),
+                  if (!widget.fixedFirmware)
+                    OutlinedButton(
+                        onPressed: _running ||
+                                _verifying ||
+                                _loadingRecovery ||
+                                _recoveryLocked ||
+                                _pendingVerification
+                            ? null
+                            : _choose,
+                        child: const Text('选择固件')),
                   FilledButton(
                       onPressed: !_running &&
                               !_preparing &&

@@ -10,8 +10,6 @@ import '../../providers/current_app_provider.dart';
 import '../ebadge/ebadge_app_root.dart';
 import '../shared/update_flow.dart';
 import '../watch/watch_app_root.dart';
-import '../capture/capture_page.dart';
-import '../ota/ota_chip_page.dart';
 import 'app_catalog.dart';
 import 'connected_app.dart';
 import 'widgets/app_card.dart';
@@ -63,10 +61,6 @@ class AppLauncherPage extends ConsumerWidget {
               Navigator.pushNamed(context, v);
             },
             itemBuilder: (context) => [
-              PopupMenuItem(
-                  value: '/qiniu-files', child: Text(strings.menuQiniuFiles)),
-              PopupMenuItem(
-                  value: '/qiniu-config', child: Text(strings.menuQiniuConfig)),
               PopupMenuItem(
                   value: '/chip-config', child: Text(strings.menuChipConfig)),
               PopupMenuItem(
@@ -195,10 +189,6 @@ class AppLauncherPage extends ConsumerWidget {
         // channel (see _launch), so this widget route is never taken.
         throw StateError(
             'dashboard is opened natively, not as a Flutter route');
-      case AppId.capture:
-        return const CapturePage();
-      case AppId.ota:
-        return const OtaChipPage();
     }
   }
 }

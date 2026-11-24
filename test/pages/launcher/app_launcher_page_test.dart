@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:honeybox/pages/launcher/app_launcher_page.dart';
@@ -6,6 +7,21 @@ import 'package:honeybox/pages/launcher/app_catalog.dart';
 import 'package:honeybox/pages/launcher/widgets/app_card.dart';
 import 'package:honeybox/providers/ble_provider.dart';
 import 'package:honeybox/providers/current_app_provider.dart';
+import 'package:honeybox/services/ble_manager.dart' as manager;
+
+class _Manager implements manager.BleManager {
+  @override
+  Stream<manager.BleState> get onStateChanged => const Stream.empty();
+  @override
+  void dispose() {}
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+  @override
+  void stopScan() {}
+  @override
+  Future<void> startScan(void Function(ScanResult) callback,
+      {String? serviceUuid}) async {}
+}
 
 void main() {
   Widget wrap(Widget child) => ProviderScope(
@@ -90,21 +106,27 @@ void main() {
     expect(find.text('选择应用'), findsOneWidget);
   });
 
-  testWidgets('returning from a non-device app clears current app state',
+  testWidgets('returning from an app clears current app state',
       (tester) async {
-    await tester.pumpWidget(wrap(const AppLauncherPage()));
+    // Watch with no connection lands on ScanPage, so the scan surface needs a
+    // fake manager and explicit pumps (ScanPage keeps a periodic timer alive).
+    await tester.pumpWidget(ProviderScope(
+      overrides: [bleManagerProvider.overrideWith((ref) => _Manager())],
+      child: const MaterialApp(home: AppLauncherPage()),
+    ));
     final container = ProviderScope.containerOf(
       tester.element(find.byType(AppLauncherPage)),
     );
 
-    await tester.ensureVisible(find.text('OTA'));
-    await tester.tap(find.text('OTA'));
-    await tester.pumpAndSettle();
-    expect(find.text('选择芯片类型'), findsOneWidget);
-    expect(container.read(currentAppProvider), AppId.ota);
+    await tester.ensureVisible(find.text('Watch'));
+    await tester.tap(find.text('Watch'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(container.read(currentAppProvider), AppId.watch);
 
-    await tester.tap(find.byType(BackButton));
-    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.text('选择应用'), findsOneWidget);
     expect(container.read(currentAppProvider), isNull);

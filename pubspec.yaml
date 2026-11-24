@@ -26,8 +26,6 @@ dependencies:
   flutter_secure_storage: ^9.2.4
   pointycastle: ^3.9.1
   palette_generator: ^0.3.3+7
-  archive: ^4.5.2
-  share_plus: ^12.0.2
 
 dev_dependencies:
   flutter_test:
@@ -45,6 +43,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/ota/
     - assets/example/img/
     - assets/example/gif/
     - assets/example/video/

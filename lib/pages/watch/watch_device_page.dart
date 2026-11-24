@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../i18n/app_strings.dart';
 import '../../i18n/watch_strings.dart';
 import '../../providers/ble_provider.dart';
+import '../../providers/ota_in_progress_provider.dart';
 import '../../providers/watch_bind_provider.dart';
 import '../../providers/watch_model_provider.dart';
+import '../../providers/watch_ota_result_provider.dart';
 import '../../theme/app_theme.dart';
 import '../shared/app_drawer.dart';
 import '../device/widgets/action_card.dart';
@@ -109,6 +111,9 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
   }
 
   void _open(String route) {
+    if (route == '/watch-rtl87x3g-ota') {
+      ref.read(otaInProgressProvider.notifier).state = true;
+    }
     Navigator.pushNamed(
       context,
       route,
@@ -135,7 +140,7 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
         _ActionItem(
             icon: Icons.system_update_alt,
             title: w.cardOta,
-            route: '/watch-ota'),
+            route: '/watch-rtl87x3g-ota'),
       ];
 
   static _ActionItem _factoryAction(WatchStrings w) => _ActionItem(
@@ -152,6 +157,7 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
     final watch = strings.watch;
     final bindState = ref.watch(watchBindProvider);
     final modelState = ref.watch(watchModelProvider);
+    final otaResult = ref.watch(watchOtaResultProvider);
     final bound = bindState.phase == WatchBindPhase.success;
     final canPop = ModalRoute.of(context)?.canPop ?? false;
 
@@ -188,6 +194,14 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 升级结果由 OTA 页写回，用常驻横幅展示 —— SnackBar 会被重连后的
+              // 自动绑定提示覆盖。
+              if (otaResult != null)
+                _WatchOtaResultBanner(
+                  result: otaResult,
+                  onDismiss: () =>
+                      ref.read(watchOtaResultProvider.notifier).state = null,
+                ),
               // 已连接状态条 —— 与 DevicePage 顶部一致的样式。
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 12),
@@ -299,6 +313,54 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 上一次 Watch OTA 的结果，常驻到用户关闭。重新连接后主页会自动重新绑定并弹出
+/// SnackBar，因此结果不能用 SnackBar 展示。
+class _WatchOtaResultBanner extends StatelessWidget {
+  final WatchOtaResult result;
+  final VoidCallback onDismiss;
+
+  const _WatchOtaResultBanner({required this.result, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final background =
+        result.success ? cs.secondaryContainer : cs.errorContainer;
+    final foreground =
+        result.success ? cs.onSecondaryContainer : cs.onErrorContainer;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            result.success ? Icons.check_circle : Icons.error_outline,
+            color: foreground,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              result.message,
+              style: tt.bodyMedium?.copyWith(color: foreground),
+            ),
+          ),
+          IconButton(
+            onPressed: onDismiss,
+            icon: Icon(Icons.close, size: 18, color: foreground),
+            tooltip: '关闭',
+          ),
+        ],
       ),
     );
   }

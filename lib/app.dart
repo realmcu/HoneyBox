@@ -16,14 +16,11 @@ import 'pages/wifi/wifi_page.dart';
 import 'pages/chip_config/chip_config_page.dart';
 import 'pages/settings/settings_page.dart';
 import 'pages/settings/cache_management_page.dart';
-import 'pages/qiniu/qiniu_config_page.dart';
-import 'pages/qiniu/qiniu_files_page.dart';
-import 'pages/ota/ota_page.dart';
 import 'pages/watch/pages/watch_face_page.dart';
 import 'pages/watch/pages/watch_notification_page.dart';
 import 'pages/watch/pages/watch_health_page.dart';
 import 'pages/watch/pages/watch_factory_page.dart';
-import 'pages/ota/ota_chip_page.dart';
+import 'pages/ota/watch_rtl87x3g_ota_page.dart';
 
 class HoneyBoxApp extends ConsumerStatefulWidget {
   const HoneyBoxApp({super.key});
@@ -59,7 +56,6 @@ class _HoneyBoxAppState extends ConsumerState<HoneyBoxApp> {
         home: const AppLauncherPage(),
         onGenerateRoute: (settings) {
           final args = settings.arguments as Map<String, String>?;
-
           Widget page;
           switch (settings.name) {
             case '/image':
@@ -111,17 +107,8 @@ class _HoneyBoxAppState extends ConsumerState<HoneyBoxApp> {
             case '/settings':
               page = const SettingsPage();
               break;
-            case '/qiniu-config':
-              page = const QiniuConfigPage();
-              break;
-            case '/qiniu-files':
-              page = const QiniuFilesPage();
-              break;
             case '/cache':
               page = const CacheManagementPage();
-              break;
-            case '/ota':
-              page = const OtaPage();
               break;
             // Watch feature pages. Health consumes the connected device details.
             case '/watch-face':
@@ -142,8 +129,11 @@ class _HoneyBoxAppState extends ConsumerState<HoneyBoxApp> {
                 deviceId: args?['deviceId'] ?? '',
               );
               break;
-            case '/watch-ota':
-              page = const OtaChipPage();
+            case '/watch-rtl87x3g-ota':
+              page = WatchRtl87x3gOtaPage(
+                deviceName: args?['deviceName'] ?? 'Watch',
+                deviceId: args?['deviceId'] ?? '',
+              );
               break;
             default:
               page = const EBadgeAppRoot();

@@ -25,6 +25,41 @@ const _opReportBufferCrc = 0x0a;
 const _notifyOpcode = 0x10;
 const _success = 0x01;
 
+@visibleForTesting
+bool matchesRtl87x3gOtaAdvertisement({
+  required String? advName,
+  required String? platformName,
+  required List<int>? manufacturerData,
+  required String normalDeviceId,
+}) {
+  final named = advName == 'BeTgt' || platformName == 'BeTgt';
+  final identity = _addressBytes(normalDeviceId);
+  final identityMatch = manufacturerData != null &&
+      identity.isNotEmpty &&
+      _identityMatches(manufacturerData, identity);
+  return named && identityMatch;
+}
+
+List<int> _addressBytes(String value) {
+  final hex = value.replaceAll(RegExp('[^0-9a-fA-F]'), '');
+  if (hex.length != 12) return const [];
+  return List<int>.generate(
+    6,
+    (i) => int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16),
+  );
+}
+
+bool _identityMatches(List<int> actual, List<int> expected) {
+  if (actual.length != expected.length) return false;
+  var direct = true;
+  var reversed = true;
+  for (var i = 0; i < expected.length; i++) {
+    if (actual[i] != expected[i]) direct = false;
+    if (actual[i] != expected[expected.length - 1 - i]) reversed = false;
+  }
+  return direct || reversed;
+}
+
 /// RTL87x3G normal OTA over FlutterBluePlus.
 ///
 /// The normal application accepts FFD1=1, reboots into a dedicated OTA-only
@@ -312,21 +347,16 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
     await FlutterBluePlus.stopScan();
     final found = Completer<BluetoothDevice>();
     final started = DateTime.now();
-    final identity = _addressBytes(normalDeviceId);
     final subscription = FlutterBluePlus.onScanResults.listen((results) {
       for (final result in results) {
         if (result.timeStamp.isBefore(started) || found.isCompleted) continue;
         final advertisement = result.advertisementData;
-        final manufacturer = advertisement.manufacturerData[_otaManufacturerId];
-        final identityMatch = manufacturer != null &&
-            identity.isNotEmpty &&
-            _identityMatches(manufacturer, identity);
-        final named = advertisement.advName == 'BeTgt' ||
-            result.device.platformName == 'BeTgt';
-        final dfuService = advertisement.serviceUuids.any(
-          (uuid) => uuid.str128.toLowerCase() == _dfuService,
-        );
-        if (identityMatch || (named && dfuService)) {
+        if (matchesRtl87x3gOtaAdvertisement(
+          advName: advertisement.advName,
+          platformName: result.device.platformName,
+          manufacturerData: advertisement.manufacturerData[_otaManufacturerId],
+          normalDeviceId: normalDeviceId,
+        )) {
           found.complete(result.device);
         }
       }
@@ -338,26 +368,6 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
       await subscription.cancel();
       await FlutterBluePlus.stopScan();
     }
-  }
-
-  List<int> _addressBytes(String value) {
-    final hex = value.replaceAll(RegExp('[^0-9a-fA-F]'), '');
-    if (hex.length != 12) return const [];
-    return List<int>.generate(
-      6,
-      (i) => int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16),
-    );
-  }
-
-  bool _identityMatches(List<int> actual, List<int> expected) {
-    if (actual.length != expected.length) return false;
-    var direct = true;
-    var reversed = true;
-    for (var i = 0; i < expected.length; i++) {
-      if (actual[i] != expected[i]) direct = false;
-      if (actual[i] != expected[expected.length - 1 - i]) reversed = false;
-    }
-    return direct || reversed;
   }
 
   void _listenConnectionState() {

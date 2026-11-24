@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
 import '../../providers/current_app_provider.dart';
-import '../../providers/rtl8762_ota_provider.dart';
+import '../../providers/ota_in_progress_provider.dart';
 import '../launcher/app_catalog.dart';
 import '../launcher/connected_app.dart';
 import '../scan/scan_page.dart';
@@ -31,7 +31,7 @@ class _WatchAppRootState extends ConsumerState<WatchAppRoot> {
       if (connectedDeviceMatchesApp(prev, AppId.watch) &&
           !connectedDeviceMatchesApp(next, AppId.watch) &&
           !_leaving &&
-          !ref.read(rtl8762OtaInProgressProvider)) {
+          !ref.read(otaInProgressProvider)) {
         Navigator.of(context).popUntil((r) =>
             r.settings.name == '/watch-root' ||
             (r.settings.name?.startsWith('/jw-history') ?? false) ||
@@ -46,7 +46,7 @@ class _WatchAppRootState extends ConsumerState<WatchAppRoot> {
     final connected = connectedDeviceMatchesApp(allConnected, AppId.watch)
         ? allConnected
         : null;
-    final otaInProgress = ref.watch(rtl8762OtaInProgressProvider);
+    final otaInProgress = ref.watch(otaInProgressProvider);
     final child = connected != null
         ? connected.isJw
             ? JwDevicePage(

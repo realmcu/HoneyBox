@@ -54,8 +54,6 @@ abstract class AppStrings {
   String get languageChinese;
   String get languageEnglish;
   String get launcherTitle;
-  String get menuQiniuFiles;
-  String get menuQiniuConfig;
   String get menuChipConfig;
   String get menuCheckUpdate;
   String get drawerChipConfig;
@@ -184,8 +182,6 @@ class ZhStrings extends AppStrings {
         AppId.ebadge => 'eBadge',
         AppId.watch => 'Watch',
         AppId.dashboard => 'Dashboard',
-        AppId.capture => '数据采集',
-        AppId.ota => 'OTA',
       };
 
   @override
@@ -193,8 +189,6 @@ class ZhStrings extends AppStrings {
         AppId.ebadge => '电子胸牌调试与内容管理',
         AppId.watch => '智能手表配对与调试',
         AppId.dashboard => '高德地图模拟导航与仪表投屏',
-        AppId.capture => '多设备 BLE 原始数据采集与配置管理',
-        AppId.ota => '按芯片类型选择固件升级方案',
       };
 
   @override
@@ -281,12 +275,6 @@ class ZhStrings extends AppStrings {
 
   @override
   String get launcherTitle => '选择应用';
-
-  @override
-  String get menuQiniuFiles => '七牛云文件';
-
-  @override
-  String get menuQiniuConfig => '七牛云配置';
 
   @override
   String get menuChipConfig => '芯片配置';
@@ -655,8 +643,6 @@ class EnStrings extends AppStrings {
         AppId.ebadge => 'eBadge',
         AppId.watch => 'Watch',
         AppId.dashboard => 'Dashboard',
-        AppId.capture => 'Capture',
-        AppId.ota => 'OTA',
       };
 
   @override
@@ -664,9 +650,6 @@ class EnStrings extends AppStrings {
         AppId.ebadge => 'Badge debugging and content management',
         AppId.watch => 'Watch pairing and debugging',
         AppId.dashboard => 'AMap simulated navigation and meter casting',
-        AppId.capture =>
-          'Raw BLE capture and configuration for several devices',
-        AppId.ota => 'Pick the firmware upgrade path by chip type',
       };
 
   @override
@@ -753,12 +736,6 @@ class EnStrings extends AppStrings {
 
   @override
   String get launcherTitle => 'Apps';
-
-  @override
-  String get menuQiniuFiles => 'Qiniu files';
-
-  @override
-  String get menuQiniuConfig => 'Qiniu settings';
 
   @override
   String get menuChipConfig => 'Chip configuration';
