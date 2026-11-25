@@ -46,6 +46,7 @@ class BleCmd {
   static const int naviProj = 0x11; // command (FFD1/FFD2) + stream (FFD3/FFD4)
   static const int watchModel =
       0x12; // command: canonical device-state snapshot
+  static const int watchRecord = 0x14; // command: microphone recording upload
 
   /// 该 CMD 跑在哪条 GATT 特征上。除 [stream] 外全部走命令通道。
   /// 注意 [naviProj] 的控制消息走 command 通道、数据帧走独立的 stream 通道。
@@ -53,6 +54,15 @@ class BleCmd {
         stream => BleCmdChannel.stream,
         _ => BleCmdChannel.command,
       };
+}
+
+/// Watch microphone recording (CMD 0x14) sub-command keys.
+abstract class BleCmdWatchRecordKey {
+  static const int start = 0x01; // Dev -> App
+  static const int data = 0x02; // Dev -> App
+  static const int stop = 0x03; // Dev -> App
+  static const int cancelRequest = 0x04; // App -> Dev
+  static const int recordRequest = 0x05; // App -> Dev, optional
 }
 
 /// Watch time sync (CMD 0x02) sub-command keys.

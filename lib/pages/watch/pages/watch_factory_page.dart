@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/ble_provider.dart';
 import '../../../providers/watch_bind_provider.dart';
 import '../../../services/watch_factory_protocol.dart';
+import '../../../services/watch_record_protocol.dart';
 import '../../../theme/app_theme.dart';
 
 enum _FactoryItemState { idle, waiting, done, timeout, failed }
@@ -78,6 +79,8 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
   int? _waitingResponseKey;
   bool _runningAll = false;
   bool _motorRunning = false;
+  bool _recordRequesting = false;
+  _FactoryResult _recordResult = const _FactoryResult(_FactoryItemState.idle);
 
   @override
   void initState() {
@@ -101,9 +104,40 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
       ref.read(bleManagerProvider).commandAvailable;
 
   void _onCommand(Uint8List frame) {
+    final recordResponse = WatchRecordProtocol.parseResponse(frame);
+    if (recordResponse != null) {
+      _onRecordResponse(recordResponse);
+      return;
+    }
     final response = WatchFactoryProtocol.parseResponse(frame);
     if (response == null || response.key != _waitingResponseKey) return;
     _showResult(response.key, response.value);
+  }
+
+  void _onRecordResponse(WatchRecordResponse response) {
+    if (!_recordRequesting ||
+        (response.key != WatchRecordProtocol.startKey &&
+            response.key != WatchRecordProtocol.stopKey)) {
+      return;
+    }
+    final stopped = response.key == WatchRecordProtocol.stopKey;
+    final text = stopped
+        ? WatchRecordProtocol.decodeStop(response.value)
+        : WatchRecordProtocol.decodeStart(response.value);
+    if (!mounted) return;
+    setState(() {
+      _recordRequesting = false;
+      _recordResult = _FactoryResult(
+        stopped && response.value.isNotEmpty && response.value[0] != 0x00
+            ? _FactoryItemState.failed
+            : _FactoryItemState.done,
+        text,
+      );
+    });
+    _requestTimer?.cancel();
+    final done = _requestDone;
+    _requestDone = null;
+    if (done != null && !done.isCompleted) done.complete();
   }
 
   void _showResult(int responseKey, Uint8List value) {
@@ -220,6 +254,48 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
     }
   }
 
+  Future<void> _requestRecord() async {
+    if (!_ready) {
+      _showMessage('请先完成设备绑定并建立命令通道');
+      return;
+    }
+    if (_requestDone != null || _recordRequesting) return;
+
+    _requestTimer?.cancel();
+    final done = Completer<void>();
+    _requestDone = done;
+    setState(() {
+      _recordRequesting = true;
+      _recordResult =
+          const _FactoryResult(_FactoryItemState.waiting, '等待手表启动…');
+    });
+
+    final sequence = ref
+        .read(bleManagerProvider)
+        .sendCommand(WatchRecordProtocol.buildRequest());
+    if (sequence == null) {
+      _requestDone = null;
+      setState(() {
+        _recordRequesting = false;
+        _recordResult =
+            const _FactoryResult(_FactoryItemState.failed, '录音请求发送失败');
+      });
+      return;
+    }
+
+    _requestTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || !_recordRequesting) return;
+      setState(() {
+        _recordRequesting = false;
+        _recordResult = const _FactoryResult(_FactoryItemState.timeout, '无响应');
+      });
+      final done = _requestDone;
+      _requestDone = null;
+      if (done != null && !done.isCompleted) done.complete();
+    });
+    await done.future;
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -259,6 +335,38 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
                     minimumSize: const Size.fromHeight(48),
                   ),
                 ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  key: const Key('watch-factory-record-start'),
+                  onPressed: ready && !_recordRequesting && !_runningAll
+                      ? _requestRecord
+                      : null,
+                  icon: _recordRequesting
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.mic_none_outlined),
+                  label: const Text('EVT_RECORD_START_REQ'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                ),
+                if (_recordResult.state != _FactoryItemState.idle) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _recordResult.text,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: switch (_recordResult.state) {
+                            _FactoryItemState.done => AppTheme.watchAccent,
+                            _FactoryItemState.timeout ||
+                            _FactoryItemState.failed =>
+                              Theme.of(context).colorScheme.error,
+                            _ => Theme.of(context).colorScheme.outline,
+                          },
+                        ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 LayoutBuilder(
                   builder: (context, constraints) {
