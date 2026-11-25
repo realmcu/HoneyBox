@@ -159,6 +159,45 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
   final List<OtaPhaseEntry> _phaseHistory = [];
   Future<void> _saveQueue = Future.value();
   bool _finishedReported = false;
+  final Stopwatch _runClock = Stopwatch();
+  final Stopwatch _transferClock = Stopwatch();
+  Timer? _metricsTicker;
+  int? _firmwareBytes;
+
+  void _startMetrics() {
+    _metricsTicker?.cancel();
+    _runClock
+      ..reset()
+      ..start();
+    _transferClock.reset();
+    _metricsTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _stopMetrics() {
+    _runClock.stop();
+    _transferClock.stop();
+    _metricsTicker?.cancel();
+    _metricsTicker = null;
+  }
+
+  void _trackPhaseMetrics(OtaPhase phase) {
+    if (phase == OtaPhase.transferring) {
+      if (!_transferClock.isRunning) _transferClock.start();
+    } else {
+      _transferClock.stop();
+    }
+  }
+
+  Widget _metric(IconData icon, String label, String value) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 6),
+          Text('$label $value'),
+        ],
+      );
 
   Future<void> _loadHistory() async {
     try {
@@ -381,6 +420,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
             }
           });
           if (session.outcome != null) {
+            _stopMetrics();
             _releaseOwnership();
             _clearOtaInProgress();
             unawaited(_finishRun(session.outcome!));
@@ -451,6 +491,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         if (phase != previousPhase) {
           _phaseHistory.add(OtaPhaseEntry(phase, DateTime.now()));
         }
+        _trackPhaseMetrics(phase);
         if (done) {
           _saveTerminal(previousPhase,
               message: message is String ? message : null,
@@ -485,12 +526,14 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           }
         });
         if (done) {
+          _stopMetrics();
           _releaseOwnership();
           _clearOtaInProgress();
           unawaited(_finishRun(session.outcome!));
         }
       }, onError: (Object error) {
         if (!mounted) return;
+        _stopMetrics();
         final wasRunning = _running;
         final session = _session;
         if (session != null && session.outcome == null) {
@@ -606,6 +649,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
                 }
               : null, onTimeout: (timedOut) {
         if (!mounted || _session != timedOut) return;
+        _stopMetrics();
         _saveTerminal(timedOut.timedOutPhase ?? OtaPhase.idle,
             message: '阶段超时', category: OtaFailureCategory.timeout);
         setState(() {
@@ -649,6 +693,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _disposed = true;
+    _metricsTicker?.cancel();
     if (_ownsOta) {
       _ownsOta = false;
       _ownership.releaseDeferred(OtaOwner.ota);
@@ -740,6 +785,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
       if (!mounted) return;
       _firmwareSha256 = inspection.sha256 ?? '';
       if (session != _session || session?.outcome != null || !_ready) {
+        _stopMetrics();
         setState(() => _running = false);
         _clearOtaInProgress();
         return;
@@ -761,8 +807,10 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           ? first['version'] as int
           : null;
       final size = await File(path).length().catchError((Object _) => 0);
+      _firmwareBytes = size > 0 ? size : null;
       if (!mounted) return;
       if (!_advanceToAwaitingConfirmation(session!)) {
+        _stopMetrics();
         setState(() => _running = false);
         _clearOtaInProgress();
         return;
@@ -780,6 +828,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
               checks: report.checks));
       if (!mounted) return;
       if (!confirmed || !report.canStart) {
+        _stopMetrics();
         setState(() {
           _running = false;
           _status = report.canStart
@@ -804,6 +853,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         unawaited(_finishRun(OtaOutcome.cancelled));
         return;
       }
+      _startMetrics();
       _targetVersion = target;
       _expectedIcType = capabilities.otaDeviceInfo?.icType;
       _postcheck = null;
@@ -847,6 +897,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         await _platform.start(path);
       });
       if (!started && mounted) {
+        _stopMetrics();
         if (session.outcome == null) {
           session.apply(OtaEvent(
               sessionId: session.id,
@@ -864,6 +915,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
         unawaited(_finishRun(OtaOutcome.failed));
       }
     } catch (error) {
+      _stopMetrics();
       _releaseOwnership();
       _ready = false;
       final session = _session;
@@ -1081,6 +1133,30 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
                   if (_progress != null)
                     LinearProgressIndicator(value: _progress),
                   Text(_platform.supported ? _status : '当前平台暂不支持 OTA'),
+                  if (_runClock.elapsed > Duration.zero)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Wrap(
+                        spacing: 24,
+                        runSpacing: 8,
+                        children: [
+                          _metric(
+                            Icons.speed,
+                            '升级速度',
+                            formatOtaSpeed(otaTransferSpeedKBps(
+                              firmwareBytes: _firmwareBytes,
+                              progress: _progress,
+                              elapsed: _transferClock.elapsed,
+                            )),
+                          ),
+                          _metric(
+                            Icons.timer_outlined,
+                            '总时间',
+                            formatOtaDuration(_runClock.elapsed),
+                          ),
+                        ],
+                      ),
+                    ),
                   for (final check in _checks)
                     ListTile(
                       leading: Icon(
