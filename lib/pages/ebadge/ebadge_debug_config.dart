@@ -90,6 +90,21 @@ const int kEBadgeStreamQualityMin = 10;
 /// JPEG 质量滑条的上界。IJG 质量档的定义上限。
 const int kEBadgeStreamQualityMax = 100;
 
+/// §6 推流画面边长的下界(正方形,单位像素,**不是**宽高两个数)。
+///
+/// 再小下去就失去调试意义:内置测试帧的四格轮转图案和帧序号会糊成一团,而这两样
+/// 正是「卡帧 / 丢帧」唯一能靠肉眼判断的依据;摄像头源则是把小画面放大回设备圆屏,
+/// 插值痕迹会盖住本要观察的编码问题。
+const int kEBadgeStreamSizeMin = 64;
+
+/// §6 推流画面边长的上界(正方形,单位像素)。
+///
+/// 1024 是**编码成本**定的,不是协议定的 —— §6.2 的 14 字节流头不带宽高,设备只能
+/// 按 JPEG 自身的 SOF 解,想发多大都行。但内置测试帧走的是纯 Dart 的
+/// [encodeBaselineJpegYuv420]:466² 已经要几百毫秒一帧,1024² 是它的 4.8 倍像素,
+/// 单帧要一两秒 —— 再往上,「改一个数等十几秒才出画面」的调试台就没人愿意用了。
+const int kEBadgeStreamSizeMax = 1024;
+
 /// 调试页会被记住的那几个选择。
 @immutable
 class EBadgeDebugConfig {
@@ -100,6 +115,7 @@ class EBadgeDebugConfig {
     this.autoScroll = true,
     this.cameraFps = _defaultCameraFps,
     this.cameraQuality = _defaultCameraQuality,
+    this.streamSize = _defaultStreamSize,
     this.otaFilePath,
     this.otaFileUri,
     this.otaFileName,
@@ -109,6 +125,11 @@ class EBadgeDebugConfig {
   /// 两处各写一个字面量,迟早会对不上。
   static const int _defaultCameraFps = 10;
   static const int _defaultCameraQuality = 80;
+
+  /// 画面边长默认 466 —— 设备圆屏的物理分辨率,与传图档位共用
+  /// [kEBadgeDemoImageSize]。默认值落在设备原生尺寸上:多推或少推像素都会让设备
+  /// 自己缩放,于是「画面不对」就多出一个「是不是缩放的问题」待排除。
+  static const int _defaultStreamSize = kEBadgeDemoImageSize;
 
   /// §5 传图正文是否套那 16 字节设备图片头。
   ///
@@ -149,6 +170,23 @@ class EBadgeDebugConfig {
   /// 20–40 KB,10 fps 就要 200–400 KB/s。往下调质量是遇到推送侧背压(进度里的
   /// 「跳 N 帧」)时**最快见效**的一档旋钮,所以它得能一边推一边调。
   final int cameraQuality;
+
+  /// §6 推流画面的边长(正方形,像素),**两个帧源共用**。
+  ///
+  /// 为什么是边长而不是宽高两个数:§6.2 的 14 字节流头**不带宽高**,设备只能按
+  /// JPEG 自身的 SOF 解;设备是圆屏,非正方形的画面它会自己加黑边或拉伸 —— 那正好
+  /// 是这条链路要排除的变量。只调一边的用途是「验证非正方形会怎样」,而那件事用
+  /// 改固件或换 JPEG 更直接。
+  ///
+  /// 为什么可调:466 是设备原生尺寸,但排障时常常要问「是不是像素太多了」——
+  /// 把边长减半,单帧体积大约降到四分之一,若掉帧随之消失,瓶颈就落在带宽/单帧
+  /// 体积上而不是协议时序上。这是与「降质量」并列的第二个背压旋钮,而且它作用在
+  /// 编码之前,比降质量更彻底。
+  ///
+  /// **推流中不能改**:两个源都要重编(内置帧要重跑四张 Canvas,摄像头要重开
+  /// 编码器),而帧率已随 0x08 OFFER 报给设备、推流周期也已定好 —— 中途改尺寸只会
+  /// 让界面说的和协议里说的对不上。改它必须先停推流。
+  final int streamSize;
 
   /// 上次选中的 OTA 升级包 —— **本机上真读得到的那个路径**;从没选过是 null。
   ///
@@ -262,6 +300,7 @@ class EBadgeDebugConfig {
     bool? autoScroll,
     int? cameraFps,
     int? cameraQuality,
+    int? streamSize,
     String? otaFilePath,
     String? otaFileUri,
     String? otaFileName,
@@ -274,6 +313,7 @@ class EBadgeDebugConfig {
         autoScroll: autoScroll ?? this.autoScroll,
         cameraFps: cameraFps ?? this.cameraFps,
         cameraQuality: cameraQuality ?? this.cameraQuality,
+        streamSize: streamSize ?? this.streamSize,
         // 可空字段没法用 `?? this.x` 表达「清空」——传 null 和不传是同一件事。所以
         // 另给一个显式开关,而不是让调用方绕道重建整个对象。
         //
@@ -291,6 +331,7 @@ class EBadgeDebugConfig {
         'autoScroll': autoScroll,
         'cameraFps': cameraFps,
         'cameraQuality': cameraQuality,
+        'streamSize': streamSize,
         'otaFilePath': otaFilePath,
         'otaFileUri': otaFileUri,
         'otaFileName': otaFileName,
@@ -320,6 +361,8 @@ class EBadgeDebugConfig {
           kEBadgeStreamFpsMax),
       cameraQuality: _int(json['cameraQuality'], _defaultCameraQuality,
           kEBadgeStreamQualityMin, kEBadgeStreamQualityMax),
+      streamSize: _int(json['streamSize'], _defaultStreamSize,
+          kEBadgeStreamSizeMin, kEBadgeStreamSizeMax),
       otaFilePath: _path(json['otaFilePath']),
       otaFileUri: _path(json['otaFileUri']),
       otaFileName: _path(json['otaFileName']),

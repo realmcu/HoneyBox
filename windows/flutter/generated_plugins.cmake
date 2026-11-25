@@ -7,8 +7,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_blue_plus_winrt
   flutter_secure_storage_windows
   permission_handler_windows
-  share_plus
-  url_launcher_windows
   watch_transport_ble
 )
 

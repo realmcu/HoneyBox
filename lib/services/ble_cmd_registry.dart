@@ -33,10 +33,12 @@ class BleCmd {
   BleCmd._();
 
   // ── CMD 字节 ────────────────────────────────────────────────────────
-  static const int watchTime = 0x02; // command
+  static const int watchSettings = 0x02; // command
+  static const int watchTime = watchSettings; // command
   static const int watchBind = 0x03; // command
   static const int watchNotification = 0x04; // command
   static const int watchHealth = 0x05; // command
+  static const int watchFactory = 0x06; // command
   static const int wifiProv = 0x0D; // command
   static const int stream = 0x0E; // stream (!!)
   static const int remoteControl = 0x0F; // command
@@ -44,6 +46,7 @@ class BleCmd {
   static const int naviProj = 0x11; // command (FFD1/FFD2) + stream (FFD3/FFD4)
   static const int watchModel =
       0x12; // command: canonical device-state snapshot
+  static const int watchRecord = 0x14; // command: microphone recording upload
 
   /// 该 CMD 跑在哪条 GATT 特征上。除 [stream] 外全部走命令通道。
   /// 注意 [naviProj] 的控制消息走 command 通道、数据帧走独立的 stream 通道。
@@ -51,6 +54,15 @@ class BleCmd {
         stream => BleCmdChannel.stream,
         _ => BleCmdChannel.command,
       };
+}
+
+/// Watch microphone recording (CMD 0x14) sub-command keys.
+abstract class BleCmdWatchRecordKey {
+  static const int start = 0x01; // Dev -> App
+  static const int data = 0x02; // Dev -> App
+  static const int stop = 0x03; // Dev -> App
+  static const int cancelRequest = 0x04; // App -> Dev
+  static const int recordRequest = 0x05; // App -> Dev, optional
 }
 
 /// Watch time sync (CMD 0x02) sub-command keys.
@@ -62,6 +74,9 @@ abstract class BleCmdWatchTimeKey {
 abstract class BleCmdWatchBindKey {
   static const int bindRequest = 0x01; // App → Dev
   static const int bindResponse = 0x02; // Dev → App
+  static const int loginRequest = 0x03; // App → Dev
+  static const int loginResponse = 0x04; // Dev → App
+  static const int unbindRequest = 0x05; // App → Dev
 }
 
 /// Watch notification (CMD 0x04) sub-command keys.
@@ -71,10 +86,10 @@ abstract class BleCmdWatchNotificationKey {
   // 尚无 builder,故本表也不列。
 }
 
-/// Canonical watch model snapshot (CMD 0x12).
+/// CMD 0x02 settings device-information payload.
 abstract class BleCmdWatchModelKey {
-  static const int get = 0x01; // App -> Dev
-  static const int snapshot = 0x02; // Dev -> App
+  static const int get = 0x30; // App -> Dev, opcode 0x01
+  static const int snapshot = 0x30; // Dev -> App, opcode 0x02
 }
 
 /// Watch sport / health data (CMD 0x05) sub-command keys.
@@ -158,7 +173,8 @@ abstract class BleCmdRemoteControlKey {
 ///   FFD3 write without response (App → Dev)
 ///   FFD4 notify                (Dev → App)
 ///
-/// 详见 `navi_projection_protocol.dart`。
+/// 已废弃：设备端改用 HoneyProtocol 3.12 的 L2 0x10 文件传输，
+/// 仪表盘投屏由原生 `mapfeature` 直接承载，本类无使用方。
 abstract class BleCmdNaviProjKey {
   // ── 控制通道 (FFD1→FFD2, 走 L1) ──
   static const int open = 0x01; // App → Dev: 开始投屏

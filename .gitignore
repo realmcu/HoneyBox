@@ -118,3 +118,5 @@ logcat.md
 /docs/superpowers/
 /docs/plans/
 /output/
+__pycache__/
+*.pyc

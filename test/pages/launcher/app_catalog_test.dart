@@ -4,14 +4,12 @@ import 'package:honeybox/pages/launcher/app_catalog.dart';
 
 void main() {
   group('kAppCatalog', () {
-    test('contains all six app entries in the merged order', () {
+    test('contains all launcher applications in order', () {
       expect(kAppCatalog.map((e) => e.id).toList(), [
         AppId.ebadge,
         AppId.watch,
         AppId.dashboard,
         AppId.watchLab,
-        AppId.capture,
-        AppId.ota,
       ]);
     });
 
@@ -24,10 +22,10 @@ void main() {
       }
     });
 
-    test('uses the product names from both branches', () {
+    test('uses the product names for every launcher application', () {
       expect(
         kAppCatalog.map((e) => e.title).toList(),
-        ['eBadge', 'Watch', 'Dashboard', 'SDK Demo', '数据采集', 'OTA'],
+        ['eBadge', 'Watch', 'Dashboard', 'SDK Demo'],
       );
     });
 
@@ -41,8 +39,6 @@ void main() {
       expect(byId[AppId.watch], 'Watch');
       expect(byId[AppId.dashboard], 'Dashboard');
       expect(byId[AppId.watchLab], 'Watch Lab');
-      expect(byId[AppId.capture], '*');
-      expect(byId[AppId.ota], '*');
     });
   });
 
@@ -52,8 +48,6 @@ void main() {
       expect(routeNameFor(AppId.watch), '/watch-root');
       expect(routeNameFor(AppId.dashboard), '/dashboard-root');
       expect(routeNameFor(AppId.watchLab), '/sdk-demo-root');
-      expect(routeNameFor(AppId.capture), '/capture-root');
-      expect(routeNameFor(AppId.ota), '/ota-root');
     });
   });
 }

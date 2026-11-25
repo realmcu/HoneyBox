@@ -174,14 +174,36 @@ jobs:
       - name: Build Android APK (debug)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') && github.event.inputs.release_tag == '' }}
         run: |
-          flutter build apk --debug
-          cp build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/HoneyBox-debug.apk
+          set -euo pipefail
+          # Central artifact mirrors occasionally return 429. Flutter retries
+          # immediately once, so add delayed attempts to ride out short limits.
+          for attempt in 1 2 3; do
+            if flutter build apk --debug; then
+              cp build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/HoneyBox-debug.apk
+              exit 0
+            fi
+            if [[ "${attempt}" == 3 ]]; then
+              exit 1
+            fi
+            echo "::warning::Android debug build failed (attempt ${attempt}); retrying after $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
 
       - name: Build Android APK (release)
         if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != '' }}
         run: |
-          flutter build apk --release
-          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/HoneyBox.apk
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if flutter build apk --release; then
+              mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/HoneyBox.apk
+              exit 0
+            fi
+            if [[ "${attempt}" == 3 ]]; then
+              exit 1
+            fi
+            echo "::warning::Android release build failed (attempt ${attempt}); retrying after $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
 
       # 验证产物签名指纹与高德控制台绑定值一致；不一致则地图会鉴权失败，
       # 而这种问题在装机运行前不会暴露，故在 CI 阶段就卡住。
@@ -227,10 +249,11 @@ jobs:
   # ─── Job 3: Windows Build ────────────────────────────────────────
   build-windows:
     name: Build Windows (x64)
-    runs-on: windows-latest
+    # The media adapter test script requires the Visual Studio 2022 generator.
+    runs-on: windows-2022
     timeout-minutes: 30
     needs: [analyze]
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v7

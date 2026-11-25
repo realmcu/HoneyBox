@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../i18n/app_strings.dart';
+
 /// Shows a modal HSV color palette. Returns the chosen opaque ARGB int
 /// (`0xFFrrggbb`) or `null` if the user cancels.
 ///
@@ -108,7 +110,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
         '#${(argb & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
 
     return AlertDialog(
-      title: const Text('调色板', textAlign: TextAlign.center),
+      title: Text(AppStrings.of(context).paletteTitle,
+          textAlign: TextAlign.center),
       contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       content: SizedBox(
         width: 300,
@@ -140,11 +143,11 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(AppStrings.of(context).cancel),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, argb),
-          child: const Text('确定'),
+          child: Text(AppStrings.of(context).confirm),
         ),
       ],
     );

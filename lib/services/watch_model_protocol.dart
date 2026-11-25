@@ -25,59 +25,54 @@ class WatchModelSnapshot {
   final int caloriesDeciKcal;
 }
 
+/// CMD 0x02 settings, key 0x30 device information.
+///
+/// Battery/activity are not part of this command; they are intentionally left
+/// unavailable instead of being invented. The wire authority is HoneyProtocol
+/// `docs/protocol/0x02-settings.rst`.
 class WatchModelProtocol {
   WatchModelProtocol._();
 
   static Uint8List buildGetRequest() => Uint8List.fromList([
-        BleCmd.watchModel,
+        BleCmd.watchSettings,
         0x00,
         BleCmdWatchModelKey.get,
         0x00,
-        0x00,
+        0x01,
+        0x01,
       ]);
 
   static WatchModelSnapshot? parseSnapshot(Uint8List frame) {
-    if (frame.length < 9 ||
-        frame[0] != BleCmd.watchModel ||
+    if (frame.length < 6 ||
+        frame[0] != BleCmd.watchSettings ||
         frame[1] != 0x00 ||
         frame[2] != BleCmdWatchModelKey.snapshot) {
       return null;
     }
     final valueLength = (frame[3] << 8) | frame[4];
-    if (valueLength < 4 || frame.length != 5 + valueLength) {
+    if (frame.length != 5 + valueLength || valueLength < 18) {
       return null;
     }
-    final schema = frame[5];
-    if (schema != 1 && schema != 2) return null;
-    final flags = frame[6];
-    final versionLength = frame[8];
-    final fixedLength = schema == 1 ? 4 : 20;
-    if (fixedLength + versionLength != valueLength) return null;
+    if (frame[5] != 0x02) return null;
 
-    final wallClockSeconds = schema == 2 ? _readU32(frame, 9) : 0;
-    final versionOffset = schema == 2 ? 25 : 9;
-
+    final major = frame[8];
+    final minor = frame[9];
+    final revision = frame[10];
     return WatchModelSnapshot(
-      batteryPercent: frame[7] > 100 ? 100 : frame[7],
-      batteryValid: (flags & 0x01) != 0,
-      charging: (flags & 0x02) != 0,
-      firmwareVersion:
-          utf8.decode(frame.sublist(versionOffset), allowMalformed: true),
-      wallClock: schema == 2 && (flags & 0x04) != 0
-          ? DateTime.fromMillisecondsSinceEpoch(
-              wallClockSeconds * 1000,
-              isUtc: true,
-            )
-          : null,
-      steps: schema == 2 ? _readU32(frame, 13) : 0,
-      distanceMeters: schema == 2 ? _readU32(frame, 17) : 0,
-      caloriesDeciKcal: schema == 2 ? _readU32(frame, 21) : 0,
+      batteryPercent: 0,
+      batteryValid: false,
+      charging: false,
+      firmwareVersion: '$major.$minor.$revision',
     );
   }
 
-  static int _readU32(Uint8List bytes, int offset) =>
-      (bytes[offset] << 24) |
-      (bytes[offset + 1] << 16) |
-      (bytes[offset + 2] << 8) |
-      bytes[offset + 3];
+  static String decodeSerial(Uint8List frame) {
+    if (frame.length < 23) return '';
+    final serialLength = frame[22];
+    if (serialLength > 32 || frame.length < 23 + serialLength) return '';
+    return utf8.decode(
+      frame.sublist(23, 23 + serialLength),
+      allowMalformed: true,
+    );
+  }
 }

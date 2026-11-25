@@ -46,8 +46,6 @@ dependencies:
     path: packages/jw_watch_demo
   ws_watch_demo:
     path: packages/ws_watch_demo
-  archive: ^4.5.2
-  share_plus: ^12.0.2
 
 dev_dependencies:
   watch_transport:
@@ -67,6 +65,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/ota/
     - assets/example/img/
     - assets/example/gif/
     - assets/example/video/

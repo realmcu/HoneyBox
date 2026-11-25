@@ -70,6 +70,29 @@ void main() {
     expect(writes, l1FrameForTest(0x10, 0x1234, const []));
   });
 
+  test('ACK_REQUEST data frame is delivered and acknowledged', () {
+    final writes = <int>[];
+    final payloads = <List<int>>[];
+    final engine = L1Engine(writeFn: (chunk) => writes.addAll(chunk))
+      ..onL2Data = (payload) => payloads.add(payload);
+    const bindResponse = [0x03, 0x00, 0x02, 0x00, 0x01, 0x00];
+
+    engine.onNotified(l1FrameForTest(0x40, 3, bindResponse));
+
+    expect(payloads, [bindResponse]);
+    expect(writes, l1FrameForTest(0x10, 3, const []));
+  });
+
+  test('ACK+error flag reports a negative acknowledgement', () {
+    final events = <(int, bool)>[];
+    final engine = L1Engine(writeFn: (_) {})
+      ..onAck = (seq, ok) => events.add((seq, ok));
+
+    engine.onNotified(l1FrameForTest(0x30, 9, const []));
+
+    expect(events, [(9, false)]);
+  });
+
   test('attach resets the L1 seq to 0 so each transfer starts at seq=0', () {
     // PROTOCOL.md §三: every transfer's BEGIN_REQ goes out as L1[seq=0], and the
     // desk-mate reference host resets seq on each attach(). This is what lets a

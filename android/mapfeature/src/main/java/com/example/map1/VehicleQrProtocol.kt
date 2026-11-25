@@ -47,55 +47,55 @@ object VehicleQrProtocol {
     sealed interface Result {
         data class WifiSuccess(val config: Config) : Result
         data class BleSuccess(val config: BleConfig) : Result
-        data class Failure(val message: String) : Result
+        data class Failure(val error: QrError) : Result
     }
 
     fun parse(raw: String): Result {
-        if (raw.toByteArray(StandardCharsets.UTF_8).size > MAX_PAYLOAD_BYTES) return failure("二维码内容过长")
-        val uri = runCatching { URI(raw) }.getOrNull() ?: return failure("二维码不是有效 URL")
-        if (!uri.isAbsolute || uri.scheme.isNullOrBlank() || uri.host.isNullOrBlank()) return failure("二维码必须是绝对 URL")
-        if (uri.rawFragment != null || uri.userInfo != null) return failure("二维码 URL 包含不允许的片段或用户信息")
+        if (raw.toByteArray(StandardCharsets.UTF_8).size > MAX_PAYLOAD_BYTES) return failure(QrError.TooLong)
+        val uri = runCatching { URI(raw) }.getOrNull() ?: return failure(QrError.NotAUrl)
+        if (!uri.isAbsolute || uri.scheme.isNullOrBlank() || uri.host.isNullOrBlank()) return failure(QrError.NotAbsoluteUrl)
+        if (uri.rawFragment != null || uri.userInfo != null) return failure(QrError.ForbiddenFragmentOrUserInfo)
 
         val values = linkedMapOf<String, String>()
-        val rawQuery = uri.rawQuery ?: return failure("二维码缺少车辆参数")
+        val rawQuery = uri.rawQuery ?: return failure(QrError.MissingQuery)
         for (part in rawQuery.split('&')) {
-            if (part.isEmpty()) return failure("二维码包含空参数")
+            if (part.isEmpty()) return failure(QrError.EmptyParameter)
             val separator = part.indexOf('=')
-            if (separator <= 0) return failure("二维码参数格式错误")
-            val key = decode(part.substring(0, separator)) ?: return failure("二维码参数编码错误")
-            val value = decode(part.substring(separator + 1)) ?: return failure("二维码参数编码错误")
-            if (key !in allowedKeys) return failure("二维码包含未知参数：$key")
-            if (values.put(key, value) != null) return failure("二维码参数重复：$key")
+            if (separator <= 0) return failure(QrError.MalformedParameter)
+            val key = decode(part.substring(0, separator)) ?: return failure(QrError.UndecodableParameter)
+            val value = decode(part.substring(separator + 1)) ?: return failure(QrError.UndecodableParameter)
+            if (key !in allowedKeys) return failure(QrError.UnknownParameter(key))
+            if (values.put(key, value) != null) return failure(QrError.DuplicateParameter(key))
         }
 
         fun required(name: String): String? = values[name]
-        val modelId = required("modelid") ?: return failure("缺少 modelid")
-        val sn = required("sn") ?: return failure("缺少 sn")
-        if (sn.isBlank() || sn.length > MAX_SN_LENGTH || sn.any(Char::isISOControl)) return failure("sn 无效")
+        val modelId = required("modelid") ?: return failure(QrError.MissingParameter("modelid"))
+        val sn = required("sn") ?: return failure(QrError.MissingParameter("sn"))
+        if (sn.isBlank() || sn.length > MAX_SN_LENGTH || sn.any(Char::isISOControl)) return failure(QrError.InvalidSerialNumber)
 
         if (modelId == MODEL_ID_RTL8773G || modelId == MODEL_ID_RTL8773E) {
             val unexpected = values.keys - bleKeys
-            if (unexpected.isNotEmpty()) return failure("BLE 车型包含不适用参数：${unexpected.first()}")
-            val address = required("addr") ?: return failure("缺少 addr")
-            if (!bleAddress.matches(address)) return failure("addr 必须是 BLE 地址，例如 C2:18:3F:91:72:44")
+            if (unexpected.isNotEmpty()) return failure(QrError.UnexpectedBleParameter(unexpected.first()))
+            val address = required("addr") ?: return failure(QrError.MissingParameter("addr"))
+            if (!bleAddress.matches(address)) return failure(QrError.InvalidAddressFormat)
             if (address.equals("00:00:00:00:00:00", ignoreCase = true) ||
                 address.equals("FF:FF:FF:FF:FF:FF", ignoreCase = true)
-            ) return failure("addr 不能是全 0 或广播地址")
+            ) return failure(QrError.ReservedAddress)
             return Result.BleSuccess(
                 BleConfig(modelId, sn, address.uppercase(), "${uri.scheme}://${uri.rawAuthority}${uri.rawPath.orEmpty()}"),
             )
         }
-        if (modelId != MODEL_ID_RTL8782) return failure("不支持的车型型号：$modelId")
+        if (modelId != MODEL_ID_RTL8782) return failure(QrError.UnsupportedModel(modelId))
 
         val unexpected = values.keys - wifiKeys
-        if (unexpected.isNotEmpty()) return failure("RTL8782 包含不适用参数：${unexpected.first()}")
-        val actionText = required("action") ?: return failure("缺少 action")
-        val action = parseAction(actionText) ?: return failure("action 必须是十进制或 0x 十六进制非负整数")
+        if (unexpected.isNotEmpty()) return failure(QrError.UnexpectedWifiParameter(unexpected.first()))
+        val actionText = required("action") ?: return failure(QrError.MissingParameter("action"))
+        val action = parseAction(actionText) ?: return failure(QrError.InvalidAction)
         val supportedActionMask = ACTION_PHONE_CONNECTS_VEHICLE_AP or ACTION_CUSTOM_LOCAL_AP
-        if (action and supportedActionMask.inv() != 0) return failure("action 包含当前不支持的标志位")
+        if (action and supportedActionMask.inv() != 0) return failure(QrError.UnsupportedActionFlags)
         val connects = action and ACTION_PHONE_CONNECTS_VEHICLE_AP != 0
         val custom = action and ACTION_CUSTOM_LOCAL_AP != 0
-        if (connects && !custom) return failure("0x200 标准车辆 AP 参数推导尚未实现；需要 0x001 自定义 AP 参数")
+        if (connects && !custom) return failure(QrError.StandardVehicleApNotImplemented)
 
         val needsEndpoint = connects || custom
         val ssid = required("ssid").orEmpty()
@@ -103,18 +103,18 @@ object VehicleQrProtocol {
         val ip = required("ip").orEmpty()
         val portText = required("port").orEmpty()
         if (needsEndpoint) {
-            if (listOf("ssid", "pwd", "ip", "port").any { it !in values }) return failure("当前 action 需要 ssid、pwd、ip 和 port")
+            if (listOf("ssid", "pwd", "ip", "port").any { it !in values }) return failure(QrError.MissingEndpointParameters)
             val ssidBytes = ssid.toByteArray(StandardCharsets.UTF_8).size
-            if (ssidBytes !in 1..32 || ssid.any(Char::isISOControl)) return failure("SSID 必须为 1–32 个 UTF-8 字节")
+            if (ssidBytes !in 1..32 || ssid.any(Char::isISOControl)) return failure(QrError.InvalidSsid)
             val validPassword = (password.length in 8..63 ||
                 password.length == 64 && password.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) &&
                 password.none(Char::isISOControl)
-            if (!validPassword) return failure("Wi-Fi 密码必须为 8–63 个字符或 64 位十六进制")
-            if (!isNumericIp(ip)) return failure("ip 必须是数字 IP 地址")
-            if (!isLocalVehicleAddress(ip)) return failure("ip 必须是车辆局域网地址")
+            if (!validPassword) return failure(QrError.InvalidPassword)
+            if (!isNumericIp(ip)) return failure(QrError.NonNumericIp)
+            if (!isLocalVehicleAddress(ip)) return failure(QrError.NonLocalIp)
         }
         val port = portText.toIntOrNull()
-        if (needsEndpoint && (port == null || port !in 1..65535)) return failure("port 必须在 1–65535 范围内")
+        if (needsEndpoint && (port == null || port !in 1..65535)) return failure(QrError.InvalidPort)
 
         return Result.WifiSuccess(Config(modelId, sn, action, ssid, password, ip, port ?: 0))
     }
@@ -150,5 +150,5 @@ object VehicleQrProtocol {
             (address.isSiteLocalAddress || address.isLinkLocalAddress)
     }
 
-    private fun failure(message: String) = Result.Failure(message)
+    private fun failure(error: QrError) = Result.Failure(error)
 }

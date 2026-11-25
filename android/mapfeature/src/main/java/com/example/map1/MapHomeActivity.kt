@@ -32,6 +32,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -64,6 +66,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.example.map1.i18n.DashboardI18n
+import com.example.map1.i18n.LanguagePreference
+import com.example.map1.i18n.LocalAppStrings
+import com.example.map1.i18n.appStrings
 import com.example.map1.navi.NaviActivity
 import com.example.map1.navi.NaviFramePreview
 import com.example.map1.navi.NaviPerfStats
@@ -83,16 +89,29 @@ import kotlinx.coroutines.withContext
 class MapHomeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        MapSdkInitializer.initialize(applicationContext)
+        // Must run before the first string lookup (the toast below).
+        LanguagePreference.ensureLoaded(this)
+        val mapReady = MapSdkInitializer.initialize(applicationContext)
+        if (!mapReady) {
+            // Key-less local builds still open the dashboard: BLE connect and the
+            // add-device flow do not touch AMap.
+            android.widget.Toast.makeText(
+                this,
+                appStrings(this).missingApiKeyToast,
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
         enableEdgeToEdge()
         setContent {
             Map1Theme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    NaviHomeScreen(
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .consumeWindowInsets(innerPadding)
-                    )
+                DashboardI18n {
+                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                        NaviHomeScreen(
+                            modifier = Modifier
+                                .padding(innerPadding)
+                                .consumeWindowInsets(innerPadding)
+                        )
+                    }
                 }
             }
         }
@@ -101,7 +120,7 @@ class MapHomeActivity : ComponentActivity() {
 
 /** 常用投屏分辨率预设（宽 to 高，像素）。 */
 private val RESOLUTION_PRESETS = listOf(
-    400 to 480,
+    410 to 370,
     480 to 800,
     600 to 1024,
     720 to 1280,
@@ -155,6 +174,7 @@ private fun parseReceiverEndpoint(rawValue: String): ReceiverEndpoint? {
 @Composable
 fun NaviHomeScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val strings = LocalAppStrings.current
 
     // 通过地点搜索选出的起点/终点（默认：苏州金鸡湖 -> 拙政园，坐标为高德 GCJ-02）
     var startPlace by remember {
@@ -202,9 +222,32 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
     var bleSender by remember { mutableStateOf<NaviBleFrameSender?>(null) }
     val bleProjecting = bleSender?.state == NaviBleFrameSender.State.SENDING ||
         bleSender?.state == NaviBleFrameSender.State.OPENING
+    // 复用同一个 sender：既避免重复绑定 onNaviNotify，也让握手结果（设备宽高/FPS）
+    // 在连接后查询一次就能被「开始投屏」直接沿用。
+    fun ensureBleSender(): NaviBleFrameSender {
+        bleSender?.let { return it }
+        val sender = NaviBleFrameSender(
+            onStatus = { status ->
+                val text = strings.castStatus(status)
+                scope.launch {
+                    // 同一状态连续上报（重试、区域不变）不重复排队，否则浮条会一直挂在屏幕上。
+                    if (snackbarHostState.currentSnackbarData?.visuals?.message != text) {
+                        snackbarHostState.showSnackbar(text)
+                    }
+                }
+            },
+        )
+        bleSender = sender
+        VehicleBleManager.onNaviNotify = { uuid, value -> sender.onNotify(uuid, value) }
+        return sender
+    }
+
     var pendingVehicleConfig by remember { mutableStateOf<VehicleQrProtocol.Config?>(null) }
     var pendingBleConfig by remember { mutableStateOf<VehicleQrProtocol.BleConfig?>(null) }
     var scanError by remember { mutableStateOf<String?>(null) }
+    // 握手失败 / 连接失败的原因。VehicleBleManager 已经主动丢弃链路，这里只负责
+    // 把原因告诉用户并把状态复位回 Idle（否则右上角会一直挂着「断开」）。
+    var connectFailure by remember { mutableStateOf<String?>(null) }
     var lastScan by remember { mutableStateOf<Pair<String, Long>?>(null) }
 
     fun handleScanResult(contents: String) {
@@ -218,7 +261,8 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
                 pendingVehicleConfig = result.config
             }
             is VehicleQrProtocol.Result.BleSuccess -> pendingBleConfig = result.config
-            is VehicleQrProtocol.Result.Failure -> scanError = "${result.message}。当前配置未更改，也未发起连接。"
+            is VehicleQrProtocol.Result.Failure ->
+                scanError = strings.scanRejected(strings.qrErrorText(result.error))
         }
     }
 
@@ -229,7 +273,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         scanLauncher.launch(
             ScanOptions().apply {
                 setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                setPrompt("扫描车辆二维码")
+                setPrompt(strings.qrScannerPrompt)
                 setBeepEnabled(false)
                 setOrientationLocked(false)
                 setBarcodeImageEnabled(false)
@@ -242,8 +286,39 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) openScanner()
-        else scope.launch { snackbarHostState.showSnackbar("相机权限被拒绝，无法扫一扫。请在系统设置中允许相机权限。") }
+        else scope.launch { snackbarHostState.showSnackbar(strings.snackCameraDenied) }
     }
+
+    // 手动添加设备：仪表不一定有二维码，改为扫广播发现后直连。复用同一个
+    // VehicleBleManager，所以连接/投屏状态与扫码路径完全一致。
+    val addDevicePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.all { it }) {
+            context.startActivity(Intent(context, AddBleDeviceActivity::class.java))
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar(strings.snackNearbyDeniedForScan)
+            }
+        }
+    }
+
+    fun openAddDevice() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            context.startActivity(Intent(context, AddBleDeviceActivity::class.java))
+        } else {
+            addDevicePermissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
     val blePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -252,7 +327,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             pendingBleConfig = null
             VehicleBleManager.connect(context, config)
         } else if (config != null) {
-            scope.launch { snackbarHostState.showSnackbar("附近设备权限被拒绝，无法连接 BLE 仪表。") }
+            scope.launch { snackbarHostState.showSnackbar(strings.snackNearbyDeniedForBle) }
         }
     }
     val wifiPermissionLauncher = rememberLauncherForActivityResult(
@@ -265,7 +340,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             pendingVehicleConfig = null
             VehicleWifiManager.connect(context, config)
         } else if (!granted) {
-            scope.launch { snackbarHostState.showSnackbar("Wi-Fi 权限被拒绝，未连接车辆。请在系统设置中授权后重试。") }
+            scope.launch { snackbarHostState.showSnackbar(strings.snackWifiDenied) }
         }
     }
 
@@ -291,12 +366,12 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             tcpHost = config.ip
             tcpPort = config.port.toString()
             pendingVehicleConfig = null
-            scope.launch { snackbarHostState.showSnackbar("action 不含 0x200：仅填入车辆端点，不连接 Wi-Fi") }
+            scope.launch { snackbarHostState.showSnackbar(strings.snackActionWithoutVehicleAp) }
             return
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             pendingVehicleConfig = null
-            scanError = "Android 10 以下不支持安全的自动车辆 Wi-Fi 选择；接收端已填入，请手动连接车辆 Wi-Fi。"
+            scanError = strings.errorLegacyWifiSelection
             return
         }
         val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
@@ -306,7 +381,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             }.recoverCatching {
                 context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
-            scope.launch { snackbarHostState.showSnackbar("请先打开 Wi-Fi，开启后返回并再次确认连接") }
+            scope.launch { snackbarHostState.showSnackbar(strings.snackEnableWifiFirst) }
             return
         }
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -329,28 +404,69 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         localIp = withContext(Dispatchers.IO) { NetworkUtils.getLocalIpv4() }
     }
 
+    // 握手没通过（服务缺失、通知订阅失败、超时）时 manager 会先自断链路并把原因
+    // 放进 State.Error：弹窗说明，同时复位到 Idle，让右上角回到「连接 / 扫一扫」。
+    LaunchedEffect(vehicleBleState) {
+        when (val state = vehicleBleState) {
+            is VehicleBleManager.State.Error -> {
+                connectFailure = strings.bleErrorText(state.error)
+                VehicleBleManager.disconnect()
+            }
+
+            // NaviReady 表示 MTU 已协商、0xFFC2 通知已订阅，此时 0x05 才能收到应答。
+            // 连上就问一次，把设备真正要求的 FPS / 投屏区域回填到输入框。
+            is VehicleBleManager.State.NaviReady -> {
+                val info = ensureBleSender().probeDeviceInfo() ?: return@LaunchedEffect
+                if (info.width > 0 && info.height > 0) {
+                    castWidth = info.width.toString()
+                    castHeight = info.height.toString()
+                }
+                info.requestedFps.takeIf { it in 1..60 }?.let { tcpFps = it.toString() }
+            }
+
+            // 断开后丢掉 sender：下次连接要重新握手（MTU 可能变了）。
+            is VehicleBleManager.State.Disconnected, is VehicleBleManager.State.Idle -> {
+                bleSender?.stop()
+                bleSender = null
+            }
+
+            else -> Unit
+        }
+    }
+
+    connectFailure?.let { message ->
+        AlertDialog(
+            onDismissRequest = { connectFailure = null },
+            title = { Text(strings.connectFailedTitle) },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { connectFailure = null }) { Text(strings.gotIt) }
+            },
+        )
+    }
+
     pendingVehicleConfig?.let { config ->
         BackHandler { pendingVehicleConfig = null }
         AlertDialog(
             onDismissRequest = { pendingVehicleConfig = null },
-            title = { Text("确认车辆连接") },
+            title = { Text(strings.confirmVehicleTitle) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("型号：${config.modelId}")
-                    Text("SN：${config.serialNumber}")
-                    Text("Action：${config.action} (${config.actionHex})")
-                    Text("SSID：${config.ssid}")
-                    Text("端点：${config.ip}:${config.port}")
-                    Text("密码：已隐藏")
-                    if (config.connectsVehicleAp) Text("确认后 Android 将显示系统 Wi-Fi 连接批准界面。")
-                    if (config.customLocalAp) Text("0x001：本地无互联网 AP；仅车辆 TCP 使用此 Wi-Fi，地图/互联网保留默认移动网络。")
+                    Text(strings.fieldModel(config.modelId))
+                    Text(strings.fieldSn(config.serialNumber))
+                    Text(strings.fieldAction(config.action.toString(), config.actionHex))
+                    Text(strings.fieldSsid(config.ssid))
+                    Text(strings.fieldEndpoint("${config.ip}:${config.port}"))
+                    Text(strings.fieldPasswordHidden)
+                    if (config.connectsVehicleAp) Text(strings.wifiApprovalNotice)
+                    if (config.customLocalAp) Text(strings.localApNotice)
                 }
             },
             confirmButton = {
-                TextButton(onClick = { confirmVehicleConfig(config) }) { Text("确认") }
+                TextButton(onClick = { confirmVehicleConfig(config) }) { Text(strings.confirm) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingVehicleConfig = null }) { Text("取消") }
+                TextButton(onClick = { pendingVehicleConfig = null }) { Text(strings.cancel) }
             },
         )
     }
@@ -358,30 +474,34 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         BackHandler { pendingBleConfig = null }
         AlertDialog(
             onDismissRequest = { pendingBleConfig = null },
-            title = { Text("已识别 BLE 仪表") },
+            title = { Text(strings.bleDetectedTitle) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("型号：${config.modelId}")
-                    Text("SN：${config.serialNumber}")
-                    Text("BLE 地址：${config.address}")
-                    Text("APK：${config.apkUrl}", maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("确认后将建立 BLE GATT 连接；专用传图 Profile 将在协议确定后接入。")
+                    Text(strings.fieldModel(config.modelId))
+                    Text(strings.fieldSn(config.serialNumber))
+                    Text(strings.fieldBleAddress(config.address))
+                    Text(
+                        strings.fieldApk(config.apkUrl),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(strings.bleGattNotice)
                 }
             },
             confirmButton = {
-                TextButton(onClick = { confirmBleConfig(config) }) { Text("连接") }
+                TextButton(onClick = { confirmBleConfig(config) }) { Text(strings.connect) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingBleConfig = null }) { Text("取消") }
+                TextButton(onClick = { pendingBleConfig = null }) { Text(strings.cancel) }
             },
         )
     }
     scanError?.let { error ->
         AlertDialog(
             onDismissRequest = { scanError = null },
-            title = { Text("车辆二维码无效") },
+            title = { Text(strings.invalidQrTitle) },
             text = { Text(error) },
-            confirmButton = { TextButton(onClick = { scanError = null }) { Text("返回") } },
+            confirmButton = { TextButton(onClick = { scanError = null }) { Text(strings.back) } },
         )
     }
 
@@ -448,33 +568,44 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         val s = startPlace ?: return
         val e = endPlace ?: return
 
-        val w = castWidth.toIntOrNull() ?: com.example.map1.navi.NaviCaptureService.DEFAULT_JPG_WIDTH
-        val h = castHeight.toIntOrNull() ?: com.example.map1.navi.NaviCaptureService.DEFAULT_JPG_HEIGHT
-        val fps = tcpFps.toIntOrNull() ?: 5
+        val quality = 60
 
-        // 1) 启动 NaviCaptureService (host="" → 不走 TCP)
-        val intent = Intent(context, NaviProjectionActivity::class.java).apply {
-            putExtra(NaviActivity.EXTRA_START_LAT, s.latitude)
-            putExtra(NaviActivity.EXTRA_START_LNG, s.longitude)
-            putExtra(NaviActivity.EXTRA_END_LAT, e.latitude)
-            putExtra(NaviActivity.EXTRA_END_LNG, e.longitude)
-            putExtra(NaviActivity.EXTRA_SPEED, speed.toIntOrNull() ?: 60)
-            putExtra(NaviActivity.EXTRA_TCP_HOST, "")  // 不走 TCP
-            putExtra(NaviActivity.EXTRA_TCP_PORT, 0)
-            putExtra(NaviActivity.EXTRA_TCP_FPS, fps)
-            putExtra(com.example.map1.navi.NaviCaptureService.EXTRA_DPI, virtualDpi.toInt())
-            putExtra(com.example.map1.navi.NaviCaptureService.EXTRA_WIDTH, w)
-            putExtra(com.example.map1.navi.NaviCaptureService.EXTRA_HEIGHT, h)
+        // 先建 sender 并问设备要投屏区域：JPEG 尺寸在 NaviCaptureService 启动时就固定了，
+        // 所以必须在启动虚拟屏之前拿到设备的实际宽高（老固件不回应则退回用户设置）。
+        // 连接时通常已经查过一次，这里命中缓存、不会重复发 0x05。
+        val sender = ensureBleSender()
+
+        scope.launch {
+            // 连接时已把设备上报的区域与 FPS 填进输入框，这里以输入框为准：
+            // 用户改了就用用户的（自定义覆盖），只有输入框为空/非法时才退回设备值。
+            val info = sender.probeDeviceInfo()
+            val w = castWidth.toIntOrNull() ?: info?.width
+                ?: com.example.map1.navi.NaviCaptureService.DEFAULT_JPG_WIDTH
+            val h = castHeight.toIntOrNull() ?: info?.height
+                ?: com.example.map1.navi.NaviCaptureService.DEFAULT_JPG_HEIGHT
+            // 设备直接给出建议质量（单一值）；未上报或超出合理区间时用本地默认。
+            val q = info?.quality?.takeIf { it in 10..100 } ?: quality
+            // 采样率同理：输入框优先，随后才用设备请求值。
+            val fpsEff = (tcpFps.toIntOrNull() ?: info?.requestedFps ?: 5).coerceIn(1, 60)
+
+            val intent = Intent(context, NaviProjectionActivity::class.java).apply {
+                putExtra(NaviActivity.EXTRA_START_LAT, s.latitude)
+                putExtra(NaviActivity.EXTRA_START_LNG, s.longitude)
+                putExtra(NaviActivity.EXTRA_END_LAT, e.latitude)
+                putExtra(NaviActivity.EXTRA_END_LNG, e.longitude)
+                putExtra(NaviActivity.EXTRA_SPEED, speed.toIntOrNull() ?: 60)
+                putExtra(NaviActivity.EXTRA_TCP_HOST, "")  // 不走 TCP
+                putExtra(NaviActivity.EXTRA_TCP_PORT, 0)
+                putExtra(NaviActivity.EXTRA_TCP_FPS, fpsEff)
+                putExtra(com.example.map1.navi.NaviCaptureService.EXTRA_DPI, virtualDpi.toInt())
+                putExtra(com.example.map1.navi.NaviCaptureService.EXTRA_WIDTH, w)
+                putExtra(com.example.map1.navi.NaviCaptureService.EXTRA_HEIGHT, h)
+                putExtra(com.example.map1.navi.NaviCaptureService.EXTRA_QUALITY, q)
+            }
+            context.startActivity(intent)
+
+            sender.start(w, h, fpsEff, q)
         }
-        context.startActivity(intent)
-
-        // 2) 创建并启动 BLE 投屏发送器
-        val sender = NaviBleFrameSender(
-            onStatus = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } },
-        )
-        bleSender = sender
-        VehicleBleManager.onNaviNotify = { uuid, value -> sender.onNotify(uuid, value) }
-        sender.start(w, h, fps, qual = 60)
     }
 
     // 请求定位权限（模拟导航本身不强依赖，但 SDK 初始化需要）
@@ -489,7 +620,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
     val target = searchingForStart
     if (target != null) {
         PlaceSearchScreen(
-            title = if (target) "选择起点" else "选择终点",
+            title = if (target) strings.pickStartTitle else strings.pickEndTitle,
             onBack = { searchingForStart = null },
             onPick = { place ->
                 if (target) startPlace = place else endPlace = place
@@ -502,30 +633,43 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
 
     // 导航进行中：投屏 JPG 预览铺满整屏，隐藏其余控件，仅保留底部「结束虚拟屏导航」按钮。
     if (virtualNaviRunning || bleProjecting) {
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            NaviJpgPreviewWindow(
-                aspectRatio = run {
-                    val w = castWidth.toIntOrNull()?.takeIf { it > 0 } ?: 400
-                    val h = castHeight.toIntOrNull()?.takeIf { it > 0 } ?: 480
-                    w.toFloat() / h.toFloat()
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { stopVirtualNavi() },
-                    modifier = Modifier.weight(1f),
+        // The projection screen returns before the main Scaffold, so it needs its
+        // own SnackbarHost -- otherwise showSnackbar() (e.g. "投屏异常…") has no
+        // host to render into and the message is silently dropped.
+        // The stop button lives in bottomBar on purpose: Scaffold stacks the
+        // SnackbarHost above the bottomBar, so cast-status messages never cover it.
+        Scaffold(
+            modifier = modifier.fillMaxSize(),
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            bottomBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.background)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                 ) {
-                    Text(if (bleProjecting) "结束 BLE 投屏" else "结束虚拟屏导航")
+                    Button(
+                        onClick = { stopVirtualNavi() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (bleProjecting) strings.endBleCasting else strings.endVirtualNavi)
+                    }
                 }
+            },
+        ) { contentPadding ->
+            val previewAspect = run {
+                val w = castWidth.toIntOrNull()?.takeIf { it > 0 } ?: 410
+                val h = castHeight.toIntOrNull()?.takeIf { it > 0 } ?: 370
+                w.toFloat() / h.toFloat()
             }
+            // 播放器式布局：整块黑底铺满，画面按自身比例居中留黑边，按钮固定在最底部。
+            NaviJpgPreviewWindow(
+                aspectRatio = previewAspect,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(contentPadding)
+                    .padding(16.dp),
+            )
         }
         return
     }
@@ -548,16 +692,52 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(text = "高德模拟导航", style = MaterialTheme.typography.headlineSmall)
-            TextButton(
-                onClick = {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
-                        PackageManager.PERMISSION_GRANTED
-                    ) openScanner() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                },
-            ) {
-                Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
-                Text("扫一扫", modifier = Modifier.padding(start = 4.dp))
+            Text(
+                text = strings.dashboardTitle,
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            // 已连线时两个入口合并成一个「断开」；连接中显示「取消」。
+            val bleLinkUp = vehicleBleState is VehicleBleManager.State.Connecting ||
+                vehicleBleState is VehicleBleManager.State.Connected ||
+                vehicleBleState is VehicleBleManager.State.NaviReady
+            val wifiLinkUp = vehicleWifiState is VehicleWifiManager.State.ApprovalPending ||
+                vehicleWifiState is VehicleWifiManager.State.Available
+            if (bleLinkUp || wifiLinkUp) {
+                TextButton(
+                    onClick = {
+                        VehicleBleManager.disconnect()
+                        VehicleWifiManager.disconnect()
+                    },
+                ) {
+                    Icon(Icons.Outlined.LinkOff, contentDescription = null)
+                    Text(
+                        text = if (vehicleBleState is VehicleBleManager.State.Connecting) {
+                            strings.cancel
+                        } else {
+                            strings.disconnect
+                        },
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            } else {
+                // 没有二维码的仪表走「+ 连接」：广播过滤后手动选设备。
+                TextButton(onClick = ::openAddDevice) {
+                    Icon(Icons.Outlined.Add, contentDescription = null)
+                    Text(strings.connect, modifier = Modifier.padding(start = 4.dp))
+                }
+                TextButton(
+                    onClick = {
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                            PackageManager.PERMISSION_GRANTED
+                        ) openScanner() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    },
+                ) {
+                    Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+                    Text(strings.scanQrCode, modifier = Modifier.padding(start = 4.dp))
+                }
             }
         }
 
@@ -571,15 +751,15 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         if (bleActive) {
             connText = when (val s = vehicleBleState) {
                 is VehicleBleManager.State.Connecting ->
-                    "BLE 仪表：正在连接 ${s.config.address}"
+                    strings.bleConnecting(s.config.address)
                 is VehicleBleManager.State.Connected ->
-                    "BLE 仪表：已连接 ${s.config.modelId} (${s.config.address})"
+                    strings.bleConnected(s.config.modelId, s.config.address)
                 is VehicleBleManager.State.NaviReady ->
-                    "BLE 仪表：投屏就绪 ${s.config.modelId}"
+                    strings.bleNaviReady(s.config.modelId)
                 is VehicleBleManager.State.Disconnected ->
-                    "BLE 仪表：${s.config.address} 已断开"
-                is VehicleBleManager.State.Error -> "BLE 仪表：${s.message}"
-                else -> "BLE 仪表：—"
+                    strings.bleDisconnected(s.config.address)
+                is VehicleBleManager.State.Error -> strings.bleError(s.error)
+                else -> strings.bleIdle
             }
             connColor = when (vehicleBleState) {
                 is VehicleBleManager.State.NaviReady -> MaterialTheme.colorScheme.primary
@@ -590,11 +770,11 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         } else if (wifiActive) {
             connText = when (val s = vehicleWifiState) {
                 is VehicleWifiManager.State.ApprovalPending ->
-                    "车辆 Wi-Fi：等待系统批准并连接 ${s.ssid}"
-                is VehicleWifiManager.State.Available -> "车辆 Wi-Fi：已连接 ${s.ssid}"
-                is VehicleWifiManager.State.Lost -> "车辆 Wi-Fi：${s.ssid} 已断开"
-                is VehicleWifiManager.State.Error -> "车辆 Wi-Fi：${s.message}"
-                else -> "车辆 Wi-Fi：—"
+                    strings.wifiApprovalPending(s.ssid)
+                is VehicleWifiManager.State.Available -> strings.wifiConnected(s.ssid)
+                is VehicleWifiManager.State.Lost -> strings.wifiLost(s.ssid)
+                is VehicleWifiManager.State.Error -> strings.wifiError(s.error)
+                else -> strings.wifiIdle
             }
             connColor = when (vehicleWifiState) {
                 is VehicleWifiManager.State.Error, is VehicleWifiManager.State.Lost ->
@@ -602,30 +782,27 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
                 else -> MaterialTheme.colorScheme.outline
             }
         } else {
-            connText = "连接仪表：未连接（扫描车辆二维码以建立连接）"
+            connText = strings.noConnection
             connColor = MaterialTheme.colorScheme.outline
         }
+        // Language is chosen in the Flutter launcher and pushed over the
+        // honeybox/map channel, so the dashboard only renders it.
         Text(
             text = connText,
             style = MaterialTheme.typography.bodySmall,
             color = connColor,
         )
-        if (bleActive && vehicleBleState !is VehicleBleManager.State.NaviReady) {
-            TextButton(onClick = { VehicleBleManager.disconnect() }) { Text("断开 BLE 仪表") }
-        } else if (!bleActive && wifiActive) {
-            TextButton(onClick = { VehicleWifiManager.disconnect() }) { Text("断开车辆 Wi-Fi") }
-        }
 
         // 起点 / 终点放同一行节省纵向空间
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PlaceSelector(
-                label = "起点",
+                label = strings.startPoint,
                 place = startPlace,
                 onClick = { searchingForStart = true },
                 modifier = Modifier.weight(1f),
             )
             PlaceSelector(
-                label = "终点",
+                label = strings.endPoint,
                 place = endPlace,
                 onClick = { searchingForStart = false },
                 modifier = Modifier.weight(1f),
@@ -637,21 +814,21 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             OutlinedTextField(
                 value = speed,
                 onValueChange = { speed = it },
-                label = { Text("速度 km/h") },
+                label = { Text(strings.speedLabel) },
                 singleLine = true,
                 modifier = Modifier.weight(0.45f)
             )
             OutlinedTextField(
                 value = tcpHost,
                 onValueChange = { tcpHost = it },
-                label = { Text("接收端 IP（留空不发）") },
+                label = { Text(strings.receiverHostLabel) },
                 singleLine = true,
                 modifier = Modifier.weight(0.55f)
             )
         }
 
         Text(
-            text = localIp?.let { "本机局域网 IP：$it" } ?: "未检测到局域网 IP",
+            text = localIp?.let { strings.localIp(it) } ?: strings.localIpUnknown,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.outline,
         )
@@ -681,13 +858,13 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
                 },
                 enabled = !scanning,
             ) {
-                Text(if (scanning) "扫描中… $scanProgress%" else "扫描局域网设备")
+                Text(if (scanning) strings.scanningLan(scanProgress) else strings.scanLanDevices)
             }
 
             if (lanDevices.isNotEmpty()) {
                 Box {
                     TextButton(onClick = { deviceMenuExpanded = true }) {
-                        Text("选择设备 (${lanDevices.size})")
+                        Text(strings.pickDevice(lanDevices.size))
                     }
                     DropdownMenu(
                         expanded = deviceMenuExpanded,
@@ -711,7 +888,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             OutlinedTextField(
                 value = tcpPort,
                 onValueChange = { tcpPort = it },
-                label = { Text("端口") },
+                label = { Text(strings.portLabel) },
                 singleLine = true,
                 modifier = Modifier.weight(1f)
             )
@@ -726,7 +903,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
 
         // 投屏分辨率：宽×高。可从常用预设下拉选择，或手动输入自定义值。
         Text(
-            text = "投屏分辨率（宽×高，像素）",
+            text = strings.resolutionSection,
             style = MaterialTheme.typography.bodySmall,
         )
         Row(
@@ -736,20 +913,20 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             OutlinedTextField(
                 value = castWidth,
                 onValueChange = { castWidth = it.filter { c -> c.isDigit() } },
-                label = { Text("宽") },
+                label = { Text(strings.widthLabel) },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             OutlinedTextField(
                 value = castHeight,
                 onValueChange = { castHeight = it.filter { c -> c.isDigit() } },
-                label = { Text("高") },
+                label = { Text(strings.heightLabel) },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             Box {
                 TextButton(onClick = { resolutionMenuExpanded = true }) {
-                    Text("预设")
+                    Text(strings.presetLabel)
                 }
                 DropdownMenu(
                     expanded = resolutionMenuExpanded,
@@ -772,7 +949,7 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
         // UI 缩放滑块：通过改变虚拟屏渲染分辨率来真正改变导航 UI 控件尺寸。
         // 值越大 → 渲染画布越大 → 缩放回目标分辨率后 UI/字越小。160=原始大小。
         Text(
-            text = "导航 UI 缩放：${virtualDpi.toInt()}（越大 UI 越小，160=原始）",
+            text = strings.zoomLabel(virtualDpi.toInt()),
             style = MaterialTheme.typography.bodySmall,
         )
         Slider(
@@ -808,9 +985,9 @@ fun NaviHomeScreen(modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(when {
-                bleReady -> "BLE 投屏"
-                tcpHost.isNotBlank() -> "开始虚拟屏导航 (WiFi)"
-                else -> "开始虚拟屏导航 (仅预览)"
+                bleReady -> strings.startBleCasting
+                tcpHost.isNotBlank() -> strings.startWifiCasting
+                else -> strings.startPreviewCasting
             })
         }
     }
@@ -825,6 +1002,7 @@ private fun NaviJpgPreviewWindow(
 ) {
     val frame by NaviFramePreview.latestFrame.collectAsState()
     val perf by NaviPerfStats.snapshot.collectAsState()
+    val strings = LocalAppStrings.current
     val imageBitmap = remember(frame) {
         val jpeg = frame?.jpeg ?: return@remember null
         BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)?.asImageBitmap()
@@ -834,29 +1012,31 @@ private fun NaviJpgPreviewWindow(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                // Black letterbox like a video player: the JPG keeps its own aspect.
+                .background(Color.Black)
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant),
             contentAlignment = Alignment.Center,
         ) {
             if (imageBitmap != null) {
                 Image(
                     bitmap = imageBitmap,
-                    contentDescription = "投屏 JPG 预览",
+                    contentDescription = strings.previewDescription,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(aspectRatio),
                 )
             } else {
                 Text(
-                    text = "投屏预览",
+                    text = strings.previewPlaceholder,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = Color.White.copy(alpha = 0.6f),
                 )
             }
 
             // 左上角叠加流程耗时日志，帮助定位帧率瓶颈。
             Text(
-                text = perf.toOverlayText(),
+                text = strings.perfOverlayText(perf),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.Green,
                 modifier = Modifier
@@ -883,7 +1063,7 @@ private fun PlaceSelector(
         Column(modifier = Modifier.padding(16.dp)) {
             Text(text = label, style = MaterialTheme.typography.labelMedium)
             Text(
-                text = place?.name ?: "点击搜索地点",
+                text = place?.name ?: LocalAppStrings.current.pickPlaceHint,
                 style = MaterialTheme.typography.titleMedium,
                 color = if (place == null) MaterialTheme.colorScheme.outline
                 else MaterialTheme.colorScheme.onSurface,
@@ -915,6 +1095,7 @@ private fun PlaceSearchScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val strings = LocalAppStrings.current
     var keyword by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Place>>(emptyList()) }
 
@@ -939,7 +1120,7 @@ private fun PlaceSearchScreen(
                 onClick = onBack,
                 modifier = Modifier.align(Alignment.CenterStart),
             ) {
-                Text("← 返回")
+                Text("← ${strings.back}")
             }
             Text(
                 text = title,
@@ -951,7 +1132,7 @@ private fun PlaceSearchScreen(
         OutlinedTextField(
             value = keyword,
             onValueChange = { keyword = it },
-            label = { Text("搜索地点 / 地址") },
+            label = { Text(strings.searchHint) },
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()

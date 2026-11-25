@@ -17,8 +17,10 @@ abstract final class JwScanPolicy {
         uuids.contains(JwGattProfile.service)) {
       return true;
     }
-    final legacy = manufacturerData[0x07d0];
-    return legacy != null && legacy.length >= 6;
+    // flutter_blue_plus separates the little-endian company ID from its data.
+    // 0xFEC5 is a shared Realtek company ID and does not identify JW devices.
+    return manufacturerData.entries
+        .any((e) => e.key == 0x07d0 && e.value.length >= 6);
   }
 
   static bool isHoneyWsAdvertisement({
@@ -26,8 +28,7 @@ abstract final class JwScanPolicy {
     required Map<int, List<int>> manufacturerData,
     String deviceName = '',
   }) {
-    if (serviceUuids.contains(
-        '6e400001-b5a3-f393-e0a9-e50e24dcca9e')) {
+    if (serviceUuids.contains('6e400001-b5a3-f393-e0a9-e50e24dcca9e')) {
       return true;
     }
     final fec5 = manufacturerData[0xfec5];
@@ -47,10 +48,9 @@ abstract final class JwScanPolicy {
       bool onlyNamed = false,
       bool onlyConnectable = false}) {
     final name = device.name.trim().toLowerCase();
+    final unnamed = name.isEmpty || name == 'n/a' || name == '未知设备';
     if (onlyConnectable && !device.connectable) return false;
-    if (onlyNamed && (name.isEmpty || name == 'n/a' || name == '未知设备')) {
-      return false;
-    }
+    if (onlyNamed && unnamed) return false;
     final q = query.trim().toLowerCase();
     final hexQuery = q.replaceAll(RegExp(r'[:\-\s]'), '');
     final isFullHexSequence = RegExp(r'^[0-9a-f]{12}$').hasMatch(hexQuery);

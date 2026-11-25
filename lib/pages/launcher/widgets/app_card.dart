@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../i18n/app_strings.dart';
 import '../app_catalog.dart';
 
 /// 应用启动器里的一张卡片：图标 + 标题 + 副标题；
@@ -6,17 +7,20 @@ import '../app_catalog.dart';
 class AppCard extends StatelessWidget {
   final AppEntry entry;
   final VoidCallback onTap;
+  final String? connectedDeviceName;
 
   const AppCard({
     super.key,
     required this.entry,
     required this.onTap,
+    this.connectedDeviceName,
   });
 
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
+    final strings = AppStrings.of(context);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -41,18 +45,24 @@ class AppCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Text(entry.title, style: tt.titleMedium),
-                        if (!entry.implemented) ...[
-                          const SizedBox(width: 8),
+                        Text(strings.appTitle(entry.id), style: tt.titleMedium),
+                        if (!entry.implemented)
                           _PreviewBadge(color: cs.outline),
-                        ],
+                        if (connectedDeviceName != null)
+                          _ConnectedBadge(
+                            color: cs.secondary,
+                            deviceName: connectedDeviceName!,
+                          ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      entry.subtitle,
+                      strings.appSubtitle(entry.id),
                       style: tt.bodySmall?.copyWith(color: cs.outline),
                     ),
                   ],
@@ -62,6 +72,40 @@ class AppCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ConnectedBadge extends StatelessWidget {
+  final Color color;
+  final String deviceName;
+
+  const _ConnectedBadge({required this.color, required this.deviceName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 180),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.link, size: 12, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              '已连接 · $deviceName',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10, color: color),
+            ),
+          ),
+        ],
       ),
     );
   }

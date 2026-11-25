@@ -6,13 +6,26 @@ import 'package:honeybox/services/watch_bind_protocol.dart';
 void main() {
   group('WatchBindProtocol', () {
     test('builds a bind request with a 32-byte user ID', () {
-      final userId = Uint8List.fromList(List<int>.generate(32, (i) => i));
+      final userId = Uint8List.fromList(
+        '0123456789abcdef0123456789abcdef'.codeUnits,
+      );
 
       final frame = WatchBindProtocol.buildRequest(userId);
 
       expect(frame.sublist(0, 5), [0x03, 0x00, 0x01, 0x00, 0x20]);
       expect(frame.sublist(5), userId);
       expect(frame, hasLength(37));
+    });
+
+    test('builds a login request with the same user ID envelope', () {
+      final userId = Uint8List.fromList(
+        '0123456789abcdef0123456789abcdef'.codeUnits,
+      );
+
+      final frame = WatchBindProtocol.buildLoginRequest(userId);
+
+      expect(frame.sublist(0, 5), [0x03, 0x00, 0x03, 0x00, 0x20]);
+      expect(frame.sublist(5), userId);
     });
 
     test('rejects a user ID that is not exactly 32 bytes', () {
@@ -60,7 +73,9 @@ void main() {
     });
 
     test('generates a 32-byte user ID', () {
-      expect(WatchBindProtocol.generateUserId(), hasLength(32));
+      final id = WatchBindProtocol.generateUserId();
+      expect(id, hasLength(32));
+      expect(String.fromCharCodes(id), matches(RegExp(r'^[0-9a-f]{32}$')));
     });
   });
 }

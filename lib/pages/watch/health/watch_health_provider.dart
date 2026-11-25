@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/ble_provider.dart';
 import '../../../providers/watch_bind_provider.dart';
 import '../../../services/watch_health_repository.dart';
+import '../../../services/watch_health_store.dart';
 import 'watch_health_data.dart';
 
 enum WatchHealthSyncPhase { idle, syncing, success, failure }
@@ -52,6 +53,13 @@ class WatchHealthNotifier extends StateNotifier<WatchHealthState> {
   final String _deviceId;
   final bool Function() _isBound;
 
+  Future<void> restore() async {
+    if (state.snapshot != null) return;
+    final snapshot = await _repository.loadCached(_deviceId);
+    if (!mounted || snapshot == null || state.snapshot != null) return;
+    state = state.copyWith(snapshot: snapshot, clearError: true);
+  }
+
   Future<void> sync() async {
     if (state.phase == WatchHealthSyncPhase.syncing) return;
     if (!_isBound()) {
@@ -88,10 +96,11 @@ class WatchHealthNotifier extends StateNotifier<WatchHealthState> {
 
 final watchHealthRepositoryProvider = Provider<WatchHealthRepository>((ref) {
   final bleManager = ref.read(bleManagerProvider);
-  return WatchHealthModelRepository(
+  return WatchHealthBleRepository(
     commandAvailable: () => bleManager.commandAvailable,
     sendCommand: bleManager.sendCommand,
     notifications: bleManager.commandNotifications,
+    store: WatchHealthFileStore(),
   );
 });
 

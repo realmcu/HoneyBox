@@ -6,9 +6,14 @@ import 'ebadge_demo_presets.dart';
 
 /// 协议调试页 §6 同屏推流用的固定测试帧(4 帧循环)。
 ///
-/// 尺寸与 Wi-Fi 传图档位统一为 [kEBadgeDemoImageSize] —— 设备圆屏的物理分辨率。
-/// §6.2 的 14 字节流头**不带宽高**,设备只能按 JPEG 自身的 SOF 尺寸解,发别的尺寸
-/// 就把「设备缩放对不对」也混进这条链路的变量里了。
+/// 边长**默认**与 Wi-Fi 传图档位统一为 [kEBadgeDemoImageSize] —— 设备圆屏的物理
+/// 分辨率。§6.2 的 14 字节流头**不带宽高**,设备只能按 JPEG 自身的 SOF 尺寸解,发
+/// 别的尺寸就把「设备缩放对不对」也混进这条链路的变量里了 —— 所以默认值必须落在
+/// 设备原生尺寸上。
+///
+/// 之所以仍然可调(见 [prepare] 的 `size`):排障时「是不是像素太多」是个必须能
+/// 单独排除的变量,把边长减半,单帧体积约降到四分之一,若掉帧随之消失,瓶颈就落在
+/// 带宽/单帧体积上而不是协议时序上。
 ///
 /// **为什么现场用 Canvas 画 + 纯 Dart 编码,而不是内嵌 base64 或走原生**:
 ///
@@ -30,7 +35,10 @@ import 'ebadge_demo_presets.dart';
 abstract class EBadgeStreamDemoFrames {
   static const int count = 4;
 
-  /// 一帧的画布尺寸。与传图档位共用同一个常量,两条链路的图别无谓地不一样。
+  /// 一帧的画布边长,**默认**与传图档位共用同一个常量。
+  ///
+  /// 它只是缺省值:[prepare] 收了一个可选的 `size`,实际用的边长以那次调用为准 ——
+  /// 调试台允许按像素调 (见 [EBadgeDebugConfig.streamSize])。
   static const int width = kEBadgeDemoImageSize;
   static const int height = kEBadgeDemoImageSize;
 
@@ -38,15 +46,44 @@ abstract class EBadgeStreamDemoFrames {
   static const int quality = 75;
 
   static List<Uint8List>? _cache;
+
+  /// [_cache] 对应的边长。它只在 [prepare] **成功**之后才更新 —— 跟着 `_cache`
+  /// 走,两者必须描述同一批字节。提前改它的话,一次失败的编码会让「尺寸」和
+  /// 「帧数组」对不上,而下一次 [prepare] 就会把旧尺寸的四帧当成新尺寸直接复用。
+  static int _cachedSize = width;
+
   static Future<List<Uint8List>>? _pending;
 
   /// 四帧是否已就绪。界面据此说明「首帧要先编码」。
   static bool get ready => _cache != null;
 
+  /// 已编好的那四帧的边长([ready] 为真时才有意义)。
+  static int get cachedSize => _cachedSize;
+
   /// 预编四帧。**推流前必须先 await 它** —— 编码要走 Canvas(异步)且四帧合计几十
-  /// 毫秒到几百毫秒,而 [at] 是同步的,拿不到就只能跳过那一 tick。重复调用复用同
-  /// 一个 Future,不会重编。
-  static Future<List<Uint8List>> prepare() => _pending ??= _build();
+  /// 毫秒到几百毫秒(边长翻倍则约四倍),而 [at] 是同步的,拿不到就只能跳过那一 tick。
+  ///
+  /// [size] 与已缓存的那一档相同时复用现有结果;**不同则重编**。不重编的话,用户
+  /// 把边长改小后界面读数变了、推出去的还是旧尺寸,而设备屏上除了「没变化」看不出
+  /// 任何异常 —— 这条链路最难查的就是这种「设置没生效」。
+  ///
+  /// 重编期间 [_cache] 会被清空(于是 [at] 返回 null、会话跳过这几 tick),而不是
+  /// 继续供着旧尺寸的帧:宁可让画面停一下,也不能让「设置说 256、推的却是 466」
+  /// 这种不一致出现。
+  static Future<List<Uint8List>> prepare({int size = width}) {
+    if (_cache != null && _cachedSize == size) {
+      return Future.value(_cache!);
+    }
+    // 同一尺寸的重入(界面重画、连点两次)复用正在进行的那一次。
+    final pending = _pending;
+    if (pending != null && _pendingSize == size) return pending;
+    _cache = null;
+    _pendingSize = size;
+    return _pending = _build(size);
+  }
+
+  /// 正在编的那一次对应的边长,用来判断能不能复用 [pending]。
+  static int? _pendingSize;
 
   /// 取第 [i] 帧(自动取模,调用方不必管越界)。尚未 [prepare] 完成时返回 null,
   /// 会话会把这一 tick 当作「没有新画面」跳过(§6.2 的 size 是 payload 长度,
@@ -57,26 +94,28 @@ abstract class EBadgeStreamDemoFrames {
     return f[i % f.length];
   }
 
-  static Future<List<Uint8List>> _build() async {
+  static Future<List<Uint8List>> _build(int size) async {
     try {
       final out = <Uint8List>[];
       for (var i = 0; i < count; i++) {
-        out.add(await _encodeFrame(i));
+        out.add(await _encodeFrame(i, size));
       }
+      // 尺寸只在这里更新:它和 `_cache` 必须同时生效,见 [cachedSize]。
+      _cachedSize = size;
       return _cache = out;
     } catch (_) {
       // 编码失败就把 Future 撤掉,否则一次偶发失败会让「重试」永远拿到同一个已失败
       // 的 Future,按多少次都起不来。
-      _pending = null;
+      if (_pendingSize == size) _pending = null;
       rethrow;
     }
   }
 
-  static Future<Uint8List> _encodeFrame(int index) async {
+  static Future<Uint8List> _encodeFrame(int index, int size) async {
     final recorder = ui.PictureRecorder();
     final canvas = ui.Canvas(recorder);
-    final double w = width.toDouble();
-    final double h = height.toDouble();
+    final double w = size.toDouble();
+    final double h = size.toDouble();
 
     canvas.drawRect(
       ui.Rect.fromLTWH(0, 0, w, h),
@@ -108,7 +147,7 @@ abstract class EBadgeStreamDemoFrames {
     );
 
     final ui.Picture picture = recorder.endRecording();
-    final ui.Image img = await picture.toImage(width, height);
+    final ui.Image img = await picture.toImage(size, size);
     final ByteData? bd =
         await img.toByteData(format: ui.ImageByteFormat.rawRgba);
     img.dispose();
@@ -118,8 +157,8 @@ abstract class EBadgeStreamDemoFrames {
     }
     return encodeBaselineJpegYuv420(
       bd.buffer.asUint8List(),
-      width,
-      height,
+      size,
+      size,
       quality: quality,
     );
   }

@@ -8,6 +8,7 @@ import 'package:honeybox/pages/watch/watch_device_page.dart';
 import 'package:honeybox/pages/device/widgets/action_card.dart';
 import 'package:honeybox/providers/watch_bind_provider.dart';
 import 'package:honeybox/providers/watch_model_provider.dart';
+import 'package:honeybox/providers/ota_in_progress_provider.dart';
 import 'package:honeybox/theme/app_theme.dart';
 
 void main() {
@@ -26,6 +27,7 @@ void main() {
   Widget buildPage({
     int? Function(Uint8List)? send,
     DateTime Function()? clock,
+    Route<dynamic>? Function(RouteSettings)? onGenerateRoute,
   }) {
     return ProviderScope(
       overrides: [
@@ -51,6 +53,7 @@ void main() {
       ],
       child: MaterialApp(
         theme: AppTheme.lightTheme,
+        onGenerateRoute: onGenerateRoute,
         home: const WatchDevicePage(
           deviceName: 'HoneyBox Watch',
           deviceId: 'test-device',
@@ -104,6 +107,37 @@ void main() {
 
     cards = tester.widgetList<ActionCard>(find.byType(ActionCard)).toList();
     expect(cards.every((card) => card.enabled && card.onTap != null), isTrue);
+  });
+
+  testWidgets('opens the Watch-specific OTA route from the connected page',
+      (tester) async {
+    RouteSettings? opened;
+    await tester.pumpWidget(buildPage(onGenerateRoute: (settings) {
+      opened = settings;
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => const Scaffold(body: Text('watch-ota-target')),
+      );
+    }));
+    await tester.pump();
+
+    notifications.add(
+      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.text('固件 OTA 升级'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('固件 OTA 升级'));
+    await tester.pumpAndSettle();
+    final container = ProviderScope.containerOf(
+      tester.element(find.text('watch-ota-target')),
+    );
+
+    expect(opened?.name, '/watch-rtl87x3g-ota');
+    expect(
+        (opened?.arguments as Map<String, String>)['deviceId'], 'test-device');
+    expect(container.read(otaInProgressProvider), isTrue);
+    expect(find.text('watch-ota-target'), findsOneWidget);
   });
 
   testWidgets('keeps bound state and retries only time synchronization',

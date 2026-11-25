@@ -29,6 +29,9 @@ import com.amap.api.navi.AMapNaviViewOptions
 import com.amap.api.navi.enums.NaviType
 import com.amap.api.navi.enums.PathPlanningStrategy
 import com.amap.api.navi.model.NaviLatLng
+import com.example.map1.i18n.AppStrings
+import com.example.map1.i18n.LanguagePreference
+import com.example.map1.i18n.appStrings
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -42,6 +45,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * 起点 / 终点经纬度通过 Intent 传入，缺省使用北京天安门 -> 北京南站。
  */
 class NaviActivity : Activity() {
+
+    /** Resolved per call so a language switch is picked up without a restart. */
+    private val strings: AppStrings get() = appStrings(this)
 
     private lateinit var naviView: AMapNaviView
     private lateinit var aMapNavi: AMapNavi
@@ -103,12 +109,12 @@ class NaviActivity : Activity() {
                 PathPlanningStrategy.DRIVING_DEFAULT
             )
             if (!ok) {
-                toast("发起算路失败，请检查起终点坐标")
+                toast(strings.navRouteStartFailed)
             }
         }
 
         override fun onInitNaviFailure() {
-            toast("导航初始化失败")
+            toast(strings.navInitFailed)
         }
 
         override fun onCalculateRouteSuccess(result: com.amap.api.navi.model.AMapCalcRouteResult?) {
@@ -124,20 +130,21 @@ class NaviActivity : Activity() {
             val detail = result?.errorDetail
             Log.e(TAG, "路线计算失败：错误码=$code, 描述=$desc, 详情=$detail")
             Log.e(TAG, "错误码说明: http://lbs.amap.com/api/android-navi-sdk/guide/tools/errorcode/")
-            toast("路线规划失败[$code]：${desc ?: ""} ${detail ?: ""}")
+            toast(strings.navRouteFailed(code, desc, detail))
         }
 
         override fun onArriveDestination() {
-            toast("已到达目的地")
+            toast(strings.navArrived)
         }
 
         override fun onEndEmulatorNavi() {
-            toast("模拟导航结束")
+            toast(strings.navEmulatorStopped)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LanguagePreference.ensureLoaded(this)
 
         naviView = AMapNaviView(this)
         naviView.onCreate(savedInstanceState)
@@ -166,7 +173,7 @@ class NaviActivity : Activity() {
             // 使用 SDK 内置语音播报
             aMapNavi.setUseInnerVoice(true, true)
         } catch (e: Exception) {
-            toast("获取导航实例失败：${e.message}")
+            toast(strings.navInstanceFailed(e.message))
         }
 
         startJpgTcpSenderIfNeeded()
@@ -207,7 +214,7 @@ class NaviActivity : Activity() {
             host = tcpHost,
             port = tcpPort,
             networkProvider = { com.example.map1.VehicleWifiManager.selectedNetwork },
-            onStatus = { msg -> runOnUiThread { toast(msg) } },
+            onStatus = { status -> runOnUiThread { toast(strings.tcpStatus(status)) } },
             onFps = { fps, seq, bps ->
                 lastActualSendFps = fps
                 lastBytesPerSecond = bps
@@ -286,7 +293,7 @@ class NaviActivity : Activity() {
         if (requestCode != REQUEST_MEDIA_PROJECTION) return
 
         if (resultCode != RESULT_OK || data == null) {
-            toast("未授权屏幕截图，JPG TCP 不发送")
+            toast(strings.navCaptureDenied)
             jpgTcpSender?.stop()
             return
         }
@@ -310,7 +317,7 @@ class NaviActivity : Activity() {
             null,
             null,
         )
-        toast("已启用快速屏幕截图")
+        toast(strings.navFastCaptureOn)
     }
 
     private fun releaseScreenCapture() {

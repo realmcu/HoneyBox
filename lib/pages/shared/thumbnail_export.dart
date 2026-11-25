@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../i18n/app_strings.dart';
+
 /// Save [bin] — a converted ARGB8565 (RAW or RLE) circular-thumbnail `.bin`,
 /// the same bytes packaged as resource[1] — to a user-chosen location via the
 /// system "save as" dialog.
@@ -24,6 +26,7 @@ Future<void> exportThumbnailBin(
   required int bgColor,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
+  final strings = AppStrings.of(context);
   final String hex =
       (bgColor & 0x00FFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase();
   final String fileName = '${_stripExtension(sourceName)}_$hex.bin';
@@ -32,20 +35,21 @@ Future<void> exportThumbnailBin(
     // path (which may be a content-uri); on desktop it only returns the chosen
     // path, so we write the bytes there ourselves.
     final String? path = await FilePicker.platform.saveFile(
-      dialogTitle: '导出缩略图',
+      dialogTitle: strings.exportThumbnail,
       fileName: fileName,
       bytes: bin,
     );
     if (path == null) {
-      messenger.showSnackBar(const SnackBar(content: Text('已取消导出')));
+      messenger.showSnackBar(SnackBar(content: Text(strings.exportCancelled)));
       return;
     }
     if (!Platform.isAndroid && !Platform.isIOS) {
       await File(path).writeAsBytes(bin, flush: true);
     }
-    messenger.showSnackBar(SnackBar(content: Text('已导出: $fileName')));
+    messenger
+        .showSnackBar(SnackBar(content: Text(strings.exportDone(fileName))));
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('导出失败: $e')));
+    messenger.showSnackBar(SnackBar(content: Text(strings.exportFailed(e))));
   }
 }
 

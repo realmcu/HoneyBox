@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
+import com.example.map1.i18n.appStrings
 
 /**
  * 方案 X 的启动入口：只负责确保悬浮窗权限，然后启动 [NaviCaptureService] 并立即 finish。
@@ -26,7 +27,7 @@ class NaviProjectionActivity : Activity() {
     /** 先确保悬浮窗权限（Service 显示 Presentation 必需），再启动虚拟屏。 */
     private fun startServiceIfReady() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "请授予『悬浮窗/显示在其他应用上层』权限后返回再试", Toast.LENGTH_LONG)
+            Toast.makeText(this, appStrings(this).overlayPermissionRequired, Toast.LENGTH_LONG)
                 .show()
             startActivityForResult(
                 Intent(
@@ -46,7 +47,7 @@ class NaviProjectionActivity : Activity() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)) {
                 startNaviCaptureService()
             } else {
-                Toast.makeText(this, "未授予悬浮窗权限，无法启动导航投屏", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, appStrings(this).overlayPermissionDenied, Toast.LENGTH_LONG).show()
                 finish()
             }
             return
@@ -73,6 +74,10 @@ class NaviProjectionActivity : Activity() {
                 NaviCaptureService.EXTRA_HEIGHT,
                 NaviCaptureService.DEFAULT_JPG_HEIGHT,
             ),
+            quality = intent.getIntExtra(
+                NaviCaptureService.EXTRA_QUALITY,
+                NaviCaptureService.DEFAULT_JPG_QUALITY,
+            ),
             startLat = intent.getDoubleExtra(NaviActivity.EXTRA_START_LAT, 31.314),
             startLng = intent.getDoubleExtra(NaviActivity.EXTRA_START_LNG, 120.728),
             endLat = intent.getDoubleExtra(NaviActivity.EXTRA_END_LAT, 31.325),
@@ -85,7 +90,7 @@ class NaviProjectionActivity : Activity() {
             startService(serviceIntent)
         }
 
-        Toast.makeText(this, "导航虚拟屏已在后台启动", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, appStrings(this).projectionStarted, Toast.LENGTH_SHORT).show()
         finish()
     }
 

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/converter.dart';
+import '../../i18n/app_strings.dart';
 import '../../services/file_cache.dart';
 import '../../services/image_bin.dart';
 import '../../services/image_jpeg.dart';
@@ -34,7 +35,7 @@ String cacheTimeLabel(DateTime t) =>
 
 /// Human-readable one-line summary of an entry's conversion parameters, derived
 /// from the filename (mirrors what each page shows in its own convert-info row).
-String cacheParamSummary(CacheEntry e) {
+String cacheParamSummary(CacheEntry e, AppStrings strings) {
   final p = e.params;
   final parts = <String>[];
   switch (e.kind) {
@@ -49,7 +50,7 @@ String cacheParamSummary(CacheEntry e) {
         if (cmp == 'rle') {
           parts.add('RLE');
         } else if (cmp == 'raw') {
-          parts.add('未压缩');
+          parts.add(strings.cacheUncompressed);
         }
       }
       break;
@@ -65,17 +66,17 @@ String cacheParamSummary(CacheEntry e) {
           parts.add('GIF');
           break;
         case 'slideshow':
-          parts.add('轮播');
+          parts.add(strings.cacheLabelCarousel);
           break;
       }
       final size = p['size'];
       if (size != null) parts.add('$size×$size');
       final fps = p['fps'];
       if (fps != null) parts.add('${fps}fps');
-      final frames = p['frames'];
-      if (frames != null) parts.add('$frames 帧');
-      final slides = p['slides'];
-      if (slides != null) parts.add('$slides 图');
+      final frames = int.tryParse(p['frames'] ?? '');
+      if (frames != null) parts.add(strings.cacheFrames(frames));
+      final slides = int.tryParse(p['slides'] ?? '');
+      if (slides != null) parts.add(strings.cacheImages(slides));
       break;
   }
   return parts.isEmpty ? e.kind.label : parts.join(' · ');
@@ -313,7 +314,7 @@ class _CacheBadgeViewState extends State<CacheBadgeView> {
         child: CircularProgressIndicator(strokeWidth: 2),
       );
     } else if (_badge == null) {
-      content = Text('无缩略图',
+      content = Text(AppStrings.of(context).cacheNoThumbnail,
           style:
               theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant));
     } else {
@@ -344,9 +345,8 @@ class _CacheBadgeViewState extends State<CacheBadgeView> {
 /// page's primary send/convert button.
 class CacheLoadButton extends StatelessWidget {
   final VoidCallback? onPressed;
-  final String tooltip;
-  const CacheLoadButton(
-      {super.key, required this.onPressed, this.tooltip = '载入缓存'});
+  final String? tooltip;
+  const CacheLoadButton({super.key, required this.onPressed, this.tooltip});
 
   @override
   Widget build(BuildContext context) {
@@ -404,7 +404,8 @@ class _CachePickerSheet extends ConsumerStatefulWidget {
 class _CachePickerSheetState extends ConsumerState<_CachePickerSheet> {
   late Future<List<CacheEntry>> _future;
 
-  String get _label => widget.label ?? widget.kind.label;
+  String _label(BuildContext context) =>
+      widget.label ?? AppStrings.of(context).cacheKindLabel(widget.kind);
 
   @override
   void initState() {
@@ -445,7 +446,8 @@ class _CachePickerSheetState extends ConsumerState<_CachePickerSheet> {
                 children: [
                   Icon(cacheKindIcon(widget.kind), size: 20, color: cs.primary),
                   const SizedBox(width: 8),
-                  Text('选择$_label缓存', style: theme.textTheme.titleMedium),
+                  Text(AppStrings.of(context).cachePick(_label(context)),
+                      style: theme.textTheme.titleMedium),
                 ],
               ),
             ),
@@ -463,7 +465,8 @@ class _CachePickerSheetState extends ConsumerState<_CachePickerSheet> {
                   if (items.isEmpty) {
                     return Padding(
                       padding: const EdgeInsets.all(32),
-                      child: Text('暂无$_label缓存',
+                      child: Text(
+                          AppStrings.of(context).cacheEmptyFor(_label(context)),
                           style: theme.textTheme.bodyMedium
                               ?.copyWith(color: cs.onSurfaceVariant)),
                     );
@@ -477,8 +480,10 @@ class _CachePickerSheetState extends ConsumerState<_CachePickerSheet> {
                       final e = items[i];
                       return ListTile(
                         leading: CacheThumb(entry: e),
-                        title: Text(cacheParamSummary(e),
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        title: Text(
+                            cacheParamSummary(e, AppStrings.of(context)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
                         subtitle: Text(
                           '${cacheTimeLabel(e.time)} · ${formatFileSize(e.size)}',
                           style: theme.textTheme.bodySmall
@@ -486,7 +491,7 @@ class _CachePickerSheetState extends ConsumerState<_CachePickerSheet> {
                         ),
                         trailing: IconButton(
                           icon: Icon(Icons.delete_outline, color: cs.error),
-                          tooltip: '删除',
+                          tooltip: AppStrings.of(context).delete,
                           onPressed: () => _delete(e),
                         ),
                         onTap: () => Navigator.of(context).pop(e),
@@ -534,13 +539,13 @@ class CacheLoadedPanel extends StatelessWidget {
             TextButton.icon(
               onPressed: onChange,
               icon: const Icon(Icons.swap_horiz, size: 18),
-              label: const Text('更换缓存'),
+              label: Text(AppStrings.of(context).cacheReplace),
             ),
             const Spacer(),
             TextButton.icon(
               onPressed: onClear,
               icon: const Icon(Icons.close, size: 18),
-              label: const Text('取消载入'),
+              label: Text(AppStrings.of(context).cacheCancelLoad),
             ),
           ],
         ),
@@ -576,7 +581,10 @@ class CacheInfoCard extends StatelessWidget {
             children: [
               Icon(cacheKindIcon(e.kind), size: 18, color: cs.primary),
               const SizedBox(width: 8),
-              Text('${e.kind.label}缓存', style: theme.textTheme.titleSmall),
+              Text(
+                  AppStrings.of(context).cacheKindTitle(
+                      AppStrings.of(context).cacheKindLabel(e.kind)),
+                  style: theme.textTheme.titleSmall),
               const Spacer(),
               Text(formatFileSize(e.size),
                   style: theme.textTheme.bodyMedium?.copyWith(
@@ -584,7 +592,7 @@ class CacheInfoCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text(cacheParamSummary(e),
+          Text(cacheParamSummary(e, AppStrings.of(context)),
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: cs.onSurfaceVariant)),
           const SizedBox(height: 2),
@@ -650,7 +658,9 @@ class _CachePreviewSheetState extends ConsumerState<_CachePreviewSheet> {
                 children: [
                   Icon(cacheKindIcon(entry.kind), size: 20, color: cs.primary),
                   const SizedBox(width: 8),
-                  Text('预览${entry.kind.label}缓存',
+                  Text(
+                      AppStrings.of(context).cachePreview(
+                          AppStrings.of(context).cacheKindLabel(entry.kind)),
                       style: theme.textTheme.titleMedium),
                 ],
               ),
@@ -660,16 +670,16 @@ class _CachePreviewSheetState extends ConsumerState<_CachePreviewSheet> {
               Center(
                 child: SegmentedButton<bool>(
                   showSelectedIcon: false,
-                  segments: const [
+                  segments: [
                     ButtonSegment(
                       value: false,
-                      icon: Icon(Icons.image_outlined, size: 18),
-                      label: Text('内容'),
+                      icon: const Icon(Icons.image_outlined, size: 18),
+                      label: Text(AppStrings.of(context).cacheTabContent),
                     ),
                     ButtonSegment(
                       value: true,
-                      icon: Icon(Icons.circle_outlined, size: 18),
-                      label: Text('缩略图'),
+                      icon: const Icon(Icons.circle_outlined, size: 18),
+                      label: Text(AppStrings.of(context).cacheTabThumbnail),
                     ),
                   ],
                   selected: {_showBadge},
@@ -695,7 +705,8 @@ class _CachePreviewSheetState extends ConsumerState<_CachePreviewSheet> {
                 child: TextButton.icon(
                   onPressed: _delete,
                   icon: Icon(Icons.delete_outline, color: cs.error),
-                  label: Text('删除', style: TextStyle(color: cs.error)),
+                  label: Text(AppStrings.of(context).delete,
+                      style: TextStyle(color: cs.error)),
                 ),
               ),
             ],
@@ -938,7 +949,7 @@ class _CachePreviewState extends State<CachePreview> {
         children: [
           Icon(Icons.movie_outlined, size: 56, color: cs.onSurfaceVariant),
           const SizedBox(height: 8),
-          Text('视频缓存 · 无法预览',
+          Text(AppStrings.of(context).cacheVideoNoPreview,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: cs.onSurfaceVariant)),
         ],
@@ -982,7 +993,9 @@ class _CachePreviewState extends State<CachePreview> {
                       color: Colors.white,
                       disabledColor: Colors.white38,
                       visualDensity: VisualDensity.compact,
-                      tooltip: _playing ? '暂停' : '播放',
+                      tooltip: _playing
+                          ? AppStrings.of(context).cachePause
+                          : AppStrings.of(context).cachePlay,
                     ),
                     IconButton(
                       onPressed: (_playing || _frameIdx != 0) ? _onStop : null,
@@ -991,7 +1004,7 @@ class _CachePreviewState extends State<CachePreview> {
                       color: Colors.white,
                       disabledColor: Colors.white38,
                       visualDensity: VisualDensity.compact,
-                      tooltip: '停止',
+                      tooltip: AppStrings.of(context).stop,
                     ),
                   ],
                 ),

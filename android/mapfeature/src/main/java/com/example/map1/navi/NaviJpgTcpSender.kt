@@ -2,6 +2,7 @@ package com.example.map1.navi
 
 import android.net.Network
 import android.util.Log
+import com.example.map1.TcpStatus
 import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -21,7 +22,7 @@ class NaviJpgTcpSender(
     private val connectTimeoutMs: Int = 30_000,
     private val readTimeoutMs: Int = 2_000,
     private val networkProvider: () -> Network? = { null },
-    private val onStatus: (String) -> Unit = {},
+    private val onStatus: (TcpStatus) -> Unit = {},
     private val onFps: (fps: Double, lastSeq: Int, bytesPerSecond: Long) -> Unit = { _, _, _ -> },
     private val onSendTiming: (seq: Int, bytes: Int, sendMs: Long) -> Unit = { _, _, _ -> },
 ) {
@@ -81,7 +82,7 @@ class NaviJpgTcpSender(
                     }
                     tcpSocket.soTimeout = readTimeoutMs
                     tcpSocket.connect(InetSocketAddress(host, port), connectTimeoutMs)
-                    onStatus("TCP 已连接 $host:$port, sndbuf=${tcpSocket.sendBufferSize}")
+                    onStatus(TcpStatus.Connected(host, port, tcpSocket.sendBufferSize))
 
                     readReadyGreeting(tcpSocket)
                     resetStatsWindow()
@@ -99,7 +100,7 @@ class NaviJpgTcpSender(
             } catch (e: Exception) {
                 if (running.get()) {
                     Log.e(TAG, "TCP JPG 连接/发送失败，准备重连", e)
-                    onStatus("TCP 断开：${e.message}，${RECONNECT_DELAY_MS}ms 后重连")
+                    onStatus(TcpStatus.Disconnected(e.message, RECONNECT_DELAY_MS))
                 }
             } finally {
                 socket = null
@@ -111,7 +112,7 @@ class NaviJpgTcpSender(
         }
 
         queue.clear()
-        onStatus("TCP 已停止")
+        onStatus(TcpStatus.Stopped)
     }
 
     private fun sleepBeforeReconnect() {

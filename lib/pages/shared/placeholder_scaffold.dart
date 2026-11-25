@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../../i18n/app_strings.dart';
+
 /// A simple "reserved / coming soon" screen used by app-level entries that are
 /// wired up but not yet implemented (chip config, settings, …).
 class PlaceholderScaffold extends StatelessWidget {
   final String title;
   final IconData icon;
-  final String message;
+  final String? message;
 
   const PlaceholderScaffold({
     super.key,
     required this.title,
     required this.icon,
-    this.message = '功能开发中，敬请期待',
+    this.message,
   });
 
   @override
@@ -34,7 +36,8 @@ class PlaceholderScaffold extends StatelessWidget {
               child: Icon(icon, size: 34, color: cs.primary),
             ),
             const SizedBox(height: 20),
-            Text(message, style: tt.bodyLarge),
+            Text(message ?? AppStrings.of(context).placeholderDefault,
+                style: tt.bodyLarge),
           ],
         ),
       ),

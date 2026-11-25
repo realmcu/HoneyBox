@@ -6,6 +6,7 @@
 // tree, read text, and verify that the values of widget properties are correct.
 
 import 'package:honeybox/app.dart';
+import 'package:honeybox/providers/language_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +18,13 @@ void main() {
 
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(app.title, 'HoneyBox');
-    expect(find.text('选择应用'), findsOneWidget);
+
+    // The launcher title depends on the resolved language (test hosts report
+    // en_US, devices may report zh), so assert through the same provider the
+    // UI reads instead of hard-coding one language's copy.
+    final container =
+        ProviderScope.containerOf(tester.element(find.byType(MaterialApp)));
+    expect(find.text(container.read(appStringsProvider).launcherTitle),
+        findsOneWidget);
   });
 }

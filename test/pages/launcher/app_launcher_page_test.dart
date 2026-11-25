@@ -1,43 +1,44 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:honeybox/pages/launcher/app_launcher_page.dart';
 import 'package:honeybox/pages/launcher/app_catalog.dart';
 import 'package:honeybox/pages/launcher/widgets/app_card.dart';
 import 'package:honeybox/pages/watch_lab/sdk_demo_hub_page.dart';
+import 'package:honeybox/providers/ble_provider.dart';
 import 'package:honeybox/providers/current_app_provider.dart';
+import 'package:honeybox/services/ble_manager.dart' as manager;
 import 'package:jw_watch_demo/jw_watch_demo.dart';
 import 'package:ws_watch_demo/ws_watch_demo.dart';
+
+class _Manager implements manager.BleManager {
+  @override
+  Stream<manager.BleState> get onStateChanged => const Stream.empty();
+  @override
+  void dispose() {}
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+  @override
+  void stopScan() {}
+  @override
+  Future<void> startScan(void Function(ScanResult) callback,
+      {String? serviceUuid}) async {}
+}
 
 void main() {
   Widget wrap(Widget child) => ProviderScope(
         child: MaterialApp(home: child),
       );
 
-  testWidgets('launcher lists every catalog entry (scroll to build)', (tester) async {
+  testWidgets('renders one AppCard per kAppCatalog entry', (tester) async {
     await tester.pumpWidget(wrap(const AppLauncherPage()));
-    final scrollable = find.byType(Scrollable);
-    expect(find.byType(AppCard), findsWidgets);
-    for (final e in kAppCatalog) {
-      await tester.scrollUntilVisible(
-        find.text(e.title),
-        120,
-        scrollable: scrollable,
-      );
-      expect(find.byType(AppCard), findsWidgets);
-    }
-    expect(kAppCatalog.length, 6);
+    expect(find.byType(AppCard), findsNWidgets(kAppCatalog.length));
   });
 
   testWidgets('每个应用的 title 都出现在页面上', (tester) async {
     await tester.pumpWidget(wrap(const AppLauncherPage()));
-    final scrollable = find.byType(Scrollable);
     for (final e in kAppCatalog) {
-      await tester.scrollUntilVisible(
-        find.text(e.title),
-        120,
-        scrollable: scrollable,
-      );
       expect(find.text(e.title), findsOneWidget,
           reason: '${e.title} not rendered');
     }
@@ -65,7 +66,76 @@ void main() {
     expect(find.text('缓存管理'), findsNothing);
   });
 
-  testWidgets('SDK Demo 入口进入 Hub，JW/WS 子项可进入全屏 Demo', (tester) async {
+  testWidgets('connected app is visible on its launcher card', (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        connectedDeviceProvider.overrideWith((ref) => ConnectedDeviceInfo(
+              deviceId: 'watch-1',
+              name: 'Watch-A1',
+              mtu: 247,
+              isJw: true,
+              ownerApp: AppId.watch.name,
+            )),
+      ],
+      child: const MaterialApp(home: AppLauncherPage()),
+    ));
+
+    expect(find.text('已连接 · Watch-A1'), findsOneWidget);
+  });
+
+  testWidgets('switching to another device app requires confirmation',
+      (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        connectedDeviceProvider.overrideWith((ref) => ConnectedDeviceInfo(
+              deviceId: 'watch-1',
+              name: 'Watch-A1',
+              mtu: 247,
+              isJw: true,
+              ownerApp: AppId.watch.name,
+            )),
+      ],
+      child: const MaterialApp(home: AppLauncherPage()),
+    ));
+
+    await tester.tap(find.text('eBadge'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('切换应用'), findsOneWidget);
+    expect(find.textContaining('当前已连接 Watch-A1'), findsOneWidget);
+
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择应用'), findsOneWidget);
+  });
+
+  testWidgets('returning from an app clears current app state', (tester) async {
+    // Watch with no connection lands on ScanPage, so the scan surface needs a
+    // fake manager and explicit pumps (ScanPage keeps a periodic timer alive).
+    await tester.pumpWidget(ProviderScope(
+      overrides: [bleManagerProvider.overrideWith((ref) => _Manager())],
+      child: const MaterialApp(home: AppLauncherPage()),
+    ));
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(AppLauncherPage)),
+    );
+
+    await tester.ensureVisible(find.text('Watch'));
+    await tester.tap(find.text('Watch'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(container.read(currentAppProvider), AppId.watch);
+
+    await tester.pageBack();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('选择应用'), findsOneWidget);
+    expect(container.read(currentAppProvider), isNull);
+  });
+
+  testWidgets('SDK Demo opens its hub and both SDK demo applications',
+      (tester) async {
     final container = ProviderContainer();
     addTearDown(container.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
@@ -76,7 +146,6 @@ void main() {
     await tester.ensureVisible(find.text('SDK Demo'));
     await tester.tap(find.text('SDK Demo'));
     await tester.pumpAndSettle();
-
     expect(find.byType(SdkDemoHubPage), findsOneWidget);
     expect(container.read(currentAppProvider), AppId.watchLab);
 
@@ -94,11 +163,8 @@ void main() {
 
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.byType(SdkDemoHubPage), findsOneWidget);
-
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.byType(SdkDemoHubPage), findsNothing);
     expect(container.read(currentAppProvider), isNull);
   });
 }

@@ -10,8 +10,6 @@
 #include <flutter_blue_plus_winrt/flutter_blue_plus_plugin.h>
 #include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h>
 #include <permission_handler_windows/permission_handler_windows_plugin.h>
-#include <share_plus/share_plus_windows_plugin_c_api.h>
-#include <url_launcher_windows/url_launcher_windows.h>
 #include <watch_transport_ble/watch_transport_ble_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
@@ -23,10 +21,6 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("FlutterSecureStorageWindowsPlugin"));
   PermissionHandlerWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("PermissionHandlerWindowsPlugin"));
-  SharePlusWindowsPluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("SharePlusWindowsPluginCApi"));
-  UrlLauncherWindowsRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("UrlLauncherWindows"));
   WatchTransportBlePluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("WatchTransportBlePluginCApi"));
 }

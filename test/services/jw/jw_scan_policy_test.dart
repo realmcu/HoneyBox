@@ -18,12 +18,16 @@ void main() {
         }),
         isFalse);
     expect(
-        candidate({'0000fee7-0000-1000-8000-00805f9b34fb'}, {
+        candidate({
+          '0000fee7-0000-1000-8000-00805f9b34fb'
+        }, {
           0xfec5: [1, 2, 3, 4, 5, 6]
         }),
         isFalse);
     expect(
-        candidate({}, {0xfec5: [1, 2, 3, 4, 5, 6]}, deviceName: 'Watch'),
+        candidate({}, {
+          0xfec5: [1, 2, 3, 4, 5, 6]
+        }, deviceName: 'Watch'),
         isFalse);
     expect(
         candidate({}, {
@@ -64,6 +68,28 @@ void main() {
         JwScanPolicy.matches(
             query: 'Watch', isDefaultWatchFilter: false, device: d),
         isFalse);
+  });
+  test('Realtek FEC5-only advertisement is not shown as a Watch candidate', () {
+    const manufacturerData = {
+      0xfec5: [0xa6, 0x10, 0xc6, 0x17, 0xaa, 0x5c]
+    };
+    final candidate = JwScanPolicy.isCandidate(
+        serviceUuids: const {}, manufacturerData: manufacturerData);
+    final hbox = ScanDevice(
+        deviceId: 'A6:10:C6:17:AA:5C',
+        name: 'HBox-AA5C',
+        rssi: -59,
+        manufacturerData: manufacturerData,
+        jwCandidate: candidate);
+    expect(candidate, isFalse);
+    expect(
+        JwScanPolicy.matches(
+            query: 'Watch', isDefaultWatchFilter: true, device: hbox),
+        isFalse);
+    expect(
+        JwScanPolicy.matches(
+            query: 'hbox', isDefaultWatchFilter: true, device: hbox),
+        isTrue);
   });
   test(
       'late name merges by ID and later empty advertising cannot erase identity or hint',

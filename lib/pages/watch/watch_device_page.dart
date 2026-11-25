@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../i18n/app_strings.dart';
+import '../../i18n/watch_strings.dart';
 import '../../providers/ble_provider.dart';
+import '../../providers/ota_in_progress_provider.dart';
 import '../../providers/watch_bind_provider.dart';
 import '../../providers/watch_model_provider.dart';
+import '../../providers/watch_ota_result_provider.dart';
 import '../../theme/app_theme.dart';
 import '../shared/app_drawer.dart';
 import '../device/widgets/action_card.dart';
 
 /// Watch 应用连接设备后的主页 —— 结构对齐 eBadge 的 [DevicePage]：
-/// 顶部已连接状态条 + Watch 状态摘要卡 + 2×2 功能网格。
+/// 顶部已连接状态条 + Watch 状态摘要卡 + 功能入口。
 ///
 /// 四张功能卡（表盘推送 / 通知转发 / 运动·健康 / 固件 OTA）当前都指向各自的
 /// 占位子页。摘要卡里的电量 / 固件版本 / 当前表盘需要通过 BLE 从设备回读，
@@ -60,50 +64,56 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
     final cs = Theme.of(context).colorScheme;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('断开连接', textAlign: TextAlign.center),
-        content: const Text('确认断开设备连接？'),
-        actionsOverflowDirection: VerticalDirection.down,
-        actions: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    ref.read(bleNotifierProvider.notifier).disconnect();
-                  },
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    backgroundColor: cs.error,
-                    foregroundColor: cs.onError,
+      builder: (ctx) {
+        final strings = AppStrings.of(ctx);
+        return AlertDialog(
+          title: Text(strings.disconnectTitle, textAlign: TextAlign.center),
+          content: Text(strings.disconnectBody),
+          actionsOverflowDirection: VerticalDirection.down,
+          actions: [
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      ref.read(bleNotifierProvider.notifier).disconnect();
+                    },
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      backgroundColor: cs.error,
+                      foregroundColor: cs.onError,
+                    ),
+                    child: Text(strings.disconnect),
                   ),
-                  child: const Text('断开'),
                 ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    backgroundColor: cs.surfaceContainerHighest,
-                    foregroundColor: cs.onSurface,
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      backgroundColor: cs.surfaceContainerHighest,
+                      foregroundColor: cs.onSurface,
+                    ),
+                    child: Text(strings.cancel),
                   ),
-                  child: const Text('取消'),
                 ),
-              ),
-            ],
-          ),
-        ],
-      ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 
   void _open(String route) {
+    if (route == '/watch-rtl87x3g-ota') {
+      ref.read(otaInProgressProvider.notifier).state = true;
+    }
     Navigator.pushNamed(
       context,
       route,
@@ -114,26 +124,42 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
     );
   }
 
-  static const _actions = [
-    _ActionItem(
-        icon: Icons.palette_outlined, title: '表盘推送', route: '/watch-face'),
-    _ActionItem(
-        icon: Icons.notifications_active_outlined,
-        title: '通知转发',
-        route: '/watch-notification'),
-    _ActionItem(
-        icon: Icons.favorite_outline, title: '运动 / 健康', route: '/watch-health'),
-    _ActionItem(
-        icon: Icons.system_update_alt, title: '固件 OTA 升级', route: '/watch-ota'),
-  ];
+  static List<_ActionItem> _actions(WatchStrings w) => [
+        _ActionItem(
+            icon: Icons.palette_outlined,
+            title: w.cardFace,
+            route: '/watch-face'),
+        _ActionItem(
+            icon: Icons.notifications_active_outlined,
+            title: w.cardNotification,
+            route: '/watch-notification'),
+        _ActionItem(
+            icon: Icons.favorite_outline,
+            title: w.cardHealth,
+            route: '/watch-health'),
+        _ActionItem(
+            icon: Icons.system_update_alt,
+            title: w.cardOta,
+            route: '/watch-rtl87x3g-ota'),
+      ];
+
+  static _ActionItem _factoryAction(WatchStrings w) => _ActionItem(
+        icon: Icons.precision_manufacturing_outlined,
+        title: w.cardFactory,
+        route: '/watch-factory',
+      );
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final strings = AppStrings.of(context);
+    final watch = strings.watch;
     final bindState = ref.watch(watchBindProvider);
     final modelState = ref.watch(watchModelProvider);
+    final otaResult = ref.watch(watchOtaResultProvider);
     final bound = bindState.phase == WatchBindPhase.success;
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
 
     ref.listen<WatchBindState>(watchBindProvider, (previous, next) {
       if (previous?.phase != WatchBindPhase.success &&
@@ -150,12 +176,13 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
       drawer: const AppDrawer(),
       drawerEdgeDragWidth: MediaQuery.sizeOf(context).width * 0.5,
       appBar: AppBar(
+        leading: canPop ? const BackButton() : null,
         title: Text(widget.deviceName),
         actions: [
           TextButton.icon(
             onPressed: _onDisconnectTap,
             icon: Icon(Icons.link_off, size: 18, color: cs.error),
-            label: const Text('断开'),
+            label: Text(strings.disconnect),
             style: TextButton.styleFrom(foregroundColor: cs.onPrimary),
           ),
         ],
@@ -167,6 +194,14 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 升级结果由 OTA 页写回，用常驻横幅展示 —— SnackBar 会被重连后的
+              // 自动绑定提示覆盖。
+              if (otaResult != null)
+                _WatchOtaResultBanner(
+                  result: otaResult,
+                  onDismiss: () =>
+                      ref.read(watchOtaResultProvider.notifier).state = null,
+                ),
               // 已连接状态条 —— 与 DevicePage 顶部一致的样式。
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 12),
@@ -187,7 +222,7 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('已连接',
+                          Text(watch.connected,
                               style:
                                   tt.titleSmall?.copyWith(color: cs.secondary)),
                           const SizedBox(height: 2),
@@ -216,7 +251,7 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
                                   .read(watchBindProvider.notifier)
                                   .retryTimeSync(),
                               icon: const Icon(Icons.sync, size: 16),
-                              label: const Text('重试同步'),
+                              label: Text(watch.retrySync),
                               style: TextButton.styleFrom(
                                 visualDensity: VisualDensity.compact,
                                 padding: const EdgeInsets.symmetric(
@@ -239,26 +274,93 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
               ),
               const SizedBox(height: 16),
               Expanded(
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.25,
+                child: ListView(
                   physics: const BouncingScrollPhysics(),
-                  children: _actions
-                      .map((a) => ActionCard(
-                            icon: a.icon,
-                            title: a.title,
-                            enabled: bound,
-                            disabledMessage: '请先完成设备绑定',
-                            onTap: bound ? () => _open(a.route) : null,
-                          ))
-                      .toList(),
+                  children: [
+                    GridView.count(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: 1.25,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: _actions(watch)
+                          .map((a) => ActionCard(
+                                icon: a.icon,
+                                title: a.title,
+                                enabled: bound,
+                                disabledMessage: watch.needBind,
+                                onTap: bound ? () => _open(a.route) : null,
+                              ))
+                          .toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 116,
+                      child: ActionCard(
+                        icon: _factoryAction(watch).icon,
+                        title: _factoryAction(watch).title,
+                        enabled: bound,
+                        disabledMessage: watch.needBind,
+                        onTap: bound
+                            ? () => _open(_factoryAction(watch).route)
+                            : null,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 上一次 Watch OTA 的结果，常驻到用户关闭。重新连接后主页会自动重新绑定并弹出
+/// SnackBar，因此结果不能用 SnackBar 展示。
+class _WatchOtaResultBanner extends StatelessWidget {
+  final WatchOtaResult result;
+  final VoidCallback onDismiss;
+
+  const _WatchOtaResultBanner({required this.result, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final background =
+        result.success ? cs.secondaryContainer : cs.errorContainer;
+    final foreground =
+        result.success ? cs.onSecondaryContainer : cs.onErrorContainer;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.fromLTRB(12, 6, 0, 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            result.success ? Icons.check_circle : Icons.error_outline,
+            color: foreground,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              result.message,
+              style: tt.bodyMedium?.copyWith(color: foreground),
+            ),
+          ),
+          IconButton(
+            onPressed: onDismiss,
+            icon: Icon(Icons.close, size: 18, color: foreground),
+            tooltip: '关闭',
+          ),
+        ],
       ),
     );
   }
@@ -278,12 +380,13 @@ class _WatchBindButton extends StatelessWidget {
     final isFailure = state.phase == WatchBindPhase.failure;
     final isUnavailable = state.phase == WatchBindPhase.unavailable;
 
+    final watch = AppStrings.of(context).watch;
     final label = switch (state.phase) {
-      WatchBindPhase.idle => '绑定设备',
-      WatchBindPhase.binding => '绑定中...',
-      WatchBindPhase.success => '已绑定',
-      WatchBindPhase.failure => '重新绑定',
-      WatchBindPhase.unavailable => '无法绑定',
+      WatchBindPhase.idle => watch.bindDevice,
+      WatchBindPhase.binding => watch.binding,
+      WatchBindPhase.success => watch.bound,
+      WatchBindPhase.failure => watch.rebind,
+      WatchBindPhase.unavailable => watch.cannotBind,
     };
     final foregroundColor = isSuccess
         ? cs.secondary
@@ -340,13 +443,15 @@ class _WatchSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
+    final watch = AppStrings.of(context).watch;
     final model = state.snapshot;
     final batteryLabel = model?.batteryValid == true
-        ? '电量 ${model!.batteryPercent}%${model.charging ? ' · 充电中' : ''}'
-        : '电量 —';
+        ? '${watch.battery(model!.batteryPercent)}'
+            '${model.charging ? watch.chargingSuffix : ''}'
+        : watch.batteryUnknown;
     final firmwareLabel = model == null || model.firmwareVersion.isEmpty
-        ? '固件 —'
-        : '固件 ${model.firmwareVersion}';
+        ? watch.firmwareUnknown
+        : watch.firmware(model.firmwareVersion);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -381,7 +486,7 @@ class _WatchSummaryCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('当前表盘 · —',
+                Text(watch.currentFaceUnknown,
                     style: tt.titleMedium?.copyWith(
                         color: Colors.white, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
@@ -391,14 +496,15 @@ class _WatchSummaryCard extends StatelessWidget {
                   children: [
                     _SummaryChip(icon: Icons.battery_full, label: batteryLabel),
                     _SummaryChip(icon: Icons.memory, label: firmwareLabel),
-                    const _SummaryChip(
-                        icon: Icons.bluetooth_connected, label: 'BLE 已连接'),
+                    _SummaryChip(
+                        icon: Icons.bluetooth_connected,
+                        label: watch.bleConnected),
                     if (state.loading)
-                      const _SummaryChip(icon: Icons.sync, label: '读取中'),
+                      _SummaryChip(icon: Icons.sync, label: watch.reading),
                     if (state.errorMessage != null)
                       _SummaryChip(
                         icon: Icons.refresh,
-                        label: '重试读取',
+                        label: watch.retryRead,
                         onTap: onRefresh,
                       ),
                   ],

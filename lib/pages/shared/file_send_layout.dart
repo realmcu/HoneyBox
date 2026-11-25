@@ -2,6 +2,7 @@ import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
 
+import '../../i18n/app_strings.dart';
 import '../../providers/transfer_provider.dart';
 
 /// Format file size in bytes to a human-readable string.
@@ -176,7 +177,7 @@ class FileSendLayout extends StatelessWidget {
           const SizedBox(height: 20),
 
           // --- Status text ---
-          _buildStatusText(theme, colorScheme),
+          _buildStatusText(context, theme, colorScheme),
 
           const SizedBox(height: 20),
 
@@ -185,7 +186,7 @@ class FileSendLayout extends StatelessWidget {
             FilledButton.icon(
               onPressed: onCancel,
               icon: const Icon(Icons.close),
-              label: const Text('取消'),
+              label: Text(AppStrings.of(context).cancel),
               style: FilledButton.styleFrom(
                 backgroundColor: colorScheme.error,
                 foregroundColor: colorScheme.onError,
@@ -199,7 +200,7 @@ class FileSendLayout extends StatelessWidget {
             FilledButton.icon(
               onPressed: fileName != null ? onSend : null,
               icon: const Icon(Icons.send),
-              label: const Text('发送到设备'),
+              label: Text(AppStrings.of(context).sendToDevice),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
@@ -265,7 +266,8 @@ class FileSendLayout extends StatelessWidget {
   }
 
   /// Builds the status text based on transfer state.
-  Widget _buildStatusText(ThemeData theme, ColorScheme colorScheme) {
+  Widget _buildStatusText(
+      BuildContext context, ThemeData theme, ColorScheme colorScheme) {
     final state = transferState;
 
     switch (state.status) {
@@ -289,7 +291,7 @@ class FileSendLayout extends StatelessWidget {
             Icon(Icons.check_circle, size: 20, color: colorScheme.secondary),
             const SizedBox(width: 6),
             Text(
-              '发送成功',
+              AppStrings.of(context).sendSuccess,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.secondary,
                 fontWeight: FontWeight.w600,
@@ -306,7 +308,7 @@ class FileSendLayout extends StatelessWidget {
             const SizedBox(width: 6),
             Flexible(
               child: Text(
-                state.errorMessage ?? '发送失败',
+                state.errorMessage ?? AppStrings.of(context).sendFailed,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.error,
                   fontWeight: FontWeight.w600,

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../i18n/app_strings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/ble_provider.dart';
 
@@ -31,16 +33,17 @@ class AppPlaceholderPage extends ConsumerWidget {
           children: [
             Icon(Icons.construction_outlined, size: 64, color: cs.outline),
             const SizedBox(height: 16),
-            Text('$appTitle 功能开发中', style: tt.titleMedium),
+            Text(AppStrings.of(context).placeholderInProgress(appTitle),
+                style: tt.titleMedium),
             const SizedBox(height: 8),
-            Text('已连接：$deviceName',
+            Text(AppStrings.of(context).placeholderConnected(deviceName),
                 style: tt.bodyMedium?.copyWith(color: cs.outline)),
             const SizedBox(height: 24),
             OutlinedButton.icon(
               onPressed: () =>
                   ref.read(bleNotifierProvider.notifier).disconnect(),
               icon: const Icon(Icons.link_off),
-              label: const Text('断开连接'),
+              label: Text(AppStrings.of(context).disconnectTitle),
             ),
           ],
         ),

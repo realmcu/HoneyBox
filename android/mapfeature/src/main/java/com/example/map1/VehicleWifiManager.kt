@@ -21,7 +21,7 @@ object VehicleWifiManager {
         data class ApprovalPending(val ssid: String) : State
         data class Available(val ssid: String) : State
         data class Lost(val ssid: String) : State
-        data class Error(val message: String) : State
+        data class Error(val error: WifiError) : State
     }
 
     private val mutableState = MutableStateFlow<State>(State.Idle)
@@ -38,13 +38,13 @@ object VehicleWifiManager {
     fun connect(context: Context, config: VehicleQrProtocol.Config) {
         disconnect()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            mutableState.value = State.Error("Android 10 以下无法安全地自动选择车辆 Wi-Fi；请手动连接后重试。为保护移动网络，不会进行全进程网络绑定。")
+            mutableState.value = State.Error(WifiError.LegacyAndroid)
             return
         }
         val appContext = context.applicationContext
         val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         if (!wifiManager.isWifiEnabled) {
-            mutableState.value = State.Error("Wi-Fi 未开启，请开启后重试")
+            mutableState.value = State.Error(WifiError.WifiOff)
             return
         }
 
@@ -57,7 +57,7 @@ object VehicleWifiManager {
                 .setWpa2Passphrase(config.password)
                 .build()
         } catch (_: IllegalArgumentException) {
-            mutableState.value = State.Error("SSID 或 Wi-Fi 密码不被 Android 接受")
+            mutableState.value = State.Error(WifiError.InvalidCredentials)
             return
         }
         val request = NetworkRequest.Builder()
@@ -87,7 +87,7 @@ object VehicleWifiManager {
                 synchronized(this@VehicleWifiManager) {
                     if (generation != currentGeneration) return
                     network = null
-                    mutableState.value = State.Error("车辆 Wi-Fi 不可用、连接超时，或用户取消了系统连接确认")
+                    mutableState.value = State.Error(WifiError.Unavailable)
                 }
             }
         }
@@ -98,10 +98,10 @@ object VehicleWifiManager {
             manager.requestNetwork(request, newCallback, REQUEST_TIMEOUT_MS)
         } catch (e: SecurityException) {
             callback = null
-            mutableState.value = State.Error("缺少附近 Wi-Fi/位置权限，无法请求车辆网络")
+            mutableState.value = State.Error(WifiError.MissingPermission)
         } catch (_: RuntimeException) {
             callback = null
-            mutableState.value = State.Error("Android 无法发起车辆 Wi-Fi 请求")
+            mutableState.value = State.Error(WifiError.CannotRequest)
         }
     }
 

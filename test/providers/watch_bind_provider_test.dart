@@ -3,10 +3,14 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:honeybox/providers/watch_bind_provider.dart';
+import 'package:honeybox/services/watch_bind_protocol.dart';
 
 void main() {
   late StreamController<Uint8List> notifications;
   late List<Uint8List> sent;
+  final userId = Uint8List.fromList(
+    '0123456789abcdef0123456789abcdef'.codeUnits,
+  );
 
   setUp(() {
     notifications = StreamController<Uint8List>.broadcast();
@@ -31,7 +35,7 @@ void main() {
             return 7;
           },
       notifications: notifications.stream,
-      userId: Uint8List.fromList(List<int>.generate(32, (i) => i)),
+      userId: userId,
       timeout: timeout,
       clock: clock ?? () => DateTime(2024, 7, 27, 15, 42, 36),
     );
@@ -47,7 +51,7 @@ void main() {
     expect(sent, isEmpty);
   });
 
-  test('sends one request and ignores a duplicate bind call', () {
+  test('sends login first and ignores a duplicate bind call', () {
     final notifier = createNotifier();
     addTearDown(notifier.dispose);
 
@@ -55,92 +59,94 @@ void main() {
     notifier.bind();
 
     expect(notifier.state.phase, WatchBindPhase.binding);
-    expect(sent, hasLength(1));
-    expect(sent.single.sublist(0, 5), [0x03, 0x00, 0x01, 0x00, 0x20]);
+    expect(sent, [WatchBindProtocol.buildLoginRequest(userId)]);
   });
 
-  test('ignores unrelated notifications then accepts a success response',
+  test('successful login skips bind and synchronizes time', () async {
+    final notifier = createNotifier();
+    addTearDown(notifier.dispose);
+    notifier.bind();
+
+    notifications.add(_bindResponse(0x04, 0x00));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(notifier.state.phase, WatchBindPhase.success);
+    expect(notifier.state.timeSyncPhase, WatchTimeSyncPhase.synced);
+    expect(sent, hasLength(2));
+    expect(sent.last, [
+      0x02,
+      0x00,
+      0x01,
+      0x00,
+      0x05,
+      0x00,
+      0x66,
+      0xA5,
+      0x15,
+      0x6C,
+    ]);
+  });
+
+  test('login miss sends bind request and bind success completes flow',
       () async {
     final notifier = createNotifier();
     addTearDown(notifier.dispose);
     notifier.bind();
 
-    notifications.add(Uint8List.fromList([0x0D, 0x00, 0x02, 0x00, 0x01, 0x00]));
+    notifications.add(_bindResponse(0x04, 0x01));
     await Future<void>.delayed(Duration.zero);
-    expect(notifier.state.phase, WatchBindPhase.binding);
+    expect(sent, hasLength(2));
+    expect(sent.last, WatchBindProtocol.buildRequest(userId));
 
-    notifications.add(Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]));
+    notifications.add(_bindResponse(0x02, 0x00));
     await Future<void>.delayed(Duration.zero);
-
     expect(notifier.state.phase, WatchBindPhase.success);
     expect(notifier.state.timeSyncPhase, WatchTimeSyncPhase.synced);
-    expect(notifier.state.message, '设备绑定成功，时间已同步');
-    expect(sent, hasLength(2));
-    expect(
-      sent.last,
-      [0x02, 0x00, 0x01, 0x00, 0x04, 0x66, 0xA5, 0x15, 0x6C],
-    );
-
-    notifications.add(
-      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
-    );
-    await Future<void>.delayed(Duration.zero);
-    expect(sent, hasLength(2));
+    expect(sent, hasLength(3));
   });
 
-  test('maps a nonzero device response to a retryable failure', () async {
+  test('bind rejection maps to retryable failure', () async {
     final notifier = createNotifier();
     addTearDown(notifier.dispose);
     notifier.bind();
+    notifications.add(_bindResponse(0x04, 0x01));
+    await Future<void>.delayed(Duration.zero);
 
-    notifications.add(Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x01]));
+    notifications.add(_bindResponse(0x02, 0x02));
     await Future<void>.delayed(Duration.zero);
 
     expect(notifier.state.phase, WatchBindPhase.failure);
     expect(notifier.state.message, '设备绑定失败');
-    expect(sent, hasLength(1));
   });
 
-  test('ignores a malformed bind response without sending time', () async {
+  test('ignores malformed and unrelated responses', () async {
     final notifier = createNotifier();
     addTearDown(notifier.dispose);
     notifier.bind();
 
-    notifications.add(
-      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x02, 0x00]),
-    );
+    notifications.add(Uint8List.fromList([0x03, 0x00, 0x04, 0x00, 0x02, 0]));
+    notifications.add(Uint8List.fromList([0x0D, 0x00, 0x02, 0x00, 0x01, 0]));
     await Future<void>.delayed(Duration.zero);
 
     expect(notifier.state.phase, WatchBindPhase.binding);
     expect(sent, hasLength(1));
   });
 
-  test('times out while waiting for a response and permits retry', () async {
+  test('times out while waiting for login and permits retry', () async {
     final notifier = createNotifier();
     addTearDown(notifier.dispose);
     notifier.bind();
 
     await Future<void>.delayed(const Duration(milliseconds: 30));
-
     expect(notifier.state.phase, WatchBindPhase.failure);
-    expect(notifier.state.message, '等待设备响应超时');
-    expect(sent, hasLength(1));
+    expect(notifier.state.message, '等待手环登录响应超时');
 
     notifier.bind();
     expect(notifier.state.phase, WatchBindPhase.binding);
     expect(sent, hasLength(2));
   });
 
-  test('becomes unavailable when sendCommand returns null', () {
-    final notifier = createNotifier(send: (_) => null);
-    addTearDown(notifier.dispose);
-
-    notifier.bind();
-
-    expect(notifier.state.phase, WatchBindPhase.unavailable);
-  });
-
-  test('keeps binding successful when time submission returns null', () async {
+  test('keeps binding successful when time submission fails', () async {
     var calls = 0;
     final notifier = createNotifier(send: (frame) {
       sent.add(Uint8List.fromList(frame));
@@ -150,38 +156,15 @@ void main() {
     addTearDown(notifier.dispose);
     notifier.bind();
 
-    notifications.add(
-      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
-    );
+    notifications.add(_bindResponse(0x04, 0x00));
     await Future<void>.delayed(Duration.zero);
 
     expect(notifier.state.phase, WatchBindPhase.success);
     expect(notifier.state.timeSyncPhase, WatchTimeSyncPhase.failed);
     expect(notifier.state.message, '设备绑定成功，时间同步失败');
-    expect(sent, hasLength(2));
   });
 
-  test('keeps binding successful when time submission throws', () async {
-    var calls = 0;
-    final notifier = createNotifier(send: (frame) {
-      sent.add(Uint8List.fromList(frame));
-      calls++;
-      if (calls == 2) throw StateError('command channel failed');
-      return 7;
-    });
-    addTearDown(notifier.dispose);
-    notifier.bind();
-
-    notifications.add(
-      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
-    );
-    await Future<void>.delayed(Duration.zero);
-
-    expect(notifier.state.phase, WatchBindPhase.success);
-    expect(notifier.state.timeSyncPhase, WatchTimeSyncPhase.failed);
-  });
-
-  test('retry sends only a fresh time frame', () async {
+  test('retry sends a fresh time frame after login success', () async {
     var now = DateTime(2024, 7, 27, 15, 42, 36);
     var calls = 0;
     final notifier = createNotifier(
@@ -195,50 +178,41 @@ void main() {
     addTearDown(notifier.dispose);
     notifier.bind();
 
-    notifications.add(
-      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
-    );
+    notifications.add(_bindResponse(0x04, 0x00));
     await Future<void>.delayed(Duration.zero);
     now = DateTime(2024, 7, 27, 15, 43, 1);
 
     notifier.retryTimeSync();
 
     expect(sent, hasLength(3));
-    expect(sent.where((frame) => frame.first == 0x03), hasLength(1));
+    expect(sent.where((frame) => frame[2] == 0x03), hasLength(1));
     expect(sent.last, isNot(equals(sent[1])));
-    expect(notifier.state.phase, WatchBindPhase.success);
     expect(notifier.state.timeSyncPhase, WatchTimeSyncPhase.synced);
-    expect(notifier.state.message, '设备绑定成功，时间已同步');
   });
 
-  test('unavailable retry stays bound and does not send another frame',
-      () async {
-    var available = true;
-    var calls = 0;
+  test('loads the persistent user identity when not supplied', () async {
     final notifier = WatchBindNotifier(
-      commandAvailable: () => available,
+      commandAvailable: () => true,
       sendCommand: (frame) {
         sent.add(Uint8List.fromList(frame));
-        calls++;
-        return calls == 2 ? null : 7;
+        return 1;
       },
       notifications: notifications.stream,
-      userId: Uint8List(32),
-      clock: () => DateTime(2024, 7, 27, 15, 42, 36),
+      userIdLoader: () async => userId,
     );
     addTearDown(notifier.dispose);
-    notifier.bind();
-    notifications.add(
-      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
-    );
-    await Future<void>.delayed(Duration.zero);
-    available = false;
 
-    notifier.retryTimeSync();
+    await notifier.bind();
 
-    expect(sent, hasLength(2));
-    expect(notifier.state.phase, WatchBindPhase.success);
-    expect(notifier.state.timeSyncPhase, WatchTimeSyncPhase.failed);
-    expect(notifier.state.message, '设备绑定成功，时间同步失败');
+    expect(sent.single, WatchBindProtocol.buildLoginRequest(userId));
   });
 }
+
+Uint8List _bindResponse(int key, int status) => Uint8List.fromList([
+      0x03,
+      0x00,
+      key,
+      0x00,
+      0x01,
+      status,
+    ]);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../i18n/app_strings.dart';
 import '../../../providers/watch_bind_provider.dart';
 import '../../../services/watch_health_protocol.dart';
 import '../../../theme/app_theme.dart';
@@ -25,13 +26,18 @@ class _WatchHealthPageState extends ConsumerState<WatchHealthPage> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          ref.read(watchBindProvider).phase != WatchBindPhase.success) {
-        return;
-      }
-      ref.read(watchHealthProvider(widget.deviceId).notifier).sync();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreAndSync());
+  }
+
+  Future<void> _restoreAndSync() async {
+    if (!mounted) return;
+    final notifier = ref.read(watchHealthProvider(widget.deviceId).notifier);
+    await notifier.restore();
+    if (!mounted ||
+        ref.read(watchBindProvider).phase != WatchBindPhase.success) {
+      return;
+    }
+    await notifier.sync();
   }
 
   @override
@@ -54,11 +60,11 @@ class _WatchHealthPageState extends ConsumerState<WatchHealthPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('运动 / 健康'),
+        title: Text(AppStrings.of(context).watch.healthTitle),
         actions: [
           IconButton(
             key: const Key('watch-health-sync'),
-            tooltip: '同步健康数据',
+            tooltip: AppStrings.of(context).watch.syncHealthTooltip,
             onPressed: syncing || !bound ? null : notifier.sync,
             icon: syncing
                 ? const SizedBox.square(
@@ -95,8 +101,8 @@ class _WatchHealthPageState extends ConsumerState<WatchHealthPage> {
                 else ...[
                   const SizedBox(height: 22),
                   _SectionHeading(
-                    title: '今日概览',
-                    trailing: _date(state.snapshot!.syncedAt),
+                    title: AppStrings.of(context).watch.todayOverview,
+                    trailing: _date(context, state.snapshot!.syncedAt),
                   ),
                   const SizedBox(height: 10),
                   _MetricsGrid(snapshot: state.snapshot!),
@@ -118,7 +124,8 @@ class _WatchHealthPageState extends ConsumerState<WatchHealthPage> {
     );
   }
 
-  static String _date(DateTime value) => '${value.month}月${value.day}日';
+  static String _date(BuildContext context, DateTime value) =>
+      AppStrings.of(context).watch.dateShort(value.month, value.day);
 }
 
 class _SyncHeader extends StatelessWidget {
@@ -136,17 +143,18 @@ class _SyncHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final watch = AppStrings.of(context).watch;
     final syncing = state.phase == WatchHealthSyncPhase.syncing;
     final failed = state.phase == WatchHealthSyncPhase.failure;
     final status = syncing
-        ? '正在同步健康数据...'
+        ? watch.syncingData
         : !bound
-            ? '设备尚未绑定'
+            ? watch.deviceNotBound
             : failed
-                ? '同步失败 · 可重新尝试'
+                ? watch.syncFailedRetry
                 : state.snapshot == null
-                    ? '尚未同步健康数据'
-                    : '最近同步：${_time(state.snapshot!.syncedAt)}';
+                    ? watch.neverSynced
+                    : watch.lastSync(_time(state.snapshot!.syncedAt));
     return Container(
       padding: const EdgeInsets.only(bottom: 14),
       decoration: const BoxDecoration(
@@ -193,10 +201,10 @@ class _SyncHeader extends StatelessWidget {
                 )
               : const Icon(Icons.sync, size: 18),
           label: Text(failed
-              ? '重试'
+              ? watch.retry
               : syncing
-                  ? '同步中'
-                  : '同步'),
+                  ? watch.syncing
+                  : watch.sync),
         ),
       ]),
     );
@@ -221,6 +229,7 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final watch = AppStrings.of(context).watch;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 72, horizontal: 24),
       child: Column(children: [
@@ -232,23 +241,23 @@ class _EmptyState extends StatelessWidget {
         const SizedBox(height: 18),
         Text(
           syncing
-              ? '正在读取手表数据'
+              ? watch.readingWatchData
               : !bound
-                  ? '请先绑定手表'
+                  ? watch.bindWatchFirst
                   : failed
-                      ? '同步未完成'
-                      : '同步手表后即可查看',
+                      ? watch.syncIncomplete
+                      : watch.syncToView,
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
         Text(
           syncing
-              ? '等待手表返回运动、睡眠和心率记录'
+              ? watch.waitingRecords
               : !bound
-                  ? '连接后需先完成绑定，才能同步健康数据'
+                  ? watch.bindToSync
                   : failed
-                      ? '请确认手表保持连接，然后重新同步'
-                      : '数据由已连接的手表提供',
+                      ? watch.keepConnected
+                      : watch.providedByWatch,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium,
         ),
@@ -257,7 +266,7 @@ class _EmptyState extends StatelessWidget {
           FilledButton.icon(
             onPressed: onSync,
             icon: const Icon(Icons.sync),
-            label: Text(failed ? '重新同步' : '立即同步'),
+            label: Text(failed ? watch.resync : watch.syncNow),
           ),
         ],
       ]),
@@ -287,23 +296,28 @@ class _MetricsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final watch = AppStrings.of(context).watch;
     final heartRate = snapshot.latestHeartRate;
     final sleep = snapshot.sleepMinutes;
     final metrics = [
-      _Metric(Icons.directions_walk, '步数', _number(snapshot.steps), '步'),
-      _Metric(Icons.route_outlined, '距离',
-          (snapshot.distanceMeters / 1000).toStringAsFixed(2), '公里'),
-      _Metric(Icons.local_fire_department_outlined, '卡路里',
-          snapshot.caloriesKcal.toStringAsFixed(1), 'kcal'),
-      _Metric(Icons.favorite, '最近心率', heartRate?.toString() ?? '--',
-          heartRate == null ? '暂无数据' : '次/分'),
+      _Metric(Icons.directions_walk, watch.steps, _number(snapshot.steps),
+          watch.unitSteps),
+      _Metric(Icons.route_outlined, watch.distance,
+          (snapshot.distanceMeters / 1000).toStringAsFixed(2), watch.unitKm),
+      _Metric(Icons.local_fire_department_outlined, watch.calories,
+          snapshot.caloriesKcal.toStringAsFixed(1), watch.unitKcal),
+      _Metric(
+          Icons.favorite,
+          watch.lastHeartRate,
+          heartRate?.toString() ?? '--',
+          heartRate == null ? watch.noData : watch.unitBpm),
       _Metric(
           Icons.bedtime_outlined,
-          '睡眠',
+          watch.sleep,
           sleep == 0
               ? '--'
               : '${sleep ~/ 60}:${(sleep % 60).toString().padLeft(2, '0')}',
-          sleep == 0 ? '暂无数据' : '小时'),
+          sleep == 0 ? watch.noData : watch.unitHours),
     ];
     return LayoutBuilder(builder: (context, constraints) {
       final width = (constraints.maxWidth - 10) / 2;
@@ -392,7 +406,8 @@ class _TrendSection extends StatelessWidget {
     final trend = state.trend!;
     final hasHeartRate = trend.points.any((point) => point.heartRate != null);
     return Column(children: [
-      _SectionHeading(title: '趋势', trailing: trend.summary),
+      _SectionHeading(
+          title: AppStrings.of(context).watch.trend, trailing: trend.summary),
       const SizedBox(height: 10),
       Container(
         padding: const EdgeInsets.all(12),
@@ -408,10 +423,16 @@ class _TrendSection extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall),
             ),
             SegmentedButton<WatchHealthPeriod>(
-              segments: const [
-                ButtonSegment(value: WatchHealthPeriod.day, label: Text('日')),
-                ButtonSegment(value: WatchHealthPeriod.week, label: Text('周')),
-                ButtonSegment(value: WatchHealthPeriod.month, label: Text('月')),
+              segments: [
+                ButtonSegment(
+                    value: WatchHealthPeriod.day,
+                    label: Text(AppStrings.of(context).watch.periodDay)),
+                ButtonSegment(
+                    value: WatchHealthPeriod.week,
+                    label: Text(AppStrings.of(context).watch.periodWeek)),
+                ButtonSegment(
+                    value: WatchHealthPeriod.month,
+                    label: Text(AppStrings.of(context).watch.periodMonth)),
               ],
               selected: {state.period},
               onSelectionChanged: (value) => onPeriodChanged(value.first),
@@ -424,10 +445,14 @@ class _TrendSection extends StatelessWidget {
           ]),
           const SizedBox(height: 12),
           Row(children: [
-            const _Legend(color: AppTheme.watchAccent, label: '步数'),
+            _Legend(
+                color: AppTheme.watchAccent,
+                label: AppStrings.of(context).watch.steps),
             if (hasHeartRate) ...[
               const SizedBox(width: 14),
-              const _Legend(color: AppTheme.error, label: '心率'),
+              _Legend(
+                  color: AppTheme.error,
+                  label: AppStrings.of(context).watch.legendHeartRate),
             ],
           ]),
           const SizedBox(height: 8),
@@ -544,11 +569,13 @@ class _SleepSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final stages = snapshot.sleepStages;
     return Column(children: [
-      _SectionHeading(title: '睡眠', trailing: snapshot.sleepRange ?? '暂无数据'),
+      _SectionHeading(
+          title: AppStrings.of(context).watch.sleep,
+          trailing: snapshot.sleepRange ?? AppStrings.of(context).watch.noData),
       const SizedBox(height: 10),
       _DataPanel(
         child: stages.isEmpty
-            ? const _NoData(message: '手表未返回睡眠记录')
+            ? _NoData(message: AppStrings.of(context).watch.noSleepRecords)
             : Column(children: [
                 for (final stage in stages)
                   Padding(
@@ -563,7 +590,9 @@ class _SleepSection extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Expanded(child: Text(stage.name)),
-                      Text('${stage.minutes ~/ 60}时${stage.minutes % 60}分'),
+                      Text(AppStrings.of(context)
+                          .watch
+                          .sleepStage(stage.minutes)),
                     ]),
                   ),
               ]),
@@ -584,11 +613,14 @@ class _HeartRateSection extends StatelessWidget {
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     final recent = records.take(5).toList();
     return Column(children: [
-      _SectionHeading(title: '心率', trailing: '${records.length} 个时段'),
+      _SectionHeading(
+          title: AppStrings.of(context).watch.heartRate,
+          trailing:
+              AppStrings.of(context).watch.heartRatePeriods(records.length)),
       const SizedBox(height: 10),
       _DataPanel(
         child: recent.isEmpty
-            ? const _NoData(message: '手表未返回心率记录')
+            ? _NoData(message: AppStrings.of(context).watch.noHeartRateRecords)
             : Column(children: [
                 for (var i = 0; i < recent.length; i++) ...[
                   Padding(
@@ -598,7 +630,9 @@ class _HeartRateSection extends StatelessWidget {
                           size: 18, color: AppTheme.error),
                       const SizedBox(width: 9),
                       Expanded(child: Text(_recordTime(recent[i].timestamp))),
-                      Text('${recent[i].heartRate} 次/分'),
+                      Text(AppStrings.of(context)
+                          .watch
+                          .heartRateValue(recent[i].heartRate)),
                     ]),
                   ),
                   if (i < recent.length - 1) const Divider(),

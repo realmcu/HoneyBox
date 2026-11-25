@@ -47,17 +47,7 @@ object NaviPerfStats {
         val sendQueueSize: Int = 0,
         val bytesPerSecond: Long = 0,
         val lastSeq: Int = -1,
-    ) {
-        /** 用于叠加在预览窗上的多行文本。 */
-        fun toOverlayText(): String = buildString {
-            append("目标FPS=$targetFps 采集=${"%.1f".format(captureFps)} 发送=${"%.1f".format(sendFps)}\n")
-            append("acquire=${acquireMs}ms(avg ${"%.1f".format(avgAcquireMs)}) 空采=$emptyAcquireCount\n")
-            append("bitmap=${toBitmapMs}ms(avg ${"%.1f".format(avgToBitmapMs)})\n")
-            append("encode=${encodeMs}ms(avg ${"%.1f".format(avgEncodeMs)})\n")
-            append("send=${sendMs}ms(avg ${"%.1f".format(avgSendMs)}) q=$sendQueueSize\n")
-            append("loop=${loopIntervalMs}ms kbps=${bytesPerSecond * 8 / 1000} seq=$lastSeq")
-        }
-    }
+    )
 
     private val _snapshot = MutableStateFlow(Snapshot())
     val snapshot: StateFlow<Snapshot> = _snapshot

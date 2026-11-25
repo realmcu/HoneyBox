@@ -11,6 +11,8 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
 import com.example.map1.MapFeature
+import com.example.map1.i18n.AppLanguage
+import com.example.map1.i18n.LanguagePreference
 import com.example.map1.navi.NaviCaptureService
 import com.example.map1.navi.NaviFramePreview
 import io.flutter.embedding.android.FlutterActivity
@@ -42,7 +44,6 @@ class MainActivity : FlutterActivity() {
     private var eventSink: EventChannel.EventSink? = null
     private var hotspot: HotspotManager? = null
     private var sta: EBadgeStaManager? = null
-    private var captureExporter: CaptureFileExporter? = null
 
     // In-page video preview players (native MediaPlayer → Flutter texture),
     // keyed by their texture id. One at a time in practice, but keyed for safety.
@@ -61,32 +62,6 @@ class MainActivity : FlutterActivity() {
 
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         RealtekOtaBridge(this, messenger)
-        val exporter = CaptureFileExporter(this)
-        captureExporter = exporter
-        MethodChannel(messenger, "honeybox/capture-export").setMethodCallHandler(exporter::handle)
-        MethodChannel(messenger, "honeybox/capture-power").setMethodCallHandler { call, result ->
-            if (call.method == "keepAwake") {
-                if (call.arguments == true) {
-                    window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                } else {
-                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                }
-                result.success(null)
-            } else if (call.method == "moveToBack") {
-                moveTaskToBack(true)
-                result.success(null)
-            } else if (call.method == "keepAlive") {
-                val text = call.argument<String>("text")
-                if (text != null) {
-                    CaptureKeepAliveService.start(this, text)
-                } else {
-                    CaptureKeepAliveService.stop(this)
-                }
-                result.success(null)
-            } else {
-                result.notImplemented()
-            }
-        }
         textureRegistry = flutterEngine.renderer
 
         EventChannel(messenger, eventChannelName).setStreamHandler(
@@ -320,6 +295,14 @@ class MainActivity : FlutterActivity() {
                         },
                     )
                 }
+                // The Flutter launcher owns the language switch now; mirror its
+                // choice into the dashboard's preference store so both sides agree.
+                "setLanguage" -> {
+                    val tag = call.argument<String>("tag")
+                    LanguagePreference.ensureLoaded(this)
+                    LanguagePreference.select(this, AppLanguage.fromTag(tag))
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -329,6 +312,8 @@ class MainActivity : FlutterActivity() {
                 "startCapture" -> {
                     val width = call.argument<Int>("width") ?: NaviCaptureService.DEFAULT_JPG_WIDTH
                     val height = call.argument<Int>("height") ?: NaviCaptureService.DEFAULT_JPG_HEIGHT
+                    val quality = call.argument<Int>("quality")
+                        ?: NaviCaptureService.DEFAULT_JPG_QUALITY
                     val fps = call.argument<Int>("fps") ?: 5
                     val speed = call.argument<Int>("speed") ?: 60
                     val startLat = call.argument<Double>("startLat") ?: 31.314
@@ -344,6 +329,7 @@ class MainActivity : FlutterActivity() {
                         dpi = NaviCaptureService.DEFAULT_VIRTUAL_DISPLAY_DPI,
                         width = width,
                         height = height,
+                        quality = quality,
                         startLat = startLat,
                         startLng = startLng,
                         endLat = endLat,
@@ -740,14 +726,7 @@ class MainActivity : FlutterActivity() {
         return created
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (captureExporter?.onActivityResult(requestCode, resultCode, data) == true) return
-        super.onActivityResult(requestCode, resultCode, data)
-    }
-
     override fun onDestroy() {
-        captureExporter?.close()
-        captureExporter = null
         encoder?.closeCamera()
         encoder = null
         hotspot?.stop()

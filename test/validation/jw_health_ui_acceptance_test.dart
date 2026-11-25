@@ -285,9 +285,10 @@ void main() {
     });
     addTearDown(() async {
       await tester.runAsync(() async {
+        await container.read(bleNotifierProvider.notifier).disconnect();
         await tester.pumpWidget(const SizedBox());
-        container.dispose();
         await fixture.close();
+        container.dispose();
         await dir.delete(recursive: true);
       });
     });
@@ -348,8 +349,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(
         find.byKey(const Key('jw-health-fixture-open-watch')), findsOneWidget);
-    expect(container.read(connectedDeviceProvider), isNull,
-        reason: 'production root leave guard must own disconnect');
+    expect(container.read(connectedDeviceProvider)?.deviceId,
+        jwHealthFixtureDeviceId,
+        reason: 'returning to launcher must preserve the active connection');
+    expect(observer.snapshot()['connectedDeviceId'], jwHealthFixtureDeviceId);
     expect(tester.takeException(), isNull);
   });
   test(

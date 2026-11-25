@@ -506,13 +506,14 @@ class _StreamPageState extends ConsumerState<StreamPage>
     final transport = _transportFor(_config.transport);
     if (!transport.isAvailable) {
       if (_config.recordToFile) {
-        _flash('未连接可投屏设备，仅本地录制');
+        _flash('${_unavailableReason()}，仅本地录制');
         setState(() => _streaming = false);
         _startNativeEncoding(generation, stream: false);
       } else {
-        _flash(_config.transport == StreamTransportKind.wifi
-            ? 'WiFi 投屏即将支持'
-            : '未连接可投屏设备（需支持流服务 FFC4/FFC5）');
+        _flash(_unavailableReason());
+        // 设备连着、只是缺流服务 —— 这最可能是 Android 缓存了旧的服务表,而不是
+        // 固件真没这个能力。给出可操作的下一步,否则用户只会反复点这个按钮。
+        if (_deviceConnected) _showStreamUnsupportedHelp();
       }
       return;
     }
@@ -845,6 +846,55 @@ class _StreamPageState extends ConsumerState<StreamPage>
         _error = '连接已断开';
       });
     }
+  }
+
+  /// Whether a device is connected at all (regardless of what it supports).
+  ///
+  /// Reads `connectedDeviceProvider` rather than `BleManager.state`: the two
+  /// `BleState` enums (this provider's and the manager's) are distinct types,
+  /// and the provider is the one the rest of the UI gates on.
+  bool get _deviceConnected => ref.read(connectedDeviceProvider) != null;
+
+  /// Why projection can't start — **distinguishing "no device" from "this device
+  /// lacks the service"**.
+  ///
+  /// These used to share one message ("未连接可投屏设备"), which reported a missing
+  /// capability as a missing connection. That cost real debugging time: the
+  /// device was connected and transferring images fine, so the message sent the
+  /// investigation looking at the connection instead of at the service table.
+  String _unavailableReason() {
+    if (_config.transport == StreamTransportKind.wifi) {
+      return 'WiFi 投屏即将支持';
+    }
+    if (!_deviceConnected) return '未连接设备';
+    return '该设备未提供投屏服务（FFC4/FFC5）';
+  }
+
+  /// 缺流服务时给出下一步。见 [BleManager.purgeGattCache] 里对缓存陈旧的说明。
+  void _showStreamUnsupportedHelp() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('设备未提供投屏服务', textAlign: TextAlign.center),
+        content: const Text(
+          '设备已连接，但它的服务表里没有投屏所需的流服务（FFC4/FFC5）。\n\n'
+          '若这台设备本应支持投屏(例如刚升过固件)，多半是 Android 缓存了旧的'
+          '服务表：系统按设备地址把服务列表存在本地，跨 App、跨重启都不会自动失效。\n\n'
+          '处理办法：打开侧边栏「设置 → 蓝牙 → 清除服务缓存」，之后断开重连。'
+          '该操作在部分机型上不生效；那种情况下可到系统设置里清除「蓝牙」应用的数据，'
+          '或先取消配对再重连。',
+        ),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('知道了'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Begin a WiFi projection over the TCP video link established by the WiFi

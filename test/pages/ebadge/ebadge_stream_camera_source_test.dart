@@ -51,6 +51,32 @@ void main() {
     expect(EBadgeStreamCameraSource.debugConfigFor(10, 100).jpegQuality, 100);
   });
 
+  // 画面尺寸要真的进到下发给原生的 config 里 —— 与质量同理:界面读数和实际编码
+  // 不一致的话,「调了尺寸没反应」就成了一个查不出因由的现象。
+  test('请求的边长透传到编码配置，且是正方形', () {
+    final cfg = EBadgeStreamCameraSource.debugConfigFor(10, 80, 256);
+    expect(cfg.width, 256);
+    expect(cfg.height, 256);
+  });
+
+  // 不给边长时沿用默认档 —— 调用方漏传不该把画面尺寸悄悄改掉。
+  test('不给边长时沿用默认档', () {
+    expect(EBadgeStreamCameraSource.debugConfigFor(10).width,
+        EBadgeStreamCameraSource.size);
+    expect(EBadgeStreamCameraSource.debugConfigFor(10).height,
+        EBadgeStreamCameraSource.size);
+  });
+
+  // 相机没开时 setSize 只记值、不打平台通道(碰了在测试里就会抛
+  // MissingPluginException),等 open() 带上。
+  test('相机未开时 setSize 只记值，不打平台通道', () async {
+    final w = _wire();
+    expect(w.src.activeSize, EBadgeStreamCameraSource.size);
+    expect(await w.src.setSize(200), isNull);
+    expect(w.src.activeSize, 200);
+    expect(w.src.isOpen, isFalse);
+  });
+
   // 不给质量时沿用默认档:调用方(比如内部重建 config 的路径)漏传不该把画面质量
   // 悄悄改掉。
   test('不给质量时沿用默认档', () {

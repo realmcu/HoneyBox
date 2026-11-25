@@ -308,7 +308,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
     if (_isBusy) return;
     _stopPlayback();
     setState(() {
-      // newIndex is already adjusted for the removed item (onReorderItem).
+      // ReorderableListView has already adjusted newIndex for the removed item.
       final s = _slides.removeAt(oldIndex);
       _slides.insert(newIndex, s);
       // Keep editing whichever slide the user was on.
@@ -1027,7 +1027,7 @@ class _SlideshowPageState extends ConsumerState<SlideshowPage> {
         buildDefaultDragHandles: true,
         padding: const EdgeInsets.symmetric(horizontal: 2),
         itemCount: _slides.length,
-        onReorderItem: _onReorder,
+        onReorder: _onReorder,
         footer: _slides.length < _maxSlides ? _buildAddTile(cs) : null,
         itemBuilder: (ctx, i) => _buildSlideTile(ctx, cs, i),
       ),

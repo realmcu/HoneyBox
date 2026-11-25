@@ -16,3 +16,42 @@ class OtaProgressTracker {
     return _progress;
   }
 }
+
+/// Average DFU transfer speed over the current transfer phase.
+///
+/// The firmware package size includes package headers, so this is an
+/// operational estimate rather than a wire-byte measurement.
+double? otaTransferSpeedKBps({
+  required int? firmwareBytes,
+  required double? progress,
+  required Duration elapsed,
+}) {
+  if (firmwareBytes == null ||
+      firmwareBytes <= 0 ||
+      progress == null ||
+      !progress.isFinite ||
+      progress <= 0 ||
+      elapsed < const Duration(milliseconds: 500)) {
+    return null;
+  }
+  final transferred = firmwareBytes * progress.clamp(0.0, 1.0);
+  return transferred / elapsed.inMilliseconds * 1000 / 1024;
+}
+
+String formatOtaSpeed(double? kbPerSecond) {
+  if (kbPerSecond == null || !kbPerSecond.isFinite || kbPerSecond <= 0) {
+    return '—';
+  }
+  if (kbPerSecond < 1024) return '${kbPerSecond.toStringAsFixed(1)} KB/s';
+  return '${(kbPerSecond / 1024).toStringAsFixed(2)} MB/s';
+}
+
+String formatOtaDuration(Duration duration) {
+  final totalSeconds = duration.isNegative ? 0 : duration.inSeconds;
+  final hours = totalSeconds ~/ 3600;
+  final minutes = (totalSeconds % 3600) ~/ 60;
+  final seconds = totalSeconds % 60;
+  String two(int value) => value.toString().padLeft(2, '0');
+  if (hours > 0) return '${two(hours)}:${two(minutes)}:${two(seconds)}';
+  return '${two(minutes)}:${two(seconds)}';
+}

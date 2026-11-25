@@ -16,6 +16,8 @@ function Assert-NotContains([string]$Pattern, [string]$Message) {
 }
 
 Assert-Contains '(?m)^\s+tags:\s*\[''v\*''\]' 'CI must run for v* tag pushes.'
+Assert-Contains '(?ms)build-windows:.*?needs:\s*\[analyze\].*?github\.event_name == ''pull_request'' \|\| github\.event_name == ''push'' \|\| github\.event_name == ''workflow_dispatch''' `
+    'Windows builds must run on pull requests, pushes, and manual runs after analyze.'
 Assert-Contains '(?m)^\s+workflow_dispatch:\s*$' 'CI must support manual runs.'
 Assert-Contains '(?ms)^\s+workflow_dispatch:\s*\r?\n\s+inputs:\s*\r?\n\s+release_tag:' `
     'Manual runs must accept a release_tag for repairing an existing release.'
