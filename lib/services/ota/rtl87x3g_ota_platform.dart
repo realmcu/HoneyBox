@@ -118,7 +118,7 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
       if (!services.any((s) => s.uuid.str128.toLowerCase() == _dfuService)) {
         throw StateError('设备未提供 RTL87x3G DFU 服务');
       }
-      _mtu = await negotiatePlatformMtu(_device!.remoteId, desired: 247);
+      _mtu = await negotiatePlatformMtu(_device!.remoteId, desired: 517);
       final info = _findCharacteristic(services, _deviceInfo);
       final rawInfo = Uint8List.fromList(await info.read());
       if (rawInfo.length < 14 ||
@@ -155,13 +155,15 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
     final package = Rtl87x3gOtaPackage.parse(
       await File(filePath).readAsBytes(),
     );
+    final noun = package.image.isUserData1 ? 'UI 资源' : '固件';
     _running = true;
-    _emit(_sessionId!, message: '开始传输固件', progress: 0, ready: false);
+    _emit(_sessionId!, message: '开始传输$noun', progress: 0, ready: false);
     unawaited(_run(package.image));
   }
 
   Future<void> _run(Rtl87x3gFirmwareImage image) async {
     final sessionId = _sessionId!;
+    final noun = image.isUserData1 ? 'UI 资源' : '固件';
     try {
       _emit(sessionId, message: '正在切换升级模式', ready: false);
       await _switchToOtaMode();
@@ -179,6 +181,7 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
       ByteData.sublistView(receive).setUint32(3, 0, Endian.little);
       await _control!.write(receive, withoutResponse: false);
 
+      final packetSize = math.max(20, math.min(512, _mtu - 3)).toInt();
       final bufferResponse = await _command(
         _opBufferCheckEnable,
         Uint8List(0),
@@ -190,8 +193,7 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
       if (bufferSize == 0) {
         throw StateError('设备未启用 DFU 缓冲校验');
       }
-      final blockSize = math.min(bufferSize, 4096).toInt();
-      final packetSize = math.max(20, math.min(240, _mtu - 3)).toInt();
+      final blockSize = math.min(bufferSize, image.bytes.length).toInt();
 
       for (var offset = 0; offset < image.bytes.length; offset += blockSize) {
         final end = math.min(offset + blockSize, image.bytes.length);
@@ -204,7 +206,7 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
             Uint8List.sublistView(block, packetOffset, packetEnd),
             withoutResponse: true,
           );
-          await Future<void>.delayed(const Duration(milliseconds: 2));
+          await Future<void>.delayed(const Duration(milliseconds: 1));
         }
         final crc = Rtl87x3gFirmwareImage.blockChecksum(block);
         final check = Uint8List(4);
@@ -224,12 +226,13 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
         }
         _emit(
           sessionId,
-          message: '正在传输固件',
+          message: '正在传输$noun',
           progress: end * 100 / image.imageSize,
         );
       }
 
-      _emit(sessionId, message: '正在校验固件', phase: 'validating', progress: 100);
+      _emit(sessionId,
+          message: '正在校验$noun', phase: 'validating', progress: 100);
       final valid = Uint8List(3);
       ByteData.sublistView(valid).setUint16(0, image.imageId, Endian.little);
       valid[2] = 1;
@@ -238,9 +241,10 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
         valid,
         expectedOpcode: _opValidFw,
         expectedLength: 3,
+        timeout: const Duration(minutes: 2),
       );
 
-      _emit(sessionId, message: '正在激活固件', phase: 'activating');
+      _emit(sessionId, message: '正在激活$noun', phase: 'activating');
       try {
         await _control!.write([_opActiveImageReset], withoutResponse: false);
       } catch (error) {
@@ -260,7 +264,7 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
       }
       _emit(
         sessionId,
-        message: 'SDK 报告升级完成，设备版本待核验',
+        message: image.isUserData1 ? 'UI 资源已写入，设备正在重启' : 'SDK 报告升级完成，设备版本待核验',
         done: true,
         progress: 100,
         outcome: 'pendingVerification',
@@ -318,7 +322,8 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
       final services = await _device!.discoverServices();
       _packet = _findCharacteristic(services, _dfuPacket);
       _control = _findCharacteristic(services, _dfuControl);
-      _mtu = await negotiatePlatformMtu(_device!.remoteId, desired: 247);
+      _mtu = await negotiatePlatformMtu(_device!.remoteId, desired: 517);
+      await _requestHighPriority();
       try {
         final info = _findCharacteristic(services, _deviceInfo);
         final rawInfo = Uint8List.fromList(await info.read());
@@ -370,6 +375,17 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
     }
   }
 
+  Future<void> _requestHighPriority() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _device!.requestConnectionPriority(
+        connectionPriorityRequest: ConnectionPriority.high,
+      );
+    } catch (error) {
+      debugPrint('RTL87x3G high-priority request failed: $error');
+    }
+  }
+
   void _listenConnectionState() {
     unawaited(_connectionState?.cancel());
     _connectionState = _device!.connectionState.listen((state) {
@@ -387,17 +403,14 @@ final class Rtl87x3gOtaPlatform implements OtaPlatform {
     Uint8List payload, {
     required int expectedOpcode,
     required int expectedLength,
+    Duration timeout = const Duration(seconds: 30),
   }) async {
     if (_reply != null) throw StateError('上一个 DFU 指令尚未完成');
     final reply = Completer<Uint8List>();
     _reply = reply;
     try {
       await _control!.write([opcode, ...payload], withoutResponse: false);
-      return await _awaitReply(
-        expectedOpcode,
-        expectedLength,
-        const Duration(seconds: 30),
-      );
+      return await _awaitReply(expectedOpcode, expectedLength, timeout);
     } finally {
       _reply = null;
     }

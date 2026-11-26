@@ -16,6 +16,7 @@ abstract class WatchStrings {
   String get cardNotification;
   String get cardHealth;
   String get cardOta;
+  String get cardResourceOta;
   String get cardFactory;
   String get needBind;
   String get bindDevice;
@@ -106,6 +107,8 @@ class ZhWatchStrings extends WatchStrings {
   String get cardHealth => '运动 / 健康';
   @override
   String get cardOta => '固件 OTA 升级';
+  @override
+  String get cardResourceOta => 'UI 资源 OTA';
   @override
   String get cardFactory => '工厂测试';
   @override
@@ -267,6 +270,8 @@ class EnWatchStrings extends WatchStrings {
   String get cardHealth => 'Activity & health';
   @override
   String get cardOta => 'Firmware OTA';
+  @override
+  String get cardResourceOta => 'UI resource OTA';
   @override
   String get cardFactory => 'Factory test';
   @override

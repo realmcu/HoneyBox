@@ -140,6 +140,30 @@ void main() {
     expect(find.text('watch-ota-target'), findsOneWidget);
   });
 
+  testWidgets('opens UI resource OTA without using the bundled App image',
+      (tester) async {
+    RouteSettings? opened;
+    await tester.pumpWidget(buildPage(onGenerateRoute: (settings) {
+      opened = settings;
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => const Scaffold(body: Text('resource-ota-target')),
+      );
+    }));
+    await tester.pump();
+    notifications.add(
+      Uint8List.fromList([0x03, 0x00, 0x02, 0x00, 0x01, 0x00]),
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.text('UI 资源 OTA'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('UI 资源 OTA'));
+    await tester.pumpAndSettle();
+
+    expect(opened?.name, '/watch-rtl87x3g-resource-ota');
+    expect(find.text('resource-ota-target'), findsOneWidget);
+  });
+
   testWidgets('keeps bound state and retries only time synchronization',
       (tester) async {
     var calls = 0;

@@ -4,10 +4,12 @@ const int rtl87x3gImageHeaderSize = 0x400;
 const int rtl87x3gControlHeaderOffset = 196;
 const int rtl87x3gControlHeaderSize = 16;
 const int rtl87x3gMcuAppImageId = 0x2793;
+const int rtl87x3gUserData1ImageId = 0xFFFE;
 const int rtl87x3gIcType = 0x13;
 const int rtl87x3gAppBankSize = 0x180000;
+const int rtl87x3gUserData1Capacity = 0x00B2F000;
 
-/// A bare RTL87x3G APP image accepted by the normal-mode DFU service.
+/// A bare RTL87x3G DFU image (MCUAPP or USER_DATA1).
 ///
 /// The file already contains the 1 KiB `IMGHDR` image header. It is not the
 /// 512-byte MP wrapper used by the existing RTL8762/S200 path.
@@ -23,6 +25,16 @@ final class Rtl87x3gFirmwareImage {
   final int version;
   final int version64;
   final int commitId;
+
+  bool get isMcuApp => imageId == rtl87x3gMcuAppImageId;
+  bool get isUserData1 => imageId == rtl87x3gUserData1ImageId;
+  int get maxImageSize =>
+      isUserData1 ? rtl87x3gUserData1Capacity : rtl87x3gAppBankSize;
+  String get kindName => switch (imageId) {
+        rtl87x3gMcuAppImageId => 'MCUAPP',
+        rtl87x3gUserData1ImageId => 'USER_DATA1',
+        _ => 'UNKNOWN',
+      };
 
   const Rtl87x3gFirmwareImage({
     required this.bytes,
@@ -68,9 +80,11 @@ final class Rtl87x3gFirmwareImage {
       rtl87x3gControlHeaderOffset + 12,
       Endian.little,
     );
-    if (imageId != rtl87x3gMcuAppImageId) {
+    if (imageId != rtl87x3gMcuAppImageId &&
+        imageId != rtl87x3gUserData1ImageId) {
       throw FormatException(
-        '镜像 ID 不是 MCUAPP(0x${rtl87x3gMcuAppImageId.toRadixString(16)})：'
+        '不支持的镜像 ID(MCUAPP=0x${rtl87x3gMcuAppImageId.toRadixString(16)}, '
+        'USER_DATA1=0x${rtl87x3gUserData1ImageId.toRadixString(16)})：'
         '0x${imageId.toRadixString(16)}',
       );
     }
@@ -83,9 +97,12 @@ final class Rtl87x3gFirmwareImage {
     if (expectedSize != source.length) {
       throw FormatException('镜像长度不一致：控制头要求 $expectedSize，文件为 ${source.length}');
     }
-    if (source.length > rtl87x3gAppBankSize) {
+    final maxImageSize = imageId == rtl87x3gUserData1ImageId
+        ? rtl87x3gUserData1Capacity
+        : rtl87x3gAppBankSize;
+    if (source.length > maxImageSize) {
       throw FormatException(
-        '镜像超过 eBadge APP bank 容量：${source.length} > $rtl87x3gAppBankSize',
+        '镜像超过分区容量：${source.length} > $maxImageSize',
       );
     }
     final version64 = data.getUint64(280, Endian.little);

@@ -135,6 +135,13 @@ class _HoneyBoxAppState extends ConsumerState<HoneyBoxApp> {
                 deviceId: args?['deviceId'] ?? '',
               );
               break;
+            case '/watch-rtl87x3g-resource-ota':
+              page = WatchRtl87x3gOtaPage(
+                deviceName: args?['deviceName'] ?? 'Watch',
+                deviceId: args?['deviceId'] ?? '',
+                resourceOta: true,
+              );
+              break;
             default:
               page = const EBadgeAppRoot();
           }

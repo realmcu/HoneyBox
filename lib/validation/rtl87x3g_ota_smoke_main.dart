@@ -39,7 +39,7 @@ Future<void> main() async {
       sessionId: 'smoke-${DateTime.now().millisecondsSinceEpoch}',
     );
     await platform.start(imagePath);
-    await finished.future.timeout(const Duration(minutes: 12));
+    await finished.future.timeout(const Duration(minutes: 20));
     writeLog('OTA_SMOKE_OK');
   } catch (error, stack) {
     writeLog('OTA_SMOKE_FAIL $error');

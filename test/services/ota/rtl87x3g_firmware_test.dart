@@ -33,7 +33,9 @@ Uint8List buildMpPackage(Uint8List image) {
   }
 
   tlv(0x0001, const [0x01, 0x00]);
-  tlv(0x0012, const [rtl87x3gMcuAppImageId & 0xff, rtl87x3gMcuAppImageId >> 8]);
+  final imageId = ByteData.sublistView(image)
+      .getUint16(rtl87x3gControlHeaderOffset + 6, Endian.little);
+  tlv(0x0012, [imageId & 0xff, imageId >> 8]);
   final size = image.length;
   tlv(0x0014, [
     size & 0xff,
@@ -62,6 +64,16 @@ void main() {
     );
   });
 
+  test('parses a USER_DATA1 ROMFS image for UI resource OTA', () {
+    final image = Rtl87x3gFirmwareImage.parse(
+      buildImage(imageId: rtl87x3gUserData1ImageId),
+    );
+    expect(image.isUserData1, isTrue);
+    expect(image.isMcuApp, isFalse);
+    expect(image.kindName, 'USER_DATA1');
+    expect(image.maxImageSize, rtl87x3gUserData1Capacity);
+  });
+
   test('calculates the RTL DFU block checksum', () {
     expect(
       Rtl87x3gFirmwareImage.blockChecksum([0x12, 0x34, 0x56, 0x78]),
@@ -74,6 +86,14 @@ void main() {
     expect(package.image.imageId, rtl87x3gMcuAppImageId);
     expect(package.mpImageId, rtl87x3gMcuAppImageId);
     expect(package.mpImageSize, rtl87x3gImageHeaderSize + 32);
+  });
+
+  test('parses a USER_DATA1 MP package', () {
+    final package = Rtl87x3gOtaPackage.parse(buildMpPackage(
+      buildImage(imageId: rtl87x3gUserData1ImageId),
+    ));
+    expect(package.image.imageId, rtl87x3gUserData1ImageId);
+    expect(package.mpImageId, rtl87x3gUserData1ImageId);
   });
 
   test('parser accepts matching device and reports target version', () async {
@@ -101,6 +121,33 @@ void main() {
     );
     final images = (result.rawStatus as Map)['images'] as List;
     expect((images.single as Map)['version'], 0x00010203);
+  });
+
+  test('parser identifies UI resources and skips APP version postcheck',
+      () async {
+    final directory = await Directory.systemTemp.createTemp('rtl87x3g-ui-');
+    final file = File('${directory.path}/ui_MP.bin');
+    await file.writeAsBytes(buildMpPackage(
+      buildImage(imageId: rtl87x3gUserData1ImageId),
+    ));
+    addTearDown(() => directory.delete(recursive: true));
+    final result = await const Rtl87x3gFirmwareParser().parse(
+      file.path,
+      const DeviceCapabilities(
+        confirmed: true,
+        icType: rtl87x3gIcType,
+        currentVersion: 0x7fffffff,
+        batteryPercent: 80,
+      ),
+    );
+    expect(result.images.single, contains('USER_DATA1'));
+    final raw = result.rawStatus as Map;
+    expect(raw['contentKind'], 'userData1');
+    expect(raw['requiresAppVersionPostcheck'], isFalse);
+    expect(
+      result.checks.firstWhere((c) => c.id == 'version').status,
+      OtaCheckStatus.warn,
+    );
   });
 
   test('extended FFF1 layout exposes RTL8773G chip type', () {

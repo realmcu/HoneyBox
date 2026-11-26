@@ -111,7 +111,8 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
   }
 
   void _open(String route) {
-    if (route == '/watch-rtl87x3g-ota') {
+    if (route == '/watch-rtl87x3g-ota' ||
+        route == '/watch-rtl87x3g-resource-ota') {
       ref.read(otaInProgressProvider.notifier).state = true;
     }
     Navigator.pushNamed(
@@ -141,6 +142,10 @@ class _WatchDevicePageState extends ConsumerState<WatchDevicePage>
             icon: Icons.system_update_alt,
             title: w.cardOta,
             route: '/watch-rtl87x3g-ota'),
+        _ActionItem(
+            icon: Icons.dashboard_customize_outlined,
+            title: w.cardResourceOta,
+            route: '/watch-rtl87x3g-resource-ota'),
       ];
 
   static _ActionItem _factoryAction(WatchStrings w) => _ActionItem(

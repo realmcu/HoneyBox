@@ -24,17 +24,19 @@ final class Rtl87x3gFirmwareParser implements FirmwareParser {
           : chipMatches
               ? OtaCheckStatus.pass
               : OtaCheckStatus.block;
-      final capacity = image.imageSize <= rtl87x3gAppBankSize
+      final capacity = image.imageSize <= image.maxImageSize
           ? OtaCheckStatus.pass
           : OtaCheckStatus.block;
       final current = capabilities.currentVersion;
-      final version = current == null
+      final version = !image.isMcuApp
           ? OtaCheckStatus.warn
-          : image.version == current
+          : current == null
               ? OtaCheckStatus.warn
-              : image.version < current
+              : image.version == current
                   ? OtaCheckStatus.warn
-                  : OtaCheckStatus.pass;
+                  : image.version < current
+                      ? OtaCheckStatus.warn
+                      : OtaCheckStatus.pass;
       final batteryValue = capabilities.batteryPercent;
       final battery = capabilities.charging == true ||
               (batteryValue != null &&
@@ -42,25 +44,28 @@ final class Rtl87x3gFirmwareParser implements FirmwareParser {
                   batteryValue <= 100)
           ? OtaCheckStatus.pass
           : OtaCheckStatus.warn;
-      final versionText = current == null
-          ? '目标版本 ${formatRtl87x3gVersion(image.version)}，设备当前版本未知'
-          : image.version == current
-              ? '目标与设备版本相同，将执行重复升级'
-              : image.version < current
-                  ? '目标版本低于设备当前版本，将执行降级'
-                  : '将从 ${formatRtl87x3gVersion(current)} 升级到 '
-                      '${formatRtl87x3gVersion(image.version)}';
+      final versionText = image.isUserData1
+          ? 'UI 资源版本 ${formatRtl87x3gVersion(image.version)}，'
+              '不与 MCUAPP 版本比较'
+          : current == null
+              ? '目标版本 ${formatRtl87x3gVersion(image.version)}，设备当前版本未知'
+              : image.version == current
+                  ? '目标与设备版本相同，将执行重复升级'
+                  : image.version < current
+                      ? '目标版本低于设备当前版本，将执行降级'
+                      : '将从 ${formatRtl87x3gVersion(current)} 升级到 '
+                          '${formatRtl87x3gVersion(image.version)}';
       final checks = <OtaCheck>[
-        const OtaCheck(
+        OtaCheck(
           'format',
           OtaCheckStatus.pass,
-          '固件格式通过：Realtek MP + RTL87x3G IMGHDR + MCUAPP',
+          '固件格式通过：Realtek MP + RTL87x3G IMGHDR + ${image.kindName}',
         ),
         OtaCheck(
           'compatibility',
           compatibility,
           deviceIc == null
-              ? '兼容性：设备芯片未知，固件为 RTL8773G MCUAPP'
+              ? '兼容性：设备芯片未知，固件为 RTL8773G ${image.kindName}'
               : chipMatches
                   ? '兼容性通过：设备与固件均为 RTL8773G'
                   : '芯片不匹配：设备 0x${deviceIc.toRadixString(16)}，固件 0x13',
@@ -68,7 +73,7 @@ final class Rtl87x3gFirmwareParser implements FirmwareParser {
         OtaCheck(
           'capacity',
           capacity,
-          '容量：${image.imageSize} / $rtl87x3gAppBankSize 字节',
+          '容量：${image.imageSize} / ${image.maxImageSize} 字节',
         ),
         OtaCheck('version', version, versionText),
         OtaCheck(
@@ -84,6 +89,8 @@ final class Rtl87x3gFirmwareParser implements FirmwareParser {
           'type': 'Realtek MP + RTL87x3G IMGHDR',
           'mpImageId': package.mpImageId,
           'mpImageSize': package.mpImageSize,
+          'contentKind': image.isUserData1 ? 'userData1' : 'mcuApp',
+          'requiresAppVersionPostcheck': image.isMcuApp,
           'images': [
             {
               'imageId': image.imageId,
@@ -97,7 +104,7 @@ final class Rtl87x3gFirmwareParser implements FirmwareParser {
         },
         type: 'Realtek RTL87x3G',
         images: [
-          'MCUAPP 0x${image.imageId.toRadixString(16)} '
+          '${image.kindName} 0x${image.imageId.toRadixString(16)} '
               '${formatRtl87x3gVersion(image.version)}',
         ],
         checks: checks,

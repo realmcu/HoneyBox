@@ -159,6 +159,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
   final List<OtaPhaseEntry> _phaseHistory = [];
   Future<void> _saveQueue = Future.value();
   bool _finishedReported = false;
+  bool _requiresAppVersionPostcheck = true;
   final Stopwatch _runClock = Stopwatch();
   final Stopwatch _transferClock = Stopwatch();
   Timer? _metricsTicker;
@@ -333,7 +334,9 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
     final callback = widget.onFinished;
     if (callback == null) return;
     var finalOutcome = outcome;
-    if (widget.autoVerify && outcome == OtaOutcome.pendingVerification) {
+    if (widget.autoVerify &&
+        _requiresAppVersionPostcheck &&
+        outcome == OtaOutcome.pendingVerification) {
       setState(() => _status = '正在核验设备固件版本');
       await _verify();
       if (!mounted) return;
@@ -644,8 +647,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
           '${DateTime.now().microsecondsSinceEpoch}-${_sessionSequence++}',
           phaseTimeouts: widget.target == OtaTarget.rtl87x3g
               ? const {
-                  OtaPhase.transferring: Duration(minutes: 12),
-                  OtaPhase.validating: Duration(minutes: 3),
+                  OtaPhase.transferring: Duration(minutes: 20),
+                  OtaPhase.validating: Duration(minutes: 5),
                 }
               : null, onTimeout: (timedOut) {
         if (!mounted || _session != timedOut) return;
@@ -801,6 +804,8 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
                       : null));
       setState(() => _checks = report.checks);
       final raw = inspection.rawStatus;
+      final requiresAppVersionPostcheck =
+          raw is Map ? raw['requiresAppVersionPostcheck'] != false : true;
       final images = raw is Map ? raw['images'] : null;
       final first = images is List && images.length == 1 ? images.first : null;
       final target = first is Map && first['version'] is int
@@ -809,6 +814,7 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
       final size = await File(path).length().catchError((Object _) => 0);
       _firmwareBytes = size > 0 ? size : null;
       if (!mounted) return;
+      _requiresAppVersionPostcheck = requiresAppVersionPostcheck;
       if (!_advanceToAwaitingConfirmation(session!)) {
         _stopMetrics();
         setState(() => _running = false);
@@ -1172,11 +1178,17 @@ class _RealtekOtaPageState extends ConsumerState<RealtekOtaPage>
                                   : Colors.red),
                       title: Text(check.explanation),
                     ),
-                  if (_pendingVerification && _postcheck == null)
+                  if (_pendingVerification &&
+                      _postcheck == null &&
+                      !_requiresAppVersionPostcheck)
+                    const Text('UI 资源已写入；设备重启后请核对界面资源。'),
+                  if (_pendingVerification &&
+                      _postcheck == null &&
+                      _requiresAppVersionPostcheck)
                     const Text('结果待核验：SDK 已报告完成，尚未确认设备运行的新固件版本。'),
                   if (_postcheck != null && _postcheck!.guidance.isNotEmpty)
                     Text(_postcheck!.guidance),
-                  if (_pendingVerification)
+                  if (_pendingVerification && _requiresAppVersionPostcheck)
                     OutlinedButton(
                         onPressed: _running || _preparing || _verifying
                             ? null

@@ -40,11 +40,13 @@ Future<String> stageWatchRtl87x3gBundledFirmware({Directory? directory}) async {
 class WatchRtl87x3gOtaPage extends ConsumerStatefulWidget {
   final String deviceName;
   final String deviceId;
+  final bool resourceOta;
 
   const WatchRtl87x3gOtaPage({
     super.key,
     required this.deviceName,
     required this.deviceId,
+    this.resourceOta = false,
   });
 
   @override
@@ -81,7 +83,8 @@ class _WatchRtl87x3gOtaPageState extends ConsumerState<WatchRtl87x3gOtaPage> {
       _isJw = connected.isJw;
       _ownerApp = connected.ownerApp;
       await ref.read(bleNotifierProvider.notifier).disconnect();
-      final path = await stageWatchRtl87x3gBundledFirmware();
+      final path =
+          widget.resourceOta ? '' : await stageWatchRtl87x3gBundledFirmware();
       if (!mounted) return;
       setState(() => _firmwarePath = path);
     } catch (error) {
@@ -186,10 +189,11 @@ class _WatchRtl87x3gOtaPageState extends ConsumerState<WatchRtl87x3gOtaPage> {
               rssi: 0,
             ),
             target: OtaTarget.rtl87x3g,
-            initialFirmwarePath: path,
-            initialFirmwareName: watchRtl87x3gBundledFirmwareName,
-            fixedFirmware: true,
-            autoVerify: true,
+            initialFirmwarePath: widget.resourceOta ? null : path,
+            initialFirmwareName:
+                widget.resourceOta ? null : watchRtl87x3gBundledFirmwareName,
+            fixedFirmware: !widget.resourceOta,
+            autoVerify: !widget.resourceOta,
             onFinished: _handleFinished,
           ),
           // Keep the OTA page mounted while the radio is handed back, so its
