@@ -14,18 +14,30 @@ import '../../services/ota/ota_target.dart';
 import '../launcher/app_catalog.dart';
 import 'realtek_ota_page.dart';
 
-const watchRtl87x3gBundledFirmwareAsset =
+const watchRtl87x3gBundledAppFirmwareAsset =
     'assets/ota/watch_rtl8773g_app_mp.bin';
+const watchRtl87x3gBundledUserDataFirmwareAsset =
+    'assets/ota/watch_rtl8773g_user_data1_mp.bin';
 const watchRtl87x3gBundledFirmwareName = 'Watch 内置固件';
+const watchRtl87x3gBundledUserDataFirmwareName = 'Watch 内置 UI 资源';
 
 /// Lowers the Realtek MP OTA package bundled in the APK into a file the OTA
 /// transport can read. The MP package (not the bare download image) is what
 /// the device expects.
-Future<String> stageWatchRtl87x3gBundledFirmware({Directory? directory}) async {
-  final data = await rootBundle.load(watchRtl87x3gBundledFirmwareAsset);
+Future<String> stageWatchRtl87x3gBundledFirmware({
+  Directory? directory,
+  bool userData = false,
+}) async {
+  final asset = userData
+      ? watchRtl87x3gBundledUserDataFirmwareAsset
+      : watchRtl87x3gBundledAppFirmwareAsset;
+  final fileName = userData
+      ? 'watch_rtl8773g_user_data1_mp.bin'
+      : 'watch_rtl87x3g_app_mp.bin';
+  final data = await rootBundle.load(asset);
   final targetDirectory = directory ?? await getTemporaryDirectory();
   final file = File(
-    '${targetDirectory.path}${Platform.pathSeparator}watch_rtl87x3g_app_mp.bin',
+    '${targetDirectory.path}${Platform.pathSeparator}$fileName',
   );
   await file.writeAsBytes(
     data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
@@ -83,8 +95,9 @@ class _WatchRtl87x3gOtaPageState extends ConsumerState<WatchRtl87x3gOtaPage> {
       _isJw = connected.isJw;
       _ownerApp = connected.ownerApp;
       await ref.read(bleNotifierProvider.notifier).disconnect();
-      final path =
-          widget.resourceOta ? '' : await stageWatchRtl87x3gBundledFirmware();
+      final path = await stageWatchRtl87x3gBundledFirmware(
+        userData: widget.resourceOta,
+      );
       if (!mounted) return;
       setState(() => _firmwarePath = path);
     } catch (error) {
@@ -189,9 +202,10 @@ class _WatchRtl87x3gOtaPageState extends ConsumerState<WatchRtl87x3gOtaPage> {
               rssi: 0,
             ),
             target: OtaTarget.rtl87x3g,
-            initialFirmwarePath: widget.resourceOta ? null : path,
-            initialFirmwareName:
-                widget.resourceOta ? null : watchRtl87x3gBundledFirmwareName,
+            initialFirmwarePath: path,
+            initialFirmwareName: widget.resourceOta
+                ? watchRtl87x3gBundledUserDataFirmwareName
+                : watchRtl87x3gBundledFirmwareName,
             fixedFirmware: !widget.resourceOta,
             autoVerify: !widget.resourceOta,
             onFinished: _handleFinished,

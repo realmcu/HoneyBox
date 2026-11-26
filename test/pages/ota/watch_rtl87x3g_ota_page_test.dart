@@ -31,6 +31,22 @@ void main() {
     expect(package.image.imageId, rtl87x3gMcuAppImageId);
   });
 
+  test('bundled Watch UI resource is a USER_DATA1 MP OTA image', () async {
+    final directory =
+        await Directory.systemTemp.createTemp('watch-ota-user-data-');
+    addTearDown(() => directory.delete(recursive: true));
+
+    final path = await stageWatchRtl87x3gBundledFirmware(
+      directory: directory,
+      userData: true,
+    );
+    final package = Rtl87x3gOtaPackage.parse(await File(path).readAsBytes());
+
+    expect(package.mpImageSize, greaterThan(6000000));
+    expect(package.image.icType, rtl87x3gIcType);
+    expect(package.image.imageId, rtl87x3gUserData1ImageId);
+  });
+
   group('watchOtaResultMessage', () {
     test('reports a verified upgrade as success', () {
       expect(
