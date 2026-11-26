@@ -8,6 +8,7 @@ import '../../../providers/ble_provider.dart';
 import '../../../providers/watch_bind_provider.dart';
 import '../../../services/watch_factory_protocol.dart';
 import '../../../services/watch_record_protocol.dart';
+import '../../../services/watch_record_file.dart';
 import '../../../theme/app_theme.dart';
 
 enum _FactoryItemState { idle, waiting, done, timeout, failed }
@@ -40,10 +41,13 @@ class WatchFactoryPage extends ConsumerStatefulWidget {
     super.key,
     required this.deviceName,
     required this.deviceId,
+    this.recordFileWriterFactory,
   });
 
   final String deviceName;
   final String deviceId;
+  final Future<WatchRecordFileWriter> Function(String deviceId)?
+      recordFileWriterFactory;
 
   @override
   ConsumerState<WatchFactoryPage> createState() => _WatchFactoryPageState();
@@ -80,6 +84,12 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
   bool _runningAll = false;
   bool _motorRunning = false;
   bool _recordRequesting = false;
+  bool _recording = false;
+  DateTime? _recordStopAt;
+  WatchRecordFileWriter? _recordFile;
+  String? _recordSavedPath;
+  int _recordDataPackets = 0;
+  int _recordDataBytes = 0;
   _FactoryResult _recordResult = const _FactoryResult(_FactoryItemState.idle);
 
   @override
@@ -96,6 +106,9 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
   void dispose() {
     _requestTimer?.cancel();
     _commandSub?.cancel();
+    final file = _recordFile;
+    _recordFile = null;
+    if (file != null) unawaited(file.abort());
     super.dispose();
   }
 
@@ -106,7 +119,11 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
   void _onCommand(Uint8List frame) {
     final recordResponse = WatchRecordProtocol.parseResponse(frame);
     if (recordResponse != null) {
-      _onRecordResponse(recordResponse);
+      if (recordResponse.key == WatchRecordProtocol.dataKey) {
+        _onRecordData(recordResponse);
+      } else {
+        _onRecordResponse(recordResponse);
+      }
       return;
     }
     final response = WatchFactoryProtocol.parseResponse(frame);
@@ -114,10 +131,21 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
     _showResult(response.key, response.value);
   }
 
+  void _onRecordData(WatchRecordResponse response) {
+    if (!_recording) return;
+    final data = WatchRecordProtocol.parseData(response);
+    if (data == null || !mounted) return;
+    final file = _recordFile;
+    if (file != null) unawaited(file.append(data.frames));
+    setState(() {
+      _recordDataPackets++;
+      _recordDataBytes += data.byteLength;
+    });
+  }
+
   void _onRecordResponse(WatchRecordResponse response) {
-    if (!_recordRequesting ||
-        (response.key != WatchRecordProtocol.startKey &&
-            response.key != WatchRecordProtocol.stopKey)) {
+    if (response.key != WatchRecordProtocol.startKey &&
+        response.key != WatchRecordProtocol.stopKey) {
       return;
     }
     final stopped = response.key == WatchRecordProtocol.stopKey;
@@ -125,19 +153,60 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
         ? WatchRecordProtocol.decodeStop(response.value)
         : WatchRecordProtocol.decodeStart(response.value);
     if (!mounted) return;
+
+    if (!stopped) {
+      _requestTimer?.cancel();
+      setState(() {
+        _recordRequesting = false;
+        _recording = true;
+        _recordStopAt = null;
+        _recordResult = _FactoryResult(_FactoryItemState.done, text);
+      });
+      final done = _requestDone;
+      _requestDone = null;
+      if (done != null && !done.isCompleted) done.complete();
+      return;
+    }
+
+    final stopAt = _recordStopAt ?? DateTime.now();
+    final failed = response.value.isNotEmpty && response.value[0] != 0x00;
+    _requestTimer?.cancel();
     setState(() {
       _recordRequesting = false;
+      _recording = false;
       _recordResult = _FactoryResult(
-        stopped && response.value.isNotEmpty && response.value[0] != 0x00
-            ? _FactoryItemState.failed
-            : _FactoryItemState.done,
+        failed ? _FactoryItemState.failed : _FactoryItemState.done,
         text,
       );
     });
-    _requestTimer?.cancel();
     final done = _requestDone;
     _requestDone = null;
     if (done != null && !done.isCompleted) done.complete();
+    unawaited(_finishRecordFile(stopAt, failed ? text : null));
+  }
+
+  Future<void> _finishRecordFile(DateTime stoppedAt, String? error) async {
+    final writer = _recordFile;
+    _recordFile = null;
+    if (writer == null) return;
+    try {
+      final file = await writer.finish(stoppedAt);
+      if (!mounted) return;
+      setState(() {
+        _recordSavedPath = file?.path;
+        if (error != null) {
+          _recordResult = _FactoryResult(_FactoryItemState.failed, error);
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _recordResult = _FactoryResult(
+          _FactoryItemState.failed,
+          '录音文件保存失败：$e',
+        );
+      });
+    }
   }
 
   void _showResult(int responseKey, Uint8List value) {
@@ -259,13 +328,46 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
       _showMessage('请先完成设备绑定并建立命令通道');
       return;
     }
-    if (_requestDone != null || _recordRequesting) return;
+    if (_requestDone != null || _recordRequesting || _recording) return;
 
     _requestTimer?.cancel();
+    WatchRecordFileWriter? writer;
+    try {
+      writer = widget.recordFileWriterFactory != null
+          ? await widget.recordFileWriterFactory!(widget.deviceId)
+          : await WatchRecordFileWriter.createDefault(
+              deviceId: widget.deviceId,
+            );
+      await writer.start(
+        sampleRate: 16000,
+        channels: 1,
+        bitsPerSample: 16,
+        startedAt: DateTime.now(),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _recordRequesting = false;
+          _recordResult = _FactoryResult(
+            _FactoryItemState.failed,
+            '无法创建录音文件：$e',
+          );
+        });
+      }
+      await writer?.abort();
+      return;
+    }
+
     final done = Completer<void>();
     _requestDone = done;
+    _recordFile = writer;
     setState(() {
       _recordRequesting = true;
+      _recording = false;
+      _recordStopAt = null;
+      _recordSavedPath = null;
+      _recordDataPackets = 0;
+      _recordDataBytes = 0;
       _recordResult =
           const _FactoryResult(_FactoryItemState.waiting, '等待手表启动…');
     });
@@ -280,6 +382,7 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
         _recordResult =
             const _FactoryResult(_FactoryItemState.failed, '录音请求发送失败');
       });
+      unawaited(_finishRecordFile(DateTime.now(), '录音请求发送失败'));
       return;
     }
 
@@ -292,8 +395,41 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
       final done = _requestDone;
       _requestDone = null;
       if (done != null && !done.isCompleted) done.complete();
+      unawaited(_finishRecordFile(DateTime.now(), '录音启动无响应'));
     });
     await done.future;
+  }
+
+  Future<void> _stopRecord() async {
+    if (!_recording || _recordRequesting || !_ready) return;
+    final stopAt = DateTime.now();
+    _recordStopAt = stopAt;
+    setState(() {
+      _recordRequesting = true;
+      _recordResult =
+          const _FactoryResult(_FactoryItemState.waiting, '正在停止录音…');
+    });
+    final sequence = ref
+        .read(bleManagerProvider)
+        .sendCommand(WatchRecordProtocol.buildCancelRequest());
+    if (sequence == null) {
+      setState(() {
+        _recordRequesting = false;
+        _recording = false;
+      });
+      await _finishRecordFile(stopAt, '停止命令发送失败');
+      return;
+    }
+
+    _requestTimer?.cancel();
+    _requestTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || !_recordRequesting) return;
+      setState(() {
+        _recordRequesting = false;
+        _recording = false;
+      });
+      unawaited(_finishRecordFile(stopAt, '未收到手表停止确认'));
+    });
   }
 
   void _showMessage(String message) {
@@ -336,21 +472,51 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  key: const Key('watch-factory-record-start'),
-                  onPressed: ready && !_recordRequesting && !_runningAll
-                      ? _requestRecord
-                      : null,
-                  icon: _recordRequesting
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.mic_none_outlined),
-                  label: const Text('EVT_RECORD_START_REQ'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(44),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('watch-factory-record-start'),
+                        onPressed: ready &&
+                                !_recordRequesting &&
+                                !_recording &&
+                                !_runningAll
+                            ? _requestRecord
+                            : null,
+                        icon: _recordRequesting && !_recording
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.mic_none_outlined),
+                        label: const Text('开始录音'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.icon(
+                        key: const Key('watch-factory-record-stop'),
+                        onPressed: ready && _recording && !_recordRequesting
+                            ? _stopRecord
+                            : null,
+                        icon: _recordRequesting && _recording
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.stop_circle_outlined),
+                        label: const Text('停止录音'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(44),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 if (_recordResult.state != _FactoryItemState.idle) ...[
                   const SizedBox(height: 8),
@@ -364,8 +530,25 @@ class _WatchFactoryPageState extends ConsumerState<WatchFactoryPage> {
                               Theme.of(context).colorScheme.error,
                             _ => Theme.of(context).colorScheme.outline,
                           },
-                        ),
+                    ),
                   ),
+                  if (_recordDataPackets > 0) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '已接收 PCM $_recordDataPackets 包 / '
+                      '$_recordDataBytes 字节',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppTheme.watchAccent,
+                          ),
+                    ),
+                  ],
+                  if (_recordSavedPath != null) ...[
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      '已保存：$_recordSavedPath',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 16),
                 LayoutBuilder(

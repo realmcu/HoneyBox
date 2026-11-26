@@ -10,8 +10,23 @@ class WatchRecordResponse {
   final Uint8List value;
 }
 
+class WatchRecordData {
+  const WatchRecordData({
+    required this.seq,
+    required this.timestamp,
+    required this.frames,
+  });
+
+  final int seq;
+  final int timestamp;
+  final List<Uint8List> frames;
+
+  int get byteLength => frames.fold(0, (sum, frame) => sum + frame.length);
+}
+
 abstract final class WatchRecordProtocol {
   static const int startKey = BleCmdWatchRecordKey.start;
+  static const int dataKey = BleCmdWatchRecordKey.data;
   static const int stopKey = BleCmdWatchRecordKey.stop;
 
   static Uint8List buildRequest() => _build(BleCmdWatchRecordKey.recordRequest);
@@ -42,17 +57,49 @@ abstract final class WatchRecordProtocol {
   }
 
   static String decodeStart(Uint8List value) {
-    if (value.length < 10 || value[0] != 0x01) {
+    if (value.length < 10) {
       return '录音已启动';
     }
     final sampleRate =
         (value[1] << 24) | (value[2] << 16) | (value[3] << 8) | value[4];
     final channels = value[5] == 1 ? '单声道' : '${value[5]} 声道';
     final frameMs = value[6];
+    if (value[0] == 0x02) {
+      final bits = value.length >= 11 ? value[10] : 16;
+      final frameBytes = value.length >= 13
+          ? (value[11] << 8) | value[12]
+          : sampleRate * value[5] * bits ~/ 8 * frameMs ~/ 1000;
+      return 'PCM $sampleRate Hz · $channels · $bits bit\n'
+          '${frameMs}ms · $frameBytes B/帧';
+    }
+    if (value[0] != 0x01) return '录音已启动';
     final bitrate = (value[7] << 8) | value[8];
     final framesPerPacket = value[9];
     return 'Opus $sampleRate Hz · $channels · ${frameMs}ms\n'
         '$bitrate bps · $framesPerPacket 帧/包';
+  }
+
+  static WatchRecordData? parseData(WatchRecordResponse response) {
+    if (response.key != dataKey || response.value.length < 8) return null;
+    final value = response.value;
+    final seq = (value[0] << 8) | value[1];
+    final timestamp =
+        (value[2] << 24) | (value[3] << 16) | (value[4] << 8) | value[5];
+    final frameCount = value[6];
+    if (frameCount == 0) return null;
+
+    var offset = 8;
+    final frames = <Uint8List>[];
+    for (var i = 0; i < frameCount; i++) {
+      if (offset + 2 > value.length) return null;
+      final frameLength = (value[offset] << 8) | value[offset + 1];
+      offset += 2;
+      if (frameLength == 0 || offset + frameLength > value.length) return null;
+      frames.add(Uint8List.fromList(value.sublist(offset, offset + frameLength)));
+      offset += frameLength;
+    }
+    if (offset != value.length) return null;
+    return WatchRecordData(seq: seq, timestamp: timestamp, frames: frames);
   }
 
   static String decodeStop(Uint8List value) {
